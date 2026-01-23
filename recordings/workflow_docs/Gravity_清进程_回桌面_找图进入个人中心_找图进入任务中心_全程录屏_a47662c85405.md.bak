@@ -1,0 +1,110 @@
+# Gravity_清进程_回桌面_找图进入个人中心_找图进入任务中心_全程录屏
+1) force-stop Gravity 2) 回到桌面首页 3) 从桌面打开 Gravity 4) 用模板图(个人中心.png)定位并点击 5) 用模板图(btn_任务中心.png)定位并点击；每步带截图，workflow 全程录屏。
+```json
+{
+  "name": "Gravity_清进程_回桌面_找图进入个人中心_找图进入任务中心_全程录屏",
+  "device_serial": "98e516bf0922",
+  "out_dir": "/Users/yeshouyou/Work/agent/phone_touch/recordings",
+  "steps": [
+    {
+      "type": "set_options",
+      "values": {
+        "fail_fast": true,
+        "retry_max_attempts": 3,
+        "retry_delay_s": 1
+      }
+    },
+    {
+      "type": "clear_background_processes",
+      "name": "清除后台(三方App)",
+      "mode": "force_stop_3p",
+      "run_kill_all_first": true,
+      "exclude_packages": [
+        "com.android.systemui",
+        "com.mi.android.globallauncher"
+      ]
+    },
+    {
+      "type": "sleep",
+      "name": "等待清后台稳定",
+      "seconds": 0.6
+    },
+    {
+      "type": "restart_app",
+      "name": "强制停止Gravity(确保冷启动)",
+      "package": "anonymous.sns.community.gravity",
+      "force_stop": true,
+      "wait_s": 0.2
+    },
+    {
+      "type": "reset_home",
+      "name": "回到桌面首页",
+      "home_presses": 2
+    },
+    {
+      "type": "sleep",
+      "name": "等待桌面稳定",
+      "seconds": 1
+    },
+    {
+      "type": "launch_from_home",
+      "name": "从桌面打开Gravity",
+      "query": "Gravity",
+      "reset_home": false,
+      "home_presses": 2,
+      "wait_s": 1.2
+    },
+    {
+      "type": "sleep",
+      "name": "等待App启动稳定",
+      "seconds": 1
+    },
+    {
+      "type": "find_image_and_tap",
+      "name": "找图点击个人中心",
+      "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/gravity_个人中心_503f458d8ac7.png",
+      "threshold": 0.85,
+      "grayscale": true,
+      "match_index": 0,
+      "pre_screenshot": true,
+      "post_screenshot": true
+    },
+    {
+      "type": "sleep",
+      "name": "等待个人中心加载",
+      "seconds": 1
+    },
+    {
+      "type": "find_image_and_tap",
+      "name": "找图点击任务中心入口",
+      "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/gravity_任务中心入口_1f2854788960.png",
+      "threshold": 0.85,
+      "grayscale": true,
+      "match_index": 0,
+      "pre_screenshot": true,
+      "post_screenshot": true
+    },
+    {
+      "type": "sleep",
+      "name": "等待跳转任务中心",
+      "seconds": 1.2
+    },
+    {
+      "type": "collect_artifacts",
+      "name": "采集focus+截图+logcat(结果校验)",
+      "include_focus": true,
+      "include_screenshot": true
+    },
+    {
+      "type": "assert",
+      "name": "断言进入TaskCenterActivity",
+      "expr": "'TaskCenterActivity' in (last.focused_activity or '')",
+      "message": "未检测到进入任务中心页面：focused_activity 不包含 'TaskCenterActivity'",
+      "fatal": true
+    }
+  ],
+  "clear_logcat_first": true,
+  "final_collect_artifacts": true,
+  "logcat_lines": 8000
+}
+```

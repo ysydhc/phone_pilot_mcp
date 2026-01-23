@@ -1,0 +1,25 @@
+Project Prompt
+
+- 思考过程和输出结果使用中文
+- 在调试程序遇到错误的情况下，优先到本地的实现里面去找，而不是创建新的函数或者文件
+- Data shape: device-related MCP tools and stored JSON use `device_serial` as the primary identifier (avoid `device_id` in new interfaces).
+- Android device aggregate: `Android_device_info.json` uses:
+  - `schema_version` (int)
+  - `updated_at` (ISO string)
+  - `devices` (map of `device_serial` -> full device profile)
+- Device profile apps: `profile.apps.apps` is a list of:
+  - `AppName`, `PackageName`, `VersionCode`, `VersionName`
+  - `include_system` in `profile.apps` indicates whether system apps are included.
+- App list collection: always wire `include_system` through; default true, `false` means third-party only.
+- Remove unused parameters directly; note the reason in changes.
+- Public methods must have bilingual (CN/EN) docstrings and usage examples; remove unused params.
+- Prefer simpler return payloads when possible.
+- When public interfaces or usage change, update `.venv` METADATA too.
+- 生成的最终文件或者接口返回的数据，务必做到简单命令，没有冗余信息
+- **文档同步规则**: 当修改 `README.md` 时，必须同步更新 `phone_touch.egg-info/PKG-INFO`，两者内容保持一致（PKG-INFO 开头有 metadata 头部，其余与 README 相同）。同时更新 `workflow/` 目录下的示例 JSON 文件以反映最新的字段变更。
+- **脚本格式规则**:
+  - 支持三种工作流格式：`.json`（程序执行）、`.script`（人类可读）、`.md`（文档内嵌脚本）
+  - `recordings/workflow_docs/` 目录下的 `.md` 文件应使用简易脚本格式（```script 代码块）
+  - 使用 `android_tool/script_parser.py` 进行格式转换
+  - MCP 工具 `android_run_script` 可直接执行任意格式的脚本文件
+  - MCP 工具 `android_convert_script` 可转换脚本格式

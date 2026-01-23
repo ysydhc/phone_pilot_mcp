@@ -1,0 +1,9 @@
+[
+  {
+    "type": "find_and_tap",
+    "query": "anonymous.sns.community.gravity:id/tab_center",
+    "field": "resource_id",
+    "exact": true,
+    "scroll_on_fail": false
+  }
+]

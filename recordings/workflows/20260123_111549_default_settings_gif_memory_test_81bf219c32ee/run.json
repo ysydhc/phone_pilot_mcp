@@ -1,0 +1,143 @@
+{"ts": 1769138149.441943, "event": "workflow_start", "workflow_id": "81bf219c32ee", "name": "settings_gif_memory_test", "device_serial": null, "started_at": "2026-01-23T11:15:49"}
+{"ts": 1769138149.8788102, "event": "logcat_clear", "result": {"ok": true, "returncode": 0, "stderr": ""}}
+{"ts": 1769138149.8883462, "event": "device_capture", "cached": false, "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138149.888819, "event": "workflow_attempt_start", "attempt": 1}
+{"ts": 1769138149.889236, "step_index": 0, "step_path": "0", "type": "clear_background_processes", "name": "clear_background_processes", "event": "step_start"}
+{"ts": 1769138149.8897028, "step_index": 0, "step_path": "0", "type": "clear_background_processes", "name": "clear_background_processes", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138149.8898602, "step_index": 1, "step_path": "1", "type": "launch_from_home", "name": "launch_from_home", "event": "step_start"}
+{"ts": 1769138149.890081, "step_index": 1, "step_path": "1", "type": "launch_from_home", "name": "launch_from_home", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138149.890253, "step_index": 2, "step_path": "2", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138151.396035, "step_index": 2, "step_path": "2", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138151.3968298, "step_index": 3, "step_path": "3", "type": "find_and_tap", "name": "find_and_tap", "event": "step_start"}
+{"ts": 1769138151.397311, "step_index": 3, "step_path": "3", "type": "find_and_tap", "name": "find_and_tap", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138151.397623, "step_index": 4, "step_path": "4", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138152.89858, "step_index": 4, "step_path": "4", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138152.8992481, "step_index": 5, "step_path": "5", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_start"}
+{"ts": 1769138152.9007528, "step_index": 5, "step_path": "5", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_end", "result": {"ok": false, "error": "find_failed", "detail": {"ok": false, "error": "device_serial is required"}, "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/keyboard_笑脸.png"}}
+{"ts": 1769138152.901268, "step_index": 6, "step_path": "6", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138154.406392, "step_index": 6, "step_path": "6", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138154.4072561, "step_index": 7, "step_path": "7", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_start"}
+{"ts": 1769138154.409024, "step_index": 7, "step_path": "7", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_end", "result": {"ok": false, "error": "find_failed", "detail": {"ok": false, "error": "device_serial is required"}, "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/keyboard_gif.png"}}
+{"ts": 1769138154.4097311, "step_index": 8, "step_path": "8", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138156.411675, "step_index": 8, "step_path": "8", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138156.412796, "step_index": 9, "step_path": "9", "type": "dump_hprof", "name": "before_gif_scroll", "event": "step_start"}
+{"ts": 1769138156.431849, "step_index": 9, "step_path": "9", "type": "dump_hprof", "name": "before_gif_scroll", "event": "step_end", "result": {"ok": false, "error": "package_required", "hint": "dump_hprof 需要 package 或当前有焦点应用"}}
+{"ts": 1769138156.4323788, "step_index": 10, "step_path": "10", "type": "screenshot", "name": "before_gif_search", "event": "step_start"}
+{"ts": 1769138157.50014, "step_index": 10, "step_path": "10", "type": "screenshot", "name": "before_gif_search", "event": "step_end", "result": {"ok": true, "path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/workflows/20260123_111549_default_settings_gif_memory_test_81bf219c32ee/steps/10_before_gif_search.png"}}
+{"ts": 1769138157.500718, "step_index": 11, "step_path": "11", "type": "find_and_tap", "name": "find_and_tap", "event": "step_start"}
+{"ts": 1769138157.501054, "step_index": 11, "step_path": "11", "type": "find_and_tap", "name": "find_and_tap", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138157.5012321, "step_index": 12, "step_path": "12", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138161.506009, "step_index": 12, "step_path": "12", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138161.507037, "step_index": 13, "step_path": "13", "type": "repeat", "name": "repeat", "event": "step_start"}
+{"ts": 1769138161.5077271, "step_index": 14, "step_path": "13.0.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138161.5084858, "step_index": 14, "step_path": "13.0.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138161.5091121, "step_index": 15, "step_path": "13.0.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138166.513827, "step_index": 15, "step_path": "13.0.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138166.51482, "step_index": 16, "step_path": "13.1.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138166.5153658, "step_index": 16, "step_path": "13.1.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138166.5157042, "step_index": 17, "step_path": "13.1.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138171.51725, "step_index": 17, "step_path": "13.1.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138171.5184, "step_index": 18, "step_path": "13.2.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138171.5187159, "step_index": 18, "step_path": "13.2.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138171.518825, "step_index": 19, "step_path": "13.2.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138176.524697, "step_index": 19, "step_path": "13.2.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138176.5255082, "step_index": 13, "step_path": "13", "type": "repeat", "name": "repeat", "event": "step_end", "result": {"ok": true, "count": 3, "steps_count": 2}}
+{"ts": 1769138176.525877, "step_index": 20, "step_path": "14", "type": "dump_hprof", "name": "after_gif_scroll", "event": "step_start"}
+{"ts": 1769138176.526433, "step_index": 20, "step_path": "14", "type": "dump_hprof", "name": "after_gif_scroll", "event": "step_end", "result": {"ok": false, "error": "package_required", "hint": "dump_hprof 需要 package 或当前有焦点应用"}}
+{"ts": 1769138176.526658, "step_index": 21, "step_path": "15", "type": "screenshot", "name": "after_gif_scroll", "event": "step_start"}
+{"ts": 1769138177.6262279, "step_index": 21, "step_path": "15", "type": "screenshot", "name": "after_gif_scroll", "event": "step_end", "result": {"ok": true, "path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/workflows/20260123_111549_default_settings_gif_memory_test_81bf219c32ee/steps/21_after_gif_scroll.png"}}
+{"ts": 1769138177.626932, "event": "workflow_attempt_end", "attempt": 1, "ok": false}
+{"ts": 1769138177.62716, "event": "workflow_attempt_start", "attempt": 2}
+{"ts": 1769138177.627452, "step_index": 0, "step_path": "0", "type": "clear_background_processes", "name": "clear_background_processes", "event": "step_start"}
+{"ts": 1769138177.62779, "step_index": 0, "step_path": "0", "type": "clear_background_processes", "name": "clear_background_processes", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138177.627977, "step_index": 1, "step_path": "1", "type": "launch_from_home", "name": "launch_from_home", "event": "step_start"}
+{"ts": 1769138177.628166, "step_index": 1, "step_path": "1", "type": "launch_from_home", "name": "launch_from_home", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138177.628295, "step_index": 2, "step_path": "2", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138179.1337678, "step_index": 2, "step_path": "2", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138179.1350698, "step_index": 3, "step_path": "3", "type": "find_and_tap", "name": "find_and_tap", "event": "step_start"}
+{"ts": 1769138179.136161, "step_index": 3, "step_path": "3", "type": "find_and_tap", "name": "find_and_tap", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138179.1371279, "step_index": 4, "step_path": "4", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138180.639633, "step_index": 4, "step_path": "4", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138180.640856, "step_index": 5, "step_path": "5", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_start"}
+{"ts": 1769138180.642119, "step_index": 5, "step_path": "5", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_end", "result": {"ok": false, "error": "find_failed", "detail": {"ok": false, "error": "device_serial is required"}, "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/keyboard_笑脸.png"}}
+{"ts": 1769138180.642501, "step_index": 6, "step_path": "6", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138182.147785, "step_index": 6, "step_path": "6", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138182.148708, "step_index": 7, "step_path": "7", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_start"}
+{"ts": 1769138182.1499782, "step_index": 7, "step_path": "7", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_end", "result": {"ok": false, "error": "find_failed", "detail": {"ok": false, "error": "device_serial is required"}, "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/keyboard_gif.png"}}
+{"ts": 1769138182.150296, "step_index": 8, "step_path": "8", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138184.1547399, "step_index": 8, "step_path": "8", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138184.1561768, "step_index": 9, "step_path": "9", "type": "dump_hprof", "name": "before_gif_scroll", "event": "step_start"}
+{"ts": 1769138184.1574469, "step_index": 9, "step_path": "9", "type": "dump_hprof", "name": "before_gif_scroll", "event": "step_end", "result": {"ok": false, "error": "package_required", "hint": "dump_hprof 需要 package 或当前有焦点应用"}}
+{"ts": 1769138184.158151, "step_index": 10, "step_path": "10", "type": "screenshot", "name": "before_gif_search", "event": "step_start"}
+{"ts": 1769138185.286585, "step_index": 10, "step_path": "10", "type": "screenshot", "name": "before_gif_search", "event": "step_end", "result": {"ok": true, "path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/workflows/20260123_111549_default_settings_gif_memory_test_81bf219c32ee/steps/10_before_gif_search.png"}}
+{"ts": 1769138185.28804, "step_index": 11, "step_path": "11", "type": "find_and_tap", "name": "find_and_tap", "event": "step_start"}
+{"ts": 1769138185.2891688, "step_index": 11, "step_path": "11", "type": "find_and_tap", "name": "find_and_tap", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138185.289909, "step_index": 12, "step_path": "12", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138189.2958982, "step_index": 12, "step_path": "12", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138189.297225, "step_index": 13, "step_path": "13", "type": "repeat", "name": "repeat", "event": "step_start"}
+{"ts": 1769138189.298153, "step_index": 14, "step_path": "13.0.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138189.2988741, "step_index": 14, "step_path": "13.0.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138189.299343, "step_index": 15, "step_path": "13.0.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138194.304684, "step_index": 15, "step_path": "13.0.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138194.3060942, "step_index": 16, "step_path": "13.1.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138194.3071601, "step_index": 16, "step_path": "13.1.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138194.307966, "step_index": 17, "step_path": "13.1.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138199.3137438, "step_index": 17, "step_path": "13.1.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138199.315219, "step_index": 18, "step_path": "13.2.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138199.3162081, "step_index": 18, "step_path": "13.2.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138199.317104, "step_index": 19, "step_path": "13.2.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138204.321337, "step_index": 19, "step_path": "13.2.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138204.323173, "step_index": 13, "step_path": "13", "type": "repeat", "name": "repeat", "event": "step_end", "result": {"ok": true, "count": 3, "steps_count": 2}}
+{"ts": 1769138204.32402, "step_index": 20, "step_path": "14", "type": "dump_hprof", "name": "after_gif_scroll", "event": "step_start"}
+{"ts": 1769138204.325253, "step_index": 20, "step_path": "14", "type": "dump_hprof", "name": "after_gif_scroll", "event": "step_end", "result": {"ok": false, "error": "package_required", "hint": "dump_hprof 需要 package 或当前有焦点应用"}}
+{"ts": 1769138204.326178, "step_index": 21, "step_path": "15", "type": "screenshot", "name": "after_gif_scroll", "event": "step_start"}
+{"ts": 1769138205.470069, "step_index": 21, "step_path": "15", "type": "screenshot", "name": "after_gif_scroll", "event": "step_end", "result": {"ok": true, "path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/workflows/20260123_111549_default_settings_gif_memory_test_81bf219c32ee/steps/21_after_gif_scroll.png"}}
+{"ts": 1769138205.4710011, "event": "workflow_attempt_end", "attempt": 2, "ok": false}
+{"ts": 1769138205.471529, "event": "workflow_attempt_start", "attempt": 3}
+{"ts": 1769138205.471931, "step_index": 0, "step_path": "0", "type": "clear_background_processes", "name": "clear_background_processes", "event": "step_start"}
+{"ts": 1769138205.47233, "step_index": 0, "step_path": "0", "type": "clear_background_processes", "name": "clear_background_processes", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138205.472538, "step_index": 1, "step_path": "1", "type": "launch_from_home", "name": "launch_from_home", "event": "step_start"}
+{"ts": 1769138205.472815, "step_index": 1, "step_path": "1", "type": "launch_from_home", "name": "launch_from_home", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138205.4729311, "step_index": 2, "step_path": "2", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138206.9783978, "step_index": 2, "step_path": "2", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138206.979326, "step_index": 3, "step_path": "3", "type": "find_and_tap", "name": "find_and_tap", "event": "step_start"}
+{"ts": 1769138206.980176, "step_index": 3, "step_path": "3", "type": "find_and_tap", "name": "find_and_tap", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138206.980642, "step_index": 4, "step_path": "4", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138208.483048, "step_index": 4, "step_path": "4", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138208.484116, "step_index": 5, "step_path": "5", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_start"}
+{"ts": 1769138208.485518, "step_index": 5, "step_path": "5", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_end", "result": {"ok": false, "error": "find_failed", "detail": {"ok": false, "error": "device_serial is required"}, "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/keyboard_笑脸.png"}}
+{"ts": 1769138208.486142, "step_index": 6, "step_path": "6", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138209.9915688, "step_index": 6, "step_path": "6", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138209.992467, "step_index": 7, "step_path": "7", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_start"}
+{"ts": 1769138209.9938052, "step_index": 7, "step_path": "7", "type": "find_image_and_tap", "name": "find_image_and_tap", "event": "step_end", "result": {"ok": false, "error": "find_failed", "detail": {"ok": false, "error": "device_serial is required"}, "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/keyboard_gif.png"}}
+{"ts": 1769138209.9943721, "step_index": 8, "step_path": "8", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138211.9963589, "step_index": 8, "step_path": "8", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138211.9971561, "step_index": 9, "step_path": "9", "type": "dump_hprof", "name": "before_gif_scroll", "event": "step_start"}
+{"ts": 1769138211.9979, "step_index": 9, "step_path": "9", "type": "dump_hprof", "name": "before_gif_scroll", "event": "step_end", "result": {"ok": false, "error": "package_required", "hint": "dump_hprof 需要 package 或当前有焦点应用"}}
+{"ts": 1769138211.9982169, "step_index": 10, "step_path": "10", "type": "screenshot", "name": "before_gif_search", "event": "step_start"}
+{"ts": 1769138213.147155, "step_index": 10, "step_path": "10", "type": "screenshot", "name": "before_gif_search", "event": "step_end", "result": {"ok": true, "path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/workflows/20260123_111549_default_settings_gif_memory_test_81bf219c32ee/steps/10_before_gif_search.png"}}
+{"ts": 1769138213.1476061, "step_index": 11, "step_path": "11", "type": "find_and_tap", "name": "find_and_tap", "event": "step_start"}
+{"ts": 1769138213.147841, "step_index": 11, "step_path": "11", "type": "find_and_tap", "name": "find_and_tap", "event": "step_end", "result": {"ok": false, "error": "device_serial is required"}}
+{"ts": 1769138213.14799, "step_index": 12, "step_path": "12", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138217.1499279, "step_index": 12, "step_path": "12", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138217.150723, "step_index": 13, "step_path": "13", "type": "repeat", "name": "repeat", "event": "step_start"}
+{"ts": 1769138217.1513028, "step_index": 14, "step_path": "13.0.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138217.151721, "step_index": 14, "step_path": "13.0.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138217.1519759, "step_index": 15, "step_path": "13.0.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138222.156325, "step_index": 15, "step_path": "13.0.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138222.157984, "step_index": 16, "step_path": "13.1.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138222.158296, "step_index": 16, "step_path": "13.1.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138222.158456, "step_index": 17, "step_path": "13.1.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138227.163538, "step_index": 17, "step_path": "13.1.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138227.163913, "step_index": 18, "step_path": "13.2.0", "type": "swipe", "name": "swipe", "event": "step_start"}
+{"ts": 1769138227.1640902, "step_index": 18, "step_path": "13.2.0", "type": "swipe", "name": "swipe", "event": "step_end", "result": {"ok": false, "error": "screen_size_unavailable", "hint": "swipe 需要屏幕尺寸才能使用百分比坐标"}}
+{"ts": 1769138227.164212, "step_index": 19, "step_path": "13.2.1", "type": "sleep", "name": "sleep", "event": "step_start"}
+{"ts": 1769138232.17007, "step_index": 19, "step_path": "13.2.1", "type": "sleep", "name": "sleep", "event": "step_end", "result": {"ok": true}}
+{"ts": 1769138232.171336, "step_index": 13, "step_path": "13", "type": "repeat", "name": "repeat", "event": "step_end", "result": {"ok": true, "count": 3, "steps_count": 2}}
+{"ts": 1769138232.17246, "step_index": 20, "step_path": "14", "type": "dump_hprof", "name": "after_gif_scroll", "event": "step_start"}
+{"ts": 1769138232.173389, "step_index": 20, "step_path": "14", "type": "dump_hprof", "name": "after_gif_scroll", "event": "step_end", "result": {"ok": false, "error": "package_required", "hint": "dump_hprof 需要 package 或当前有焦点应用"}}
+{"ts": 1769138232.174012, "step_index": 21, "step_path": "15", "type": "screenshot", "name": "after_gif_scroll", "event": "step_start"}
+{"ts": 1769138233.2551382, "step_index": 21, "step_path": "15", "type": "screenshot", "name": "after_gif_scroll", "event": "step_end", "result": {"ok": true, "path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/workflows/20260123_111549_default_settings_gif_memory_test_81bf219c32ee/steps/21_after_gif_scroll.png"}}
+{"ts": 1769138233.255664, "event": "workflow_attempt_end", "attempt": 3, "ok": false}
+{"ts": 1769138233.710613, "event": "final_collect_artifacts", "result": {"ok": true, "created_at": "2026-01-23T11:17:13", "focused_package": null, "focused_activity": null, "logcat_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/workflows/20260123_111549_default_settings_gif_memory_test_81bf219c32ee/final_logcat.txt"}}
+{"ts": 1769138233.711207, "event": "workflow_end", "ok": false, "finished_at": "2026-01-23T11:17:13"}

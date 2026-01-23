@@ -1,0 +1,19 @@
+{
+  "device_serial": "98e516bf0922",
+  "started_at": "2026-01-04T10:03:25",
+  "duration_s": 60.0,
+  "count": 1,
+  "screen": {
+    "w": 1080,
+    "h": 2400
+  },
+  "touch_abs": {
+    "max_x": 10800,
+    "max_y": 24000,
+    "scale_x": 0.0999074074074074,
+    "scale_y": 0.09995833333333333
+  },
+  "raw_log_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/tap_targets/20260104_100149_98e516bf0922_tap_targets_20260104_100149/getevent.log",
+  "keep_device": null,
+  "slot": 0
+}

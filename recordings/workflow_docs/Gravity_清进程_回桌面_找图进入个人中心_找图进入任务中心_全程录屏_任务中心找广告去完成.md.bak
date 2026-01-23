@@ -1,0 +1,200 @@
+### Gravity_清进程_回桌面_找图进入个人中心_找图进入任务中心_全程录屏_任务中心找广告去完成
+在原流程基础上：进入任务中心后，自动上下滑动找广告模块，并点击模块内“去完成”。
+```json
+{
+  "name": "Gravity_清进程_回桌面_找图进入个人中心_找图进入任务中心_全程录屏_任务中心找广告去完成",
+  "device_serial": "98e516bf0922",
+  "out_dir": "/Users/yeshouyou/Work/agent/phone_touch/recordings",
+  "steps": [
+    {
+      "type": "set_options",
+      "values": {
+        "fail_fast": true,
+        "retry_max_attempts": 3,
+        "retry_delay_s": 1
+      }
+    },
+    {
+      "type": "clear_background_processes",
+      "name": "清除后台(三方App)",
+      "mode": "force_stop_3p",
+      "run_kill_all_first": true,
+      "exclude_packages": [
+        "com.android.systemui",
+        "com.mi.android.globallauncher"
+      ]
+    },
+    {
+      "type": "sleep",
+      "name": "等待清后台稳定",
+      "seconds": 0.6
+    },
+    {
+      "type": "reset_home",
+      "name": "回到桌面首页",
+      "home_presses": 2
+    },
+    {
+      "type": "sleep",
+      "name": "等待桌面稳定",
+      "seconds": 1
+    },
+    {
+      "type": "launch_from_home",
+      "name": "从桌面打开Gravity",
+      "query": "Gravity",
+      "reset_home": false,
+      "home_presses": 2,
+      "wait_s": 1.2
+    },
+    {
+      "type": "sleep",
+      "name": "等待App启动稳定",
+      "seconds": 2
+    },
+    {
+      "type": "find_and_tap",
+      "name": "点击个人中心(tab_center)",
+      "query": "anonymous.sns.community.gravity:id/tab_center",
+      "field": "resource_id",
+      "exact": true,
+      "retry_max_attempts": 3,
+      "retry_delay_s": 0.5,
+      "verify": {
+        "type": "find_on_screen",
+        "query": "anonymous.sns.community.gravity:id/tab_center",
+        "field": "resource_id",
+        "exact": true,
+        "timeout_s": 4,
+        "interval_s": 0.3
+      },
+      "scroll_on_fail": false,
+      "pre_screenshot": true,
+      "post_screenshot": true
+    },
+    {
+      "type": "sleep",
+      "name": "等待个人中心加载",
+      "seconds": 1
+    },
+    {
+      "type": "find_and_tap",
+      "name": "点击任务中心入口(clPoint)",
+      "query": "anonymous.sns.community.gravity:id/clPoint",
+      "field": "resource_id",
+      "exact": true,
+      "scroll_on_fail": false,
+      "pre_screenshot": true,
+      "post_screenshot": true
+    },
+    {
+      "type": "sleep",
+      "name": "等待跳转任务中心",
+      "seconds": 1.2
+    },
+    {
+      "type": "collect_artifacts",
+      "name": "采集focus+截图+logcat(结果校验)",
+      "include_focus": true,
+      "include_screenshot": true
+    },
+    {
+      "type": "assert",
+      "name": "断言进入TaskCenterActivity",
+      "expr": "last.focused_activity == 'com.hiclub.android.gravity.point.TaskCenterActivity'",
+      "message": "未检测到进入任务中心页面：focused_activity 不是 TaskCenterActivity",
+      "fatal": true
+    },
+    {
+      "type":"find_and_tap",
+      "name":"确认tab",
+      "query":"ディリータスク",
+      "exact": false,
+      "scroll_on_fail": false,
+      "pre_screenshot": true,
+      "post_screenshot": true
+    },
+    {
+      "type": "dump_hprof",
+      "name": "点击已完成后dump内存",
+      "package": "anonymous.sns.community.gravity",
+      "var": "hprof_after_complete"
+    },
+    {
+      "type": "sleep",
+      "name": "等待tab切换",
+      "seconds": 2
+    },
+    {
+      "type": "find_and_tap",
+      "name": "广告任务点去完成",
+      "query": "広告を最後まで見る",
+      "field": "text",
+      "exact": true,
+      "tap_offset_x": 508,
+      "tap_offset_y": 56,
+      "scroll_on_fail": true,
+      "directions": ["down", "up"],
+      "max_swipes": 6,
+      "swipe_padding_ratio": 0.28,
+      "pre_screenshot": true,
+      "post_screenshot": true
+    },
+    {
+      "type": "sleep",
+      "name": "等待广告页面加载",
+      "seconds": 3
+    },
+    {
+      "type": "sleep",
+      "name": "等待33秒(广告播放)",
+      "seconds": 33
+    },
+    {
+      "type": "screenshot",
+      "name": "等待33秒后截图"
+    },
+    {
+      "type": "find_and_tap",
+      "name": "点击close关闭按钮",
+      "query": "close",
+      "exact": false,
+      "scroll_on_fail": false,
+      "retry_max_attempts": 3,
+      "retry_delay_s": 1,
+      "pre_screenshot": true,
+      "post_screenshot": true
+    },
+    {
+      "type": "sleep",
+      "name": "点击close后等待稳定",
+      "seconds": 2
+    },
+    {
+      "type": "dump_hprof",
+      "name": "点击close后dump内存",
+      "package": "anonymous.sns.community.gravity",
+      "var": "hprof_after_close"
+    },
+    {
+      "type": "diff_hprof",
+      "name": "内存差异分析(已完成vs关闭后)",
+      "before": "$hprof_after_complete",
+      "after": "$hprof_after_close",
+      "large_object_threshold": 524288
+    },
+    {
+      "type": "analyze_hprof",
+      "name": "分析关闭后的内存快照",
+      "path": "$hprof_after_close",
+      "large_object_threshold": 524288
+    }
+  ],
+  "clear_logcat_first": true,
+  "final_collect_artifacts": true,
+  "logcat_lines": 8000,
+  "record_screen": true,
+  "retry_on_fail_clear_cache": true,
+  "workflow_retry_times": 3
+}
+```

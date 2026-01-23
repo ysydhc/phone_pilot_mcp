@@ -1,0 +1,41 @@
+{
+  "device_serial": "98e516bf0922",
+  "ts": "20260104_113547",
+  "name": "gravity_buttons_with_labels_v2",
+  "display": {
+    "ok": true,
+    "device_serial": "98e516bf0922",
+    "method": "dumpsys_power",
+    "raw": "",
+    "timed_out": true,
+    "timeout_s": 2.0,
+    "screen_on": null
+  },
+  "keyguard": {
+    "ok": true,
+    "device_serial": "98e516bf0922",
+    "method": "uiautomator",
+    "signals": {
+      "launcher_seen": false,
+      "pin_entry_seen": false,
+      "keyguard_hint_seen": false,
+      "packages": [
+        "anonymous.sns.community.gravity"
+      ]
+    },
+    "keyguard_showing": null
+  },
+  "focus": {
+    "package": "anonymous.sns.community.gravity",
+    "activity": "com.hiclub.android.gravity.MainActivity"
+  },
+  "screenshot_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/analyze_buttons/20260104_113547_98e516bf0922_gravity_buttons_with_labels_v2/screenshots/20260104_113617_98e516bf0922_screen.png",
+  "ui_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/analyze_buttons/20260104_113547_98e516bf0922_gravity_buttons_with_labels_v2/ui.xml",
+  "ui_signature": "8acd06e937c4d2228fe11b7540fcee605972f34b",
+  "ui_packages": [
+    "anonymous.sns.community.gravity"
+  ],
+  "likely_locked_or_aod": false,
+  "count": 48,
+  "annotated_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/analyze_buttons/20260104_113547_98e516bf0922_gravity_buttons_with_labels_v2/annotate/20260104_113622_buttons_annotated.png"
+}

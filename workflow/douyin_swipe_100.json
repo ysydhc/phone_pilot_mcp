@@ -1,0 +1,48 @@
+{
+  "name": "douyin_swipe_100",
+  "device_serial": null,
+  "clear_logcat_first": false,
+  "final_collect_artifacts": false,
+  "steps": [
+    {
+      "type": "reset_home",
+      "home_presses": 2
+    },
+    {
+      "type": "clear_background_processes",
+      "mode": "force_stop_3p",
+      "exclude_packages": null,
+      "max_packages": null,
+      "run_kill_all_first": true
+    },
+    {
+      "type": "restart_app",
+      "package": "com.ss.android.ugc.aweme",
+      "force_stop": true,
+      "wait_s": 2.0
+    },
+    {
+      "type": "sleep",
+      "seconds": 2.0
+    }, 
+    {
+      "type": "repeat",
+      "count": 100,
+      "steps": [
+        {
+          "type": "swipe",
+          "x1_pct": 0.5,
+          "y1_pct": 0.8,
+          "x2_pct": 0.5,
+          "y2_pct": 0.2,
+          "duration_ms": 320,
+          "wait_s": 0.2
+        },
+        {
+          "type": "sleep",
+          "seconds": 5.0
+        }
+      ]
+    }
+  ]
+}

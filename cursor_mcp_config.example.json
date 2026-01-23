@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "android_touch": {
+      "command": "/ABS/PATH/TO/uv",
+      "args": [
+        "run",
+        "--project",
+        "/ABS/PATH/TO/phone_touch",
+        "/ABS/PATH/TO/phone_touch/mcp_android.py"
+      ],
+      "cwd": "/ABS/PATH/TO/phone_touch",
+      "env": {
+        "ADB_PATH": "/ABS/PATH/TO/Android/sdk/platform-tools/adb",
+        "ANDROID_ADB_PATH": "/ABS/PATH/TO/Android/sdk/platform-tools/adb",
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
+
+

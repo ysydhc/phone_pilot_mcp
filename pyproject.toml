@@ -1,0 +1,27 @@
+[project]
+name = "phone-touch"
+version = "0.1.7"
+description = "Android touch record/replay via MCP + adb getevent + Monkey .mks"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "mcp[cli]>=1.24.0",
+    "openai>=2.14.0",
+    # Computer vision (template matching). Use headless to avoid GUI deps on servers.
+    "opencv-python-headless>=4.10.0.84",
+]
+
+[project.scripts]
+phone-touch-mcp = "phone_touch.cli:main"
+phone-touch-call = "phone_touch.mcp_call:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["android_tool", "phone_touch"]
+py-modules = ["mcp_android"]
+
+

@@ -1,0 +1,2 @@
+add device 1: /dev/input/event8
+  name:     "uinput-fpc"

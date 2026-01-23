@@ -1,0 +1,76 @@
+# Gravity_清后台_回桌面_打开App_点击tvCenter_v3_fastTap
+提速版：点击 tvCenter 关闭 find_and_tap 的 before/after 截图，并移除 verify（verify 会额外做多次 UI dump 轮询）。保留点击后单独 screenshot 作为证据。
+```json
+{
+  "name": "Gravity_清后台_回桌面_打开App_点击tvCenter_v3_fastTap",
+  "device_serial": "98e516bf0922",
+  "out_dir": "/Users/yeshouyou/Work/agent/phone_touch/recordings",
+  "steps": [
+    {
+      "type": "set_options",
+      "values": {
+        "fail_fast": true,
+        "retry_max_attempts": 2,
+        "retry_delay_s": 0.4
+      }
+    },
+    {
+      "type": "clear_background_processes",
+      "mode": "force_stop_3p",
+      "max_packages": 400,
+      "run_kill_all_first": true
+    },
+    {
+      "type": "reset_home",
+      "home_presses": 2
+    },
+    {
+      "type": "ensure_launch",
+      "query": "Gravity",
+      "package": "anonymous.sns.community.gravity",
+      "reset_home": false,
+      "max_swipes": 12,
+      "wait_s": 1.5
+    },
+    {
+      "type": "wait_for_focus",
+      "package": "anonymous.sns.community.gravity",
+      "timeout_s": 12,
+      "interval_s": 0.35
+    },
+    {
+      "type": "dismiss_popups",
+      "name": "post_launch_dismiss",
+      "max_rounds": 2,
+      "max_taps": 6,
+      "settle_s": 0.35,
+      "post_screenshot": true
+    },
+    {
+      "type": "wait_for_ui",
+      "query": "anonymous.sns.community.gravity:id/tvCenter",
+      "field": "resource_id",
+      "exact": true,
+      "timeout_s": 10,
+      "interval_s": 0.35
+    },
+    {
+      "type": "find_and_tap",
+      "name": "tap_tvCenter_fast",
+      "query": "anonymous.sns.community.gravity:id/tvCenter",
+      "field": "resource_id",
+      "exact": true,
+      "scroll_on_fail": false,
+      "pre_screenshot": false,
+      "post_screenshot": false
+    },
+    {
+      "type": "screenshot",
+      "name": "after_tap_tvCenter"
+    }
+  ],
+  "clear_logcat_first": true,
+  "final_collect_artifacts": true,
+  "logcat_lines": 8000
+}
+```

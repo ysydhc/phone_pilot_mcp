@@ -1,0 +1,41 @@
+
+
+```json
+
+{
+  "name": "go show ad",
+  "device_serial": "98e516bf0922",
+  "out_dir": "./recordings",
+  "clear_logcat_first": true,
+  "final_collect_artifacts": true,
+  "logcat_lines": 8000,
+  "record_screen": true,
+  "steps": [
+    {
+    "type": "find_multi_stage",
+    "name": "tap_go_complete",
+    "scroll_on_fail": true,
+    "directions": ["up", "down"],
+    "max_swipes": 6,
+    "swipe_padding_ratio": 0.28,
+    "stages": [
+        {
+            "type": "image",
+            "template_path": "/Users/yeshouyou/Work/agent/phone_touch/recordings/templates/广告item.png",
+            "feature_ratio_thresh": 0.6,
+            "feature_min_inliers": 8
+        },
+        {
+            "type": "text",
+            "engine": "uia",
+            "query": "去完成",
+            "roi_from_prev": true
+        }
+    ],
+    "tap_final": true
+    }
+  ]
+}
+
+
+```
