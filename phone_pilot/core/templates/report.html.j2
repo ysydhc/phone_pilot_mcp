@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ meta.script_name }} — {{ "PASSED" if meta.exit_code == 0 else "FAILED" }}</title>
+<style>
+/* ---- Reset & Base ---- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --text: #1a1a2e; --text2: #555;
+  --border: #e0e0e0; --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+  --blue: #3b82f6; --purple: #8b5cf6;
+  --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --text: #e2e8f0; --text2: #94a3b8;
+    --border: #334155; --shadow: 0 1px 3px rgba(0,0,0,.3);
+  }
+}
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 0; }
+a { color: var(--blue); text-decoration: none; }
+
+/* ---- Layout ---- */
+.container { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
+
+/* ---- Banner ---- */
+.banner { padding: 28px 32px; color: #fff; border-radius: var(--radius); margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.banner.passed { background: linear-gradient(135deg, #059669, #22c55e); }
+.banner.failed { background: linear-gradient(135deg, #dc2626, #ef4444); }
+.banner h1 { font-size: 1.6rem; font-weight: 700; }
+.banner .meta-row { display: flex; gap: 20px; flex-wrap: wrap; font-size: .9rem; opacity: .92; }
+.banner .meta-row span { white-space: nowrap; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: .78rem; font-weight: 600; background: rgba(255,255,255,.22); }
+
+/* ---- Cards ---- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+.card h3 { font-size: .85rem; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+.card .big { font-size: 2rem; font-weight: 700; }
+.card .big.green { color: var(--green); }
+.card .big.red { color: var(--red); }
+.card .big.amber { color: var(--amber); }
+
+/* ---- Progress bar ---- */
+.progress-bar { width: 100%; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.progress-bar .fill { height: 100%; border-radius: 4px; transition: width .3s; }
+.progress-bar .fill.green { background: var(--green); }
+.progress-bar .fill.red { background: var(--red); }
+
+/* ---- Section ---- */
+.section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 24px; overflow: hidden; }
+.section-header { padding: 16px 20px; font-weight: 600; font-size: 1.05rem; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; }
+.section-header .chevron { transition: transform .2s; font-size: .8rem; color: var(--text2); }
+.section-header.collapsed .chevron { transform: rotate(-90deg); }
+.section-body { padding: 16px 20px; }
+.section-body.hidden { display: none; }
+
+/* ---- Steps timeline ---- */
+.step-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.step-row:last-child { border-bottom: none; }
+.step-num { min-width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; color: #fff; flex-shrink: 0; }
+.step-num.ok { background: var(--green); }
+.step-num.fail { background: var(--red); }
+.step-num.skip { background: var(--text2); }
+.step-info { flex: 1; min-width: 0; }
+.step-action { font-weight: 600; font-size: .95rem; }
+.step-detail { color: var(--text2); font-size: .85rem; margin-top: 2px; word-break: break-word; }
+.step-time { font-size: .78rem; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
+/* Step thumbnail: landscape default */
+.step-thumb { width: 120px; height: 80px; object-fit: cover; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); flex-shrink: 0; }
+/* Portrait adaptation */
+.portrait .step-thumb { width: 60px; height: 120px; object-fit: cover; }
+.step-thumb:hover { opacity: .85; }
+.step-row.failed { background: rgba(239,68,68,.06); border-radius: 6px; margin: 0 -8px; padding: 12px 8px; }
+
+/* ---- Gallery ---- */
+/* Landscape default */
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.gallery img { width: 100%; height: 140px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; transition: transform .15s; }
+/* Portrait adaptation */
+.portrait .gallery { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+.portrait .gallery img { height: 220px; object-fit: contain; background: var(--bg); }
+.gallery img:hover { transform: scale(1.03); }
+.gallery .caption { font-size: .75rem; color: var(--text2); margin-top: 4px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery .cap-step { display: inline-block; background: var(--blue); color: #fff; width: 20px; height: 20px; border-radius: 50%; font-size: .65rem; line-height: 20px; text-align: center; font-weight: 700; margin-right: 3px; vertical-align: middle; }
+
+/* ---- Lightbox ---- */
+.lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 1000; align-items: center; justify-content: center; cursor: pointer; }
+.lightbox.active { display: flex; }
+.lightbox img { max-width: 82vw; max-height: 90vh; border-radius: 8px; box-shadow: 0 4px 30px rgba(0,0,0,.5); cursor: default; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.15); border: none; color: #fff; font-size: 2rem; padding: 16px 12px; cursor: pointer; border-radius: 8px; transition: background .2s; z-index: 1001; line-height: 1; }
+.lb-nav:hover { background: rgba(255,255,255,.3); }
+.lb-prev { left: 16px; }
+.lb-next { right: 16px; }
+.lb-counter { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,.7); font-size: .85rem; z-index: 1001; }
+
+/* ---- Log ---- */
+.log-preview { background: #1e1e2e; color: #cdd6f4; border-radius: 8px; padding: 14px 16px; font-family: "SF Mono", "Fira Code", monospace; font-size: .8rem; line-height: 1.5; overflow-x: auto; max-height: 400px; overflow-y: auto; white-space: pre; }
+.log-file-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); gap: 8px; }
+.log-file-item:last-child { border-bottom: none; }
+.log-file-item .log-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.btn-sm { padding: 3px 8px; border-radius: 5px; font-size: .72rem; cursor: pointer; border: 1px solid var(--border); background: none; color: var(--text2); transition: all .15s; white-space: nowrap; }
+.btn-sm:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+/* ---- Memory ---- */
+.mem-table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-bottom: 16px; }
+.mem-table th, .mem-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+.mem-table th { color: var(--text2); font-weight: 600; font-size: .78rem; text-transform: uppercase; }
+.mem-table .warn { color: var(--red); font-weight: 600; }
+.mem-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mem-table .delta-pos { color: var(--red); }
+.mem-table .delta-neg { color: var(--green); }
+.mem-table .delta-zero { color: var(--text2); }
+.mem-sub { font-size: .78rem; color: var(--text2); margin-bottom: 12px; }
+/* Stacked bar */
+.mem-bar { display: flex; height: 28px; border-radius: 6px; overflow: hidden; margin-bottom: 6px; background: var(--border); }
+.mem-bar-seg { height: 100%; display: flex; align-items: center; justify-content: center; font-size: .65rem; color: #fff; font-weight: 600; white-space: nowrap; overflow: hidden; min-width: 2px; }
+.mem-bar-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: .75rem; margin-bottom: 16px; }
+.mem-bar-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.mem-bar-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+/* Alerts */
+.mem-alert { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: .78rem; font-weight: 600; margin: 0 6px 6px 0; }
+.mem-alert.error { background: rgba(239,68,68,.12); color: var(--red); }
+.mem-alert.warn { background: rgba(245,158,11,.12); color: var(--amber); }
+.mem-alert.ok { background: rgba(34,197,94,.12); color: var(--green); }
+/* Diff bar comparison */
+.mem-diff-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: .8rem; }
+.mem-diff-bar .label { min-width: 56px; text-align: right; color: var(--text2); font-size: .72rem; }
+.mem-diff-bar .bar-wrap { flex: 1; height: 18px; background: var(--border); border-radius: 4px; overflow: hidden; position: relative; }
+.mem-diff-bar .bar-fill { height: 100%; border-radius: 4px; transition: width .3s; }
+.mem-diff-bar .bar-val { font-size: .72rem; min-width: 60px; text-align: right; }
+/* Leak report */
+.leak-badge { display: inline-block; padding: 4px 14px; border-radius: 14px; font-size: .85rem; font-weight: 700; }
+.leak-badge.safe { background: rgba(34,197,94,.12); color: var(--green); }
+.leak-badge.danger { background: rgba(239,68,68,.12); color: var(--red); }
+/* Shark leak trace */
+.leak-trace { background: #1e1e2e; color: #cdd6f4; border-radius: 8px; padding: 12px 16px; font-family: "SF Mono", monospace; font-size: .78rem; line-height: 1.6; margin: 8px 0; white-space: pre-wrap; overflow-x: auto; }
+/* Timeline SVG */
+.mem-timeline-wrap { overflow-x: auto; margin: 8px 0 16px; }
+.mem-timeline-wrap svg { display: block; }
+
+/* ---- Healing events ---- */
+.heal-row { display: flex; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: .85rem; }
+.heal-row:last-child { border-bottom: none; }
+.heal-badge { padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+.heal-badge.success { background: rgba(34,197,94,.15); color: var(--green); }
+.heal-badge.fail { background: rgba(239,68,68,.15); color: var(--red); }
+
+/* ---- Footer ---- */
+.footer { text-align: center; color: var(--text2); font-size: .78rem; padding: 20px 0 40px; }
+
+/* ---- Nav ---- */
+.nav { position: sticky; top: 0; z-index: 100; background: var(--surface); border-bottom: 1px solid var(--border); padding: 8px 16px; display: flex; gap: 16px; overflow-x: auto; font-size: .85rem; box-shadow: var(--shadow); }
+.nav a { color: var(--text2); white-space: nowrap; padding: 4px 0; }
+.nav a:hover { color: var(--blue); }
+
+/* ---- Responsive ---- */
+@media (max-width: 640px) {
+  .banner { padding: 20px; }
+  .banner h1 { font-size: 1.2rem; }
+  .step-thumb { width: 80px; height: 54px; }
+  .cards { grid-template-columns: 1fr 1fr; }
+}
+</style>
+</head>
+<body class="{{ 'portrait' if is_portrait else '' }}">
+
+<!-- Navigation -->
+<nav class="nav">
+  <a href="/" style="font-weight:700;color:var(--blue)" title="返回 Dashboard">&larr; Dashboard</a>
+  <span style="color:var(--border)">|</span>
+  <a href="#overview">概览</a>
+  <a href="#steps">步骤</a>
+  {% if gallery_items %}<a href="#gallery">截图</a>{% endif %}
+  {% if logcat_files or console_tail %}<a href="#logs">日志</a>{% endif %}
+  {% if meminfo_files %}<a href="#memory">内存</a>{% endif %}
+  {% if healing_events %}<a href="#healing">自愈</a>{% endif %}
+</nav>
+
+<div class="container">
+
+<!-- Banner -->
+<div class="banner {{ 'passed' if meta.exit_code == 0 else 'failed' }}">
+  <div>
+    <h1>{{ meta.script_name or "Script" }}</h1>
+    <div class="meta-row">
+      <span>{{ "PASSED" if meta.exit_code == 0 else "FAILED" }}</span>
+      <span>{{ duration_display }}</span>
+      <span>{{ meta.device.serial or "?" }} ({{ meta.device.platform or "?" }})</span>
+      {% if meta.git.commit %}<span>{{ meta.git.branch or "" }}@{{ meta.git.commit }}{% if meta.git.dirty %} *{% endif %}</span>{% endif %}
+    </div>
+  </div>
+  <span class="badge">{{ meta.started_at[:19] if meta.started_at else "" }}</span>
+</div>
+
+<!-- Overview Cards -->
+<div class="cards" id="overview">
+  <!-- Steps pass rate -->
+  <div class="card">
+    <h3>步骤通过率</h3>
+    <div class="big {{ 'green' if steps_pass_rate == 100 else ('red' if steps_pass_rate < 50 else 'amber') }}">{{ steps_pass_rate }}%</div>
+    <div style="font-size:.85rem;color:var(--text2);margin-top:4px">{{ meta.steps.passed }}/{{ meta.steps.total }} 步通过</div>
+    <div class="progress-bar">
+      <div class="fill {{ 'green' if steps_pass_rate >= 80 else 'red' }}" style="width:{{ steps_pass_rate }}%"></div>
+    </div>
+  </div>
+
+  <!-- Duration -->
+  <div class="card">
+    <h3>执行耗时</h3>
+    <div class="big">{{ duration_display }}</div>
+    <div style="font-size:.85rem;color:var(--text2);margin-top:4px">{{ meta.started_at[:19] if meta.started_at else "" }}</div>
+  </div>
+
+  <!-- Artifacts -->
+  <div class="card">
+    <h3>产物统计</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.9rem;margin-top:4px">
+      <span>截图 <b>{{ meta.artifacts.screenshots }}</b></span>
+      <span>录屏 <b>{{ meta.artifacts.screen_recordings }}</b></span>
+      <span>日志 <b>{{ meta.artifacts.logcat_dumps }}</b></span>
+      <span>内存 <b>{{ meta.artifacts.meminfo_snapshots }}</b></span>
+    </div>
+  </div>
+
+  {% if healing_events %}
+  <!-- Healing -->
+  <div class="card">
+    <h3>自愈事件</h3>
+    <div class="big {{ 'green' if healing_success_rate >= 80 else 'amber' }}">{{ healing_events|length }}</div>
+    <div style="font-size:.85rem;color:var(--text2);margin-top:4px">成功率 {{ healing_success_rate }}%</div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Steps Timeline -->
+<div class="section" id="steps">
+  <div class="section-header" onclick="toggleSection(this)">
+    步骤时间线 ({{ steps|length }})
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body">
+    {% for s in steps %}
+    <div class="step-row {{ 'failed' if s.status not in ('ok', 'passed') else '' }}">
+      <div class="step-num {{ 'ok' if s.status in ('ok', 'passed') else 'fail' }}">{{ loop.index }}</div>
+      <div class="step-info">
+        <div class="step-action">{{ s.action }}{% if s.retry_info %} <span style="font-size:.75rem;color:var(--amber);font-weight:400">({{ s.retry_info }})</span>{% endif %}</div>
+        {% if s.detail %}<div class="step-detail">{{ s.detail[:200] }}</div>{% endif %}
+      </div>
+      <div class="step-time">{{ s.timestamp[11:19] if s.timestamp|length > 19 else s.timestamp }}</div>
+      {% if s.screenshot %}
+      <img class="step-thumb" src="screenshots/{{ s.screenshot }}" alt="Step {{ s.step }}" onclick="openLightbox(this.getAttribute('src'))">
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% if not steps %}
+    <div style="color:var(--text2);padding:12px 0">无步骤记录</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Screenshot Gallery -->
+{% if gallery_items %}
+<div class="section" id="gallery">
+  <div class="section-header" onclick="toggleSection(this)">
+    截图画廊 ({{ gallery_items|length }})
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body">
+    <div class="gallery">
+      {% for gi in gallery_items %}
+      <div>
+        <img src="screenshots/{{ gi.filename }}" alt="{{ gi.filename }}" data-idx="{{ loop.index0 }}" onclick="openLightbox({{ loop.index0 }})">
+        <div class="caption">
+          {% if gi.step_num %}<span class="cap-step">{{ gi.step_num }}</span> {{ gi.step_action or "" }}{% if gi.step_detail %}: {{ gi.step_detail }}{% endif %}{% else %}{{ gi.filename }}{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Logs -->
+{% if logcat_files or console_tail %}
+<div class="section" id="logs">
+  <div class="section-header" onclick="toggleSection(this)">
+    日志
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body">
+    {% if logcat_files %}
+    <h4 style="margin-bottom:8px;font-size:.9rem">Logcat 文件</h4>
+    {% for lf in logcat_files %}
+    <div class="log-file-item">
+      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis">{{ lf.name }}</span>
+      <div class="log-actions">
+        <span style="color:var(--text2);font-size:.8rem;white-space:nowrap">{{ lf.lines }} 行 &middot; {{ lf.size_kb }}KB</span>
+        {% if lf.abs_path %}
+        <button class="btn-sm" onclick="copyToClipboard('{{ lf.abs_path }}')">复制路径</button>
+        <button class="btn-sm" onclick="openInFinder('{{ lf.abs_dir }}')">在 Finder 中打开</button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if console_tail %}
+    <h4 style="margin:16px 0 8px;font-size:.9rem">
+      控制台输出（末尾 {{ console_tail_lines }} 行）
+      {% if console_log_abs %}
+      <button class="btn-sm" style="margin-left:8px" onclick="copyToClipboard('{{ console_log_abs }}')">复制路径</button>
+      <button class="btn-sm" onclick="openInFinder('{{ run_dir_abs }}')">在 Finder 中打开</button>
+      {% endif %}
+    </h4>
+    <div class="log-preview">{{ console_tail }}</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Memory Analysis -->
+{% if memory %}
+<div class="section" id="memory">
+  <div class="section-header" onclick="toggleSection(this)">
+    内存分析
+    {% if memory.leak_report and memory.leak_report.leaked %}<span class="mem-alert error" style="margin-left:12px">Activity 泄漏</span>{% endif %}
+    {% if memory.diff and memory.diff.alerts %}{% for a in memory.diff.alerts %}<span class="mem-alert {{ a.level }}" style="margin-left:6px">{{ a.text }}</span>{% endfor %}{% endif %}
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body">
+
+    {# ---- Leak Report ---- #}
+    {% if memory.leak_report %}
+    <h4 style="margin:0 0 10px;font-size:.95rem">Activity 泄漏检测</h4>
+    {% if memory.leak_report.leaked %}
+    <span class="leak-badge danger">已确认泄漏</span>
+    <p style="margin:8px 0;font-size:.85rem;color:var(--text2)">{{ memory.leak_report.verdict }}</p>
+    <table class="mem-table" style="max-width:500px">
+      <tbody>
+        <tr><td>包名</td><td>{{ memory.leak_report.package }}</td></tr>
+        <tr><td>内存中 Activity 数</td><td class="warn">{{ memory.leak_report.activities_in_memory }}</td></tr>
+        <tr><td>可见 Activity 数</td><td>{{ memory.leak_report.visible_count }}</td></tr>
+        {% if memory.leak_report.gc_performed %}<tr><td>GC 后 Activity 数</td><td class="warn">{{ memory.leak_report.after_gc_activities }}</td></tr>{% endif %}
+        {% if memory.leak_report.leak_count %}<tr><td>泄漏数量</td><td class="warn">{{ memory.leak_report.leak_count }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+    {% if memory.leak_report.leaked_activities %}
+    <div style="margin:8px 0;font-size:.85rem"><b>泄漏 Activities：</b>
+      {% for act in memory.leak_report.leaked_activities %}<code style="background:rgba(239,68,68,.1);padding:1px 6px;border-radius:4px;font-size:.8rem;color:var(--red)">{{ act }}</code> {% endfor %}
+    </div>
+    {% endif %}
+    {% if memory.leak_report.hprof_path %}
+    <div style="font-size:.8rem;color:var(--text2);margin-top:4px">hprof: <code>{{ memory.leak_report.hprof_path }}</code></div>
+    {% endif %}
+    {% else %}
+    <span class="leak-badge safe">无泄漏</span>
+    <p style="margin:8px 0;font-size:.85rem;color:var(--text2)">{{ memory.leak_report.verdict }}</p>
+    <table class="mem-table" style="max-width:500px">
+      <tbody>
+        <tr><td>内存中 Activity 数</td><td>{{ memory.leak_report.activities_in_memory }}</td></tr>
+        <tr><td>可见 Activity 数</td><td>{{ memory.leak_report.visible_count }}</td></tr>
+      </tbody>
+    </table>
+    {% if memory.leak_report.visible_activities %}
+    <div style="margin:8px 0;font-size:.82rem;color:var(--text2)">可见 Activities：{{ memory.leak_report.visible_activities|join(', ') }}</div>
+    {% endif %}
+    {% endif %}
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    {% endif %}
+
+    {# ---- Diff Comparison ---- #}
+    {% if memory.diff %}
+    <h4 style="margin:0 0 10px;font-size:.95rem">内存前后对比</h4>
+    {% if memory.diff.alerts %}
+    <div style="margin-bottom:10px">{% for a in memory.diff.alerts %}<span class="mem-alert {{ a.level }}">{{ a.text }}</span>{% endfor %}</div>
+    {% endif %}
+    <table class="mem-table">
+      <thead><tr><th>指标</th><th class="num">Before (MB)</th><th class="num">After (MB)</th><th class="num">变化 (MB)</th><th class="num">变化 (%)</th></tr></thead>
+      <tbody>
+        {% for r in memory.diff.rows %}
+        <tr>
+          <td>{{ r.label }}</td>
+          <td class="num">{{ "%.1f"|format(r.before) }}</td>
+          <td class="num">{{ "%.1f"|format(r.after) }}</td>
+          <td class="num {{ 'delta-pos' if r.delta > 0 else ('delta-neg' if r.delta < 0 else 'delta-zero') }}">{{ "+%.2f"|format(r.delta) if r.delta > 0 else "%.2f"|format(r.delta) }}</td>
+          <td class="num {{ 'warn' if r.level == 'error' else '' }}">{{ "+%.1f"|format(r.percent) if r.percent > 0 else "%.1f"|format(r.percent) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {# Visual diff bars #}
+    <div style="margin-top:12px">
+      {% set max_val = memory.diff.rows[0].after if memory.diff.rows else 1 %}
+      {% for r in memory.diff.rows %}
+      {% if r.before > 0 or r.after > 0 %}
+      {% set bar_max = [r.before, r.after]|max %}
+      <div class="mem-diff-bar">
+        <div class="label">{{ r.label }}</div>
+        <div class="bar-wrap">
+          <div class="bar-fill" style="width:{{ (r.before / (bar_max * 1.2) * 100)|round }}%;background:var(--blue);opacity:.5"></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-fill" style="width:{{ (r.after / (bar_max * 1.2) * 100)|round }}%;background:{{ 'var(--red)' if r.level == 'error' else ('var(--amber)' if r.level == 'warn' else 'var(--blue)') }}"></div>
+        </div>
+        <div class="bar-val {{ 'delta-pos' if r.delta > 0 else 'delta-zero' }}">{{ "+%.1f"|format(r.delta) if r.delta > 0 else "%.1f"|format(r.delta) }} MB</div>
+      </div>
+      {% endif %}
+      {% endfor %}
+      <div style="font-size:.72rem;color:var(--text2);margin-top:4px">
+        <span style="display:inline-block;width:10px;height:10px;background:var(--blue);opacity:.5;border-radius:2px;vertical-align:middle"></span> Before &nbsp;
+        <span style="display:inline-block;width:10px;height:10px;background:var(--blue);border-radius:2px;vertical-align:middle"></span> After
+      </div>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    {% endif %}
+
+    {# ---- Objects Diff ---- #}
+    {% if memory.objects_diff %}
+    <h4 style="margin:0 0 10px;font-size:.95rem">对象计数对比</h4>
+    <table class="mem-table" style="max-width:500px">
+      <thead><tr><th>对象</th><th class="num">Before</th><th class="num">After</th><th class="num">变化</th></tr></thead>
+      <tbody>
+        {% for o in memory.objects_diff %}
+        <tr>
+          <td>{{ o.name }}</td>
+          <td class="num">{{ o.before }}</td>
+          <td class="num">{{ o.after }}</td>
+          <td class="num {{ 'delta-pos' if o.delta > 0 else ('delta-neg' if o.delta < 0 else 'delta-zero') }}">{{ "+%d"|format(o.delta) if o.delta > 0 else o.delta }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    {% endif %}
+
+    {# ---- Memory Distribution (Before/After) ---- #}
+    {% for snap_key, snap_label in [('before', 'Before'), ('after', 'After')] %}
+    {% if memory[snap_key] is defined and memory[snap_key] %}
+    {% set snap = memory[snap_key] %}
+    <h4 style="margin:0 0 8px;font-size:.9rem">{{ snap_label }} 快照 <span style="font-weight:400;font-size:.8rem;color:var(--text2)">({{ snap.captured_at }})</span></h4>
+    <div class="mem-sub">Total PSS: <b>{{ "%.1f"|format(snap.total_pss_mb) }} MB</b> &mdash; {{ snap.package }}</div>
+    {% if snap.segments %}
+    <div class="mem-bar">
+      {% for seg in snap.segments %}
+      <div class="mem-bar-seg" style="width:{{ seg.pct }}%;background:{{ seg.color }}" title="{{ seg.name }}: {{ seg.mb }} MB ({{ seg.pct }}%)">{% if seg.pct > 8 %}{{ seg.mb }}{% endif %}</div>
+      {% endfor %}
+    </div>
+    <div class="mem-bar-legend">
+      {% for seg in snap.segments %}
+      <span><i style="background:{{ seg.color }}"></i>{{ seg.name }} {{ seg.mb }} MB ({{ seg.pct }}%)</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if snap.objects %}
+    <div style="font-size:.82rem;color:var(--text2);margin-bottom:12px">
+      Views: <b>{{ snap.objects.Views|default(0) }}</b> &middot;
+      Activities: <b>{{ snap.objects.Activities|default(0) }}</b> &middot;
+      AppContexts: <b>{{ snap.objects.AppContexts|default(0) }}</b> &middot;
+      ViewRootImpl: <b>{{ snap.objects.ViewRootImpl|default(0) }}</b>
+    </div>
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+
+    {# ---- Shark Analysis ---- #}
+    {% if memory.shark_analysis %}
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <h4 style="margin:0 0 10px;font-size:.95rem">Shark 泄漏分析</h4>
+    {% if memory.shark_analysis.has_leak %}
+    <span class="leak-badge danger">检测到 {{ memory.shark_analysis.leak_count|default(0) }} 个泄漏</span>
+    {% if memory.shark_analysis.confirmed %}<span class="mem-alert error" style="margin-left:8px">GC 后二次确认</span>{% endif %}
+    {% if memory.shark_analysis.leaks %}
+    {% for lk in memory.shark_analysis.leaks %}
+    <div style="margin:10px 0">
+      <div style="font-weight:600;font-size:.85rem;color:var(--red)">{{ lk.class_name|default("Unknown") }}</div>
+      {% if lk.leak_trace %}<div class="leak-trace">{{ lk.leak_trace }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% else %}
+    <span class="leak-badge safe">Shark 未发现泄漏</span>
+    {% endif %}
+    {% if memory.shark_analysis.shark_version %}<div style="font-size:.72rem;color:var(--text2);margin-top:4px">Shark {{ memory.shark_analysis.shark_version }}</div>{% endif %}
+    {% endif %}
+
+    {# ---- Timeline Chart ---- #}
+    {% if memory.timeline %}
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <h4 style="margin:0 0 10px;font-size:.95rem">内存趋势 ({{ memory.timeline.count }} 个采样点)</h4>
+    {% if memory.timeline.chart_data and memory.timeline.chart_data.points %}
+    {% set cd = memory.timeline.chart_data %}
+    {% set svg_w = 680 %}
+    {% set svg_h = 220 %}
+    {% set pad_l = 50 %}
+    {% set pad_r = 20 %}
+    {% set pad_t = 10 %}
+    {% set pad_b = 30 %}
+    {% set plot_w = svg_w - pad_l - pad_r %}
+    {% set plot_h = svg_h - pad_t - pad_b %}
+    <div class="mem-timeline-wrap">
+    <svg width="{{ svg_w }}" height="{{ svg_h }}" viewBox="0 0 {{ svg_w }} {{ svg_h }}" xmlns="http://www.w3.org/2000/svg" style="font-family:sans-serif;font-size:11px">
+      {# Y-axis grid lines #}
+      {% for i in range(5) %}
+      {% set y = pad_t + plot_h - (plot_h * i / 4) %}
+      <line x1="{{ pad_l }}" y1="{{ y }}" x2="{{ svg_w - pad_r }}" y2="{{ y }}" stroke="var(--border)" stroke-width="0.5"/>
+      <text x="{{ pad_l - 6 }}" y="{{ y + 4 }}" text-anchor="end" fill="var(--text2)" font-size="10">{{ "%.0f"|format(cd.max_mb * i / 4) }}</text>
+      {% endfor %}
+      <text x="{{ pad_l - 6 }}" y="{{ pad_t + plot_h + 18 }}" text-anchor="end" fill="var(--text2)" font-size="9">MB</text>
+      {# Lines for each metric #}
+      {% for metric, color, label in [('pss', '#3b82f6', 'Total PSS'), ('native', '#ef4444', 'Native'), ('dalvik', '#f59e0b', 'Dalvik')] %}
+      <polyline fill="none" stroke="{{ color }}" stroke-width="{{ '2.5' if metric == 'pss' else '1.5' }}" points="{% for p in cd.points %}{{ pad_l + (p.ts / (cd.max_ts or 1)) * plot_w }},{{ pad_t + plot_h - (p[metric] / cd.max_mb) * plot_h }} {% endfor %}"/>
+      {% endfor %}
+      {# X-axis labels #}
+      {% set label_count = [5, cd.points|length]|min %}
+      {% for i in range(label_count) %}
+      {% set idx = (i * (cd.points|length - 1) / ([label_count - 1, 1]|max))|round|int %}
+      {% set p = cd.points[idx] %}
+      <text x="{{ pad_l + (p.ts / (cd.max_ts or 1)) * plot_w }}" y="{{ svg_h - 4 }}" text-anchor="middle" fill="var(--text2)" font-size="10">{{ "%.0f"|format(p.ts) }}s</text>
+      {% endfor %}
+    </svg>
+    </div>
+    <div class="mem-bar-legend" style="margin-top:4px">
+      <span><i style="background:#3b82f6"></i>Total PSS</span>
+      <span><i style="background:#ef4444"></i>Native Heap</span>
+      <span><i style="background:#f59e0b"></i>Dalvik Heap</span>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {# ---- Perfetto Analysis ---- #}
+    {% if memory.perfetto %}
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+    <h4 style="margin:0 0 10px;font-size:.95rem">Perfetto 深度分析</h4>
+    {% if memory.perfetto.ok %}
+    {% if memory.perfetto.allocations %}
+    <div style="font-size:.85rem;margin-bottom:8px">
+      总分配: <b>{{ "%.1f"|format(memory.perfetto.allocations.total_allocated_bytes / 1048576) }} MB</b> &middot;
+      总释放: <b>{{ "%.1f"|format(memory.perfetto.allocations.total_freed_bytes / 1048576) }} MB</b> &middot;
+      净增: <b>{{ "%.1f"|format(memory.perfetto.allocations.net_bytes / 1048576) }} MB</b>
+    </div>
+    {% endif %}
+    {% if memory.perfetto.top_allocators %}
+    <table class="mem-table">
+      <thead><tr><th>调用点</th><th class="num">分配量</th><th class="num">次数</th></tr></thead>
+      <tbody>
+        {% for alloc in memory.perfetto.top_allocators[:15] %}
+        <tr>
+          <td style="font-family:monospace;font-size:.8rem">{{ alloc.callsite }}</td>
+          <td class="num">{{ "%.1f"|format(alloc.bytes / 1048576) }} MB</td>
+          <td class="num">{{ alloc.count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if memory.perfetto.trace_file %}
+    <div style="font-size:.8rem;color:var(--text2);margin-top:8px">Trace 文件: <code>{{ memory.perfetto.trace_file }}</code>（可用 <a href="https://ui.perfetto.dev/" target="_blank">Perfetto UI</a> 打开查看火焰图）</div>
+    {% endif %}
+    {% else %}
+    <div style="color:var(--text2);font-size:.85rem">{{ memory.perfetto.error|default("Perfetto 分析未成功") }}</div>
+    {% endif %}
+    {% endif %}
+
+  </div>
+</div>
+{% endif %}
+
+<!-- Healing Events -->
+{% if healing_events %}
+<div class="section" id="healing">
+  <div class="section-header" onclick="toggleSection(this)">
+    自愈事件 ({{ healing_events|length }})
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body">
+    {% for he in healing_events %}
+    <div class="heal-row">
+      <span class="heal-badge {{ 'success' if he.success else 'fail' }}">{{ "OK" if he.success else "FAIL" }}</span>
+      <span style="font-weight:600">{{ he.fix_type or "?" }}</span>
+      <span style="color:var(--text2)">{{ he.action or "" }}({{ he.query[:30] if he.query else "" }})</span>
+      <span style="color:var(--text2);font-size:.78rem">{{ he.fix_source or he.source or "" }}</span>
+      {% if he.duration_ms %}<span style="color:var(--text2);font-size:.78rem">{{ "%.0f"|format(he.duration_ms) }}ms</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Error message -->
+{% if meta.error_message %}
+<div class="section" style="border-color:var(--red)">
+  <div class="section-header" style="color:var(--red)">
+    错误信息
+  </div>
+  <div class="section-body">
+    <div class="log-preview" style="background:#2d1215;color:#fca5a5">{{ meta.error_message }}</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Footer -->
+<div class="footer">
+  {% if meta.git.commit %}git {{ meta.git.branch or "" }}@{{ meta.git.commit }}{% if meta.git.dirty %} (dirty, {{ meta.git.dirty_files_count }} files){% endif %} &middot; {% endif %}
+  Generated at {{ generated_at }} &middot; phone_pilot
+</div>
+
+</div><!-- .container -->
+
+<!-- Lightbox overlay with navigation -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
+  <button class="lb-nav lb-prev" onclick="lbPrev(event)" title="上一张">&#10094;</button>
+  <img id="lightbox-img" src="" alt="Preview">
+  <button class="lb-nav lb-next" onclick="lbNext(event)" title="下一张">&#10095;</button>
+  <div class="lb-counter" id="lb-counter"></div>
+</div>
+
+<script>
+/* Section collapse/expand */
+function toggleSection(header) {
+  header.classList.toggle('collapsed');
+  var body = header.nextElementSibling;
+  body.classList.toggle('hidden');
+}
+
+/* Lightbox with navigation */
+var _lbImages = [];
+var _lbCurrent = 0;
+(function() {
+  var imgs = document.querySelectorAll('.gallery img[data-idx]');
+  imgs.forEach(function(img) { _lbImages.push(img.getAttribute('src')); });
+  /* Also collect step thumbnails as fallback */
+  if (_lbImages.length === 0) {
+    document.querySelectorAll('.step-thumb').forEach(function(img) { _lbImages.push(img.getAttribute('src')); });
+  }
+})();
+
+function openLightbox(idx) {
+  if (typeof idx === 'string') {
+    /* Called with src string (from step thumbnail) */
+    var found = _lbImages.indexOf(idx);
+    _lbCurrent = found >= 0 ? found : 0;
+    document.getElementById('lightbox-img').src = idx;
+  } else {
+    _lbCurrent = idx;
+    document.getElementById('lightbox-img').src = _lbImages[idx] || '';
+  }
+  _updateLbCounter();
+  document.getElementById('lightbox').classList.add('active');
+}
+function closeLightbox(e) {
+  if (e && (e.target.tagName === 'BUTTON' || e.target.tagName === 'IMG')) return;
+  document.getElementById('lightbox').classList.remove('active');
+}
+function lbPrev(e) {
+  e && e.stopPropagation();
+  _lbCurrent = (_lbCurrent - 1 + _lbImages.length) % _lbImages.length;
+  document.getElementById('lightbox-img').src = _lbImages[_lbCurrent];
+  _updateLbCounter();
+}
+function lbNext(e) {
+  e && e.stopPropagation();
+  _lbCurrent = (_lbCurrent + 1) % _lbImages.length;
+  document.getElementById('lightbox-img').src = _lbImages[_lbCurrent];
+  _updateLbCounter();
+}
+function _updateLbCounter() {
+  var el = document.getElementById('lb-counter');
+  if (el && _lbImages.length > 0) el.textContent = (_lbCurrent + 1) + ' / ' + _lbImages.length;
+}
+document.addEventListener('keydown', function(e) {
+  if (!document.getElementById('lightbox').classList.contains('active')) return;
+  if (e.key === 'Escape') document.getElementById('lightbox').classList.remove('active');
+  else if (e.key === 'ArrowLeft') lbPrev();
+  else if (e.key === 'ArrowRight') lbNext();
+});
+
+/* Copy to clipboard */
+function copyToClipboard(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('已复制: ' + text);
+    }).catch(function() { _fallbackCopy(text); });
+  } else { _fallbackCopy(text); }
+}
+function _fallbackCopy(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); showToast('已复制: ' + text); }
+  catch(e) { showToast('复制失败', true); }
+  document.body.removeChild(ta);
+}
+
+/* Open directory in Finder (only works from file:// protocol) */
+function openInFinder(dirPath) {
+  /* For file:// protocol pages, attempt to open via link; for http:// just copy path */
+  if (window.location.protocol === 'file:') {
+    window.open('file://' + dirPath, '_blank');
+  } else {
+    copyToClipboard(dirPath);
+    showToast('路径已复制（通过 Web 服务打开时无法直接跳转 Finder）');
+  }
+}
+
+/* Toast for report page */
+var _toastEl = null;
+function showToast(msg, isError) {
+  if (!_toastEl) {
+    _toastEl = document.createElement('div');
+    _toastEl.style.cssText = 'position:fixed;bottom:24px;right:24px;padding:10px 18px;border-radius:8px;font-size:.85rem;z-index:1100;transition:all .3s;transform:translateY(80px);opacity:0;box-shadow:0 4px 12px rgba(0,0,0,.15);';
+    document.body.appendChild(_toastEl);
+  }
+  _toastEl.textContent = msg;
+  _toastEl.style.background = isError ? '#fecaca' : '#d1fae5';
+  _toastEl.style.color = isError ? '#991b1b' : '#065f46';
+  _toastEl.style.transform = 'translateY(0)'; _toastEl.style.opacity = '1';
+  setTimeout(function() { _toastEl.style.transform = 'translateY(80px)'; _toastEl.style.opacity = '0'; }, 2500);
+}
+</script>
+</body>
+</html>

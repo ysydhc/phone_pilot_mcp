@@ -1,3 +1,0 @@
-[console_scripts]
-phone-touch-call = phone_touch.mcp_call:main
-phone-touch-mcp = phone_touch.cli:main

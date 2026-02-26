@@ -1,27 +1,68 @@
 [project]
-name = "phone-touch"
-version = "0.1.7"
-description = "Android touch record/replay via MCP + adb getevent + Monkey .mks"
+name = "phone-pilot"
+version = "0.5.1"
+description = "Multi-platform mobile automation via MCP - Control Android devices through AI agents"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.13"
+keywords = ["mcp", "android", "automation", "mobile", "testing", "ai-agent", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "httpx>=0.28.1",
     "mcp[cli]>=1.24.0",
-    "openai>=2.14.0",
     # Computer vision (template matching). Use headless to avoid GUI deps on servers.
     "opencv-python-headless>=4.10.0.84",
+    # HTML report generation
+    "jinja2>=3.1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/aspect-build/phone-pilot-mcp"
+Repository = "https://github.com/aspect-build/phone-pilot-mcp"
+Documentation = "https://github.com/aspect-build/phone-pilot-mcp#readme"
+Issues = "https://github.com/aspect-build/phone-pilot-mcp/issues"
+
+[project.optional-dependencies]
+# HarmonyOS device automation
+harmony = ["hmdriver2>=1.4.0"]
+# Language detection & translation (for multilingual OCR/text)
+vision = ["langdetect>=1.0.9", "deep-translator>=1.11.4"]
+# Install everything
+all = ["phone-pilot[harmony,vision]"]
+
 [project.scripts]
-phone-touch-mcp = "phone_touch.cli:main"
-phone-touch-call = "phone_touch.mcp_call:main"
+phone-pilot-mcp = "phone_pilot.cli:main"
+phone-pilot-call = "phone_pilot.mcp_call:main"
+phone-pilot-web = "phone_pilot.web:_cli"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["android_tool", "phone_touch"]
-py-modules = ["mcp_android"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["phone_pilot*"]
 
+[tool.setuptools.package-data]
+"phone_pilot.core" = ["templates/*.j2"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+exclude = [
+    "**/build/**",
+    ".venv",  
+    "**/__pycache__",
+    ".recordings",
+]

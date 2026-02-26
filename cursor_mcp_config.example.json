@@ -1,21 +1,37 @@
 {
   "mcpServers": {
-    "android_touch": {
-      "command": "/ABS/PATH/TO/uv",
+    "// 方式一：uvx（推荐，无需安装）": {},
+    "phone_pilot": {
+      "command": "uvx",
+      "args": ["phone-pilot-mcp"],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+
+    "// 方式二：pip install 后直接使用": {},
+    "phone_pilot_installed": {
+      "command": "phone-pilot-mcp",
+      "args": [],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+
+    "// 方式三：开发模式（本地源码）": {},
+    "phone_pilot_dev": {
+      "command": "uv",
       "args": [
         "run",
         "--project",
-        "/ABS/PATH/TO/phone_touch",
-        "/ABS/PATH/TO/phone_touch/mcp_android.py"
+        "<PROJECT_PATH>",
+        "phone-pilot-mcp"
       ],
-      "cwd": "/ABS/PATH/TO/phone_touch",
+      "cwd": "<PROJECT_PATH>",
       "env": {
-        "ADB_PATH": "/ABS/PATH/TO/Android/sdk/platform-tools/adb",
-        "ANDROID_ADB_PATH": "/ABS/PATH/TO/Android/sdk/platform-tools/adb",
+        "ADB_PATH": "<ANDROID_SDK>/platform-tools/adb",
         "PYTHONUNBUFFERED": "1"
       }
     }
   }
 }
-
-

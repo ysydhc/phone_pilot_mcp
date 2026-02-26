@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>phone_pilot Dashboard</title>
+<style>
+/* ---- Reset & Base ---- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f5f6f8; --surface: #ffffff; --text: #1a1a2e; --text2: #555;
+  --border: #e0e0e0; --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+  --blue: #3b82f6; --purple: #8b5cf6;
+  --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --text: #e2e8f0; --text2: #94a3b8;
+    --border: #334155; --shadow: 0 1px 3px rgba(0,0,0,.3);
+  }
+}
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; padding: 0; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- Header ---- */
+.header { background: linear-gradient(135deg, #3b82f6, #8b5cf6); color: #fff; padding: 28px 32px; }
+.header h1 { font-size: 1.5rem; font-weight: 700; }
+.header .sub { font-size: .88rem; opacity: .85; margin-top: 4px; }
+
+/* ---- Container ---- */
+.container { max-width: 1200px; margin: 0 auto; padding: 20px 16px; }
+
+/* ---- Summary cards ---- */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
+.card .label { font-size: .78rem; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.card .big { font-size: 1.8rem; font-weight: 700; }
+.card .big.green { color: var(--green); }
+.card .big.red { color: var(--red); }
+.card .big.blue { color: var(--blue); }
+
+/* ---- Tabs ---- */
+.tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 2px solid var(--border); }
+.tab-btn { padding: 10px 24px; font-size: .92rem; font-weight: 600; cursor: pointer; background: none; border: none; color: var(--text2); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ---- Table ---- */
+.runs-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.runs-table th { text-align: left; padding: 10px 12px; font-size: .78rem; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; border-bottom: 2px solid var(--border); white-space: nowrap; }
+.runs-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.runs-table tr:hover td { background: rgba(59,130,246,.04); }
+.runs-table .name-cell { font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: .75rem; font-weight: 600; }
+.status-badge.passed { background: rgba(34,197,94,.12); color: var(--green); }
+.status-badge.failed { background: rgba(239,68,68,.12); color: var(--red); }
+
+/* ---- Resource grid ---- */
+.res-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.res-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
+.res-card .thumb-wrap { position: relative; width: 100%; height: 120px; border-radius: 6px; overflow: hidden; background: var(--bg); }
+.res-card .thumb { width: 100%; height: 100%; object-fit: contain; }
+.res-card .thumb-wrap.invalid { opacity: .5; }
+.res-card .invalid-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(239,68,68,.85); color: #fff; padding: 4px 12px; border-radius: 6px; font-size: .8rem; font-weight: 600; pointer-events: none; }
+.res-card .key { font-weight: 600; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-card .origin { font-size: .75rem; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-card .meta-time { font-size: .75rem; color: var(--text2); }
+.res-card .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.btn-copy { background: none; border: 1px solid var(--blue); color: var(--blue); padding: 4px 10px; border-radius: 6px; font-size: .75rem; cursor: pointer; transition: all .15s; white-space: nowrap; }
+.btn-copy:hover { background: var(--blue); color: #fff; }
+
+/* ---- Delete button ---- */
+.btn-del { background: none; border: 1px solid var(--red); color: var(--red); padding: 4px 12px; border-radius: 6px; font-size: .78rem; cursor: pointer; transition: all .15s; }
+.btn-del:hover { background: var(--red); color: #fff; }
+.btn-gen { background: none; border: 1px solid var(--blue); color: var(--blue); padding: 4px 12px; border-radius: 6px; font-size: .78rem; cursor: pointer; transition: all .15s; }
+.btn-gen:hover { background: var(--blue); color: #fff; }
+
+/* ---- Filter / Search bar ---- */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: center; }
+.filter-bar input[type="text"] { padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; background: var(--surface); color: var(--text); min-width: 200px; flex: 1; max-width: 360px; }
+.filter-bar input[type="text"]:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
+.filter-bar select { padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; background: var(--surface); color: var(--text); cursor: pointer; }
+.filter-bar select:focus { outline: none; border-color: var(--blue); }
+.filter-bar .count { font-size: .8rem; color: var(--text2); margin-left: auto; }
+
+/* ---- Pass rate color ---- */
+.pass-rate { font-weight: 600; font-size: .85rem; }
+.pass-rate.green { color: var(--green); }
+.pass-rate.red { color: var(--red); }
+.pass-rate.amber { color: var(--amber); }
+
+/* ---- Empty state ---- */
+.empty { text-align: center; color: var(--text2); padding: 48px 16px; font-size: .95rem; }
+
+/* ---- Toast ---- */
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 20px; box-shadow: 0 4px 12px rgba(0,0,0,.15); font-size: .88rem; z-index: 1000; transform: translateY(100px); opacity: 0; transition: all .3s; }
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.error { border-color: var(--red); color: var(--red); }
+
+/* ---- Footer ---- */
+.footer { text-align: center; color: var(--text2); font-size: .78rem; padding: 20px 0 40px; }
+
+/* ---- Responsive ---- */
+@media (max-width: 640px) {
+  .header { padding: 20px; }
+  .header h1 { font-size: 1.2rem; }
+  .cards { grid-template-columns: 1fr 1fr; }
+  .tab-btn { padding: 8px 16px; font-size: .85rem; }
+  .runs-table { font-size: .8rem; }
+  .runs-table th, .runs-table td { padding: 8px 6px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1>phone_pilot Dashboard</h1>
+  <div class="sub">.recordings: {{ recordings_root }} | {{ generated_at }}</div>
+</div>
+
+<div class="container">
+
+<!-- Summary cards -->
+<div class="cards">
+  <div class="card">
+    <div class="label">运行总数</div>
+    <div class="big blue">{{ runs|length }}</div>
+  </div>
+  <div class="card">
+    <div class="label">通过</div>
+    <div class="big green">{{ passed_count }}</div>
+  </div>
+  <div class="card">
+    <div class="label">失败</div>
+    <div class="big red">{{ failed_count }}</div>
+  </div>
+  <div class="card">
+    <div class="label">图片资源</div>
+    <div class="big blue">{{ resources|length }}</div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('runs')">运行记录 ({{ runs|length }})</button>
+  <button class="tab-btn" onclick="switchTab('resources')">图片资源 ({{ resources|length }})</button>
+</div>
+
+<!-- Batch action bar (shown when runs tab is active) -->
+
+<!-- Runs Tab -->
+<div class="tab-panel active" id="tab-runs">
+  {% if runs %}
+  <div class="filter-bar">
+    <input type="text" id="runs-filter-name" placeholder="搜索脚本名称..." oninput="filterRuns()">
+    <select id="runs-filter-status" onchange="filterRuns()">
+      <option value="">全部状态</option>
+      <option value="passed">通过 (PASSED)</option>
+      <option value="failed">失败 (FAILED)</option>
+      <option value="unknown">未知</option>
+    </select>
+    <button class="btn-gen" id="btn-gen-all" onclick="generateAllReports()" style="margin-left:8px">一键生成全部报告</button>
+    <span class="count" id="runs-count">共 {{ runs|length }} 条</span>
+  </div>
+  <table class="runs-table">
+    <thead>
+      <tr>
+        <th>脚本</th>
+        <th>状态</th>
+        <th>通过率</th>
+        <th>耗时</th>
+        <th>设备</th>
+        <th>时间</th>
+        <th>报告</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr data-name="{{ r.script_name|lower }}" data-status="{{ r.status }}">
+        <td class="name-cell" title="{{ r.run_dir }}">{{ r.script_name }}</td>
+        <td><span class="status-badge {{ r.status }}">{{ r.status|upper }}</span></td>
+        <td>
+          <span class="pass-rate {{ 'green' if r.pass_rate == 100 else ('red' if r.pass_rate < 50 else 'amber') }}">{{ r.pass_rate }}%</span>
+        </td>
+        <td>{{ r.duration_display }}</td>
+        <td style="font-size:.8rem;color:var(--text2)">{{ r.device_serial or "-" }}</td>
+        <td style="font-size:.8rem;white-space:nowrap">{{ r.started_at[5:16] if r.started_at else "-" }}</td>
+        <td>
+          {% if r.has_report %}
+          <a href="/run/{{ r.run_dir }}/report.html" target="_blank">查看</a>
+          {% else %}
+          <button class="btn-gen" data-run="{{ r.run_dir }}" onclick="generateReport('{{ r.run_dir }}')">生成</button>
+          {% endif %}
+        </td>
+        <td><button class="btn-del" onclick="deleteRun('{{ r.run_dir }}')">删除</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">暂无运行记录</div>
+  {% endif %}
+</div>
+
+<!-- Resources Tab -->
+<div class="tab-panel" id="tab-resources">
+  {% if resources %}
+  <div class="filter-bar">
+    <input type="text" id="res-search" placeholder="搜索资源 key / 来源路径..." oninput="filterResources()">
+    <span class="count" id="res-count">共 {{ resources|length }} 个</span>
+  </div>
+  <div class="res-grid" id="res-grid">
+    {% for res in resources %}
+    <div class="res-card" id="res-{{ res.key }}" data-search="{{ res.key|lower }} {{ (res.cached_path or '')|lower }}">
+      <div class="thumb-wrap{{ ' invalid' if not res.file_exists else '' }}">
+        {% if res.file_exists %}
+        <img class="thumb" src="/res/{{ res.key }}" alt="{{ res.key }}" onerror="this.parentElement.classList.add('invalid');this.insertAdjacentHTML('afterend','<div class=invalid-badge>已失效</div>')">
+        {% else %}
+        <img class="thumb" src="" alt="已失效" style="display:none">
+        <div class="invalid-badge">已失效</div>
+        {% endif %}
+      </div>
+      <div class="key" title="@res:{{ res.key }}">@res:{{ res.key }}</div>
+      <div class="origin" title="{{ res.cached_path or '' }}">{{ res.cached_path or '' }}</div>
+      <div class="meta-time">{{ res.updated_at[:16] if res.updated_at else "" }}</div>
+      <div class="actions">
+        <button class="btn-copy" onclick="copyPath('@res:{{ res.key }}')">复制引用</button>
+        {% if res.cached_path %}
+        <button class="btn-copy" onclick="copyPath('{{ res.cached_path }}')">复制路径</button>
+        {% endif %}
+        <button class="btn-del" onclick="deleteResource('{{ res.key }}')">删除</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">暂无图片资源</div>
+  {% endif %}
+</div>
+
+<!-- Footer -->
+<div class="footer">phone_pilot Dashboard | {{ generated_at }}</div>
+
+</div><!-- .container -->
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* Tab switching */
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.classList.remove('active'); });
+  document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+  event.target.classList.add('active');
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+/* Toast */
+function showToast(msg, isError) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(function() { t.className = 'toast'; }, 3000);
+}
+
+/* Delete run */
+function deleteRun(name) {
+  if (!confirm('确认删除运行记录 "' + name + '"？\n此操作不可恢复。')) return;
+  fetch('/api/delete-run', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'name=' + encodeURIComponent(name)
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('已删除: ' + name); setTimeout(function() { location.reload(); }, 800); }
+      else { showToast('删除失败: ' + (d.error || '未知错误'), true); }
+    }).catch(function(e) { showToast('请求失败: ' + e, true); });
+}
+
+/* Delete resource */
+function deleteResource(key) {
+  if (!confirm('确认删除资源 "@res:' + key + '"？')) return;
+  fetch('/api/delete-resource', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'key=' + encodeURIComponent(key)
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        showToast('已删除: @res:' + key);
+        var el = document.getElementById('res-' + key);
+        if (el) el.remove();
+      } else { showToast('删除失败: ' + (d.error || '未知错误'), true); }
+    }).catch(function(e) { showToast('请求失败: ' + e, true); });
+}
+
+/* Copy path to clipboard */
+function copyPath(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function() {
+      showToast('已复制: ' + text);
+    }).catch(function() { fallbackCopy(text); });
+  } else {
+    fallbackCopy(text);
+  }
+}
+function fallbackCopy(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); showToast('已复制: ' + text); }
+  catch(e) { showToast('复制失败', true); }
+  document.body.removeChild(ta);
+}
+
+/* Filter runs table */
+function filterRuns() {
+  var nameQ = document.getElementById('runs-filter-name').value.toLowerCase();
+  var statusQ = document.getElementById('runs-filter-status').value;
+  var rows = document.querySelectorAll('.runs-table tbody tr');
+  var shown = 0;
+  rows.forEach(function(row) {
+    var name = row.getAttribute('data-name') || '';
+    var status = row.getAttribute('data-status') || '';
+    var nameMatch = !nameQ || name.indexOf(nameQ) !== -1;
+    var statusMatch = !statusQ || status === statusQ;
+    if (nameMatch && statusMatch) { row.style.display = ''; shown++; }
+    else { row.style.display = 'none'; }
+  });
+  document.getElementById('runs-count').textContent = '显示 ' + shown + '/' + rows.length + ' 条';
+}
+
+/* Filter resources grid */
+function filterResources() {
+  var q = document.getElementById('res-search').value.toLowerCase();
+  var cards = document.querySelectorAll('.res-card');
+  var shown = 0;
+  cards.forEach(function(card) {
+    var search = card.getAttribute('data-search') || '';
+    if (!q || search.indexOf(q) !== -1) { card.style.display = ''; shown++; }
+    else { card.style.display = 'none'; }
+  });
+  document.getElementById('res-count').textContent = '显示 ' + shown + '/' + cards.length + ' 个';
+}
+
+/* Generate report */
+function generateReport(name) {
+  var btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  return fetch('/api/generate-report', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'name=' + encodeURIComponent(name)
+  }).then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        showToast('报告已生成: ' + name);
+        btn.outerHTML = '<a href="/run/' + name + '/report.html" target="_blank">查看</a>';
+        return true;
+      } else {
+        showToast('生成失败: ' + (d.error || '未知错误'), true);
+        btn.disabled = false;
+        btn.textContent = '生成';
+        return false;
+      }
+    }).catch(function(e) {
+      showToast('请求失败: ' + e, true);
+      btn.disabled = false;
+      btn.textContent = '生成';
+      return false;
+    });
+}
+
+/* Batch generate all reports */
+function generateAllReports() {
+  var btns = document.querySelectorAll('.btn-gen[data-run]');
+  if (btns.length === 0) {
+    showToast('所有运行记录已有报告');
+    return;
+  }
+  var total = btns.length;
+  var genBtn = document.getElementById('btn-gen-all');
+  genBtn.disabled = true;
+  genBtn.textContent = '生成中 (0/' + total + ')...';
+  var done = 0;
+  var queue = Array.from(btns);
+
+  function next() {
+    if (queue.length === 0) {
+      genBtn.textContent = '全部完成 (' + done + '/' + total + ')';
+      setTimeout(function() { genBtn.disabled = false; genBtn.textContent = '一键生成全部报告'; }, 2000);
+      return;
+    }
+    var btn = queue.shift();
+    var name = btn.getAttribute('data-run');
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+    fetch('/api/generate-report', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: 'name=' + encodeURIComponent(name)
+    }).then(function(r) { return r.json(); })
+      .then(function(d) {
+        done++;
+        genBtn.textContent = '生成中 (' + done + '/' + total + ')...';
+        if (d.ok) {
+          btn.outerHTML = '<a href="/run/' + name + '/report.html" target="_blank">查看</a>';
+        } else {
+          btn.disabled = false;
+          btn.textContent = '失败';
+          btn.style.borderColor = 'var(--red)';
+          btn.style.color = 'var(--red)';
+        }
+        next();
+      }).catch(function() { done++; next(); });
+  }
+  next();
+}
+</script>
+</body>
+</html>
