@@ -3092,3 +3092,201 @@ def get_touch_abs_max(device_serial: Optional[str], keep_device: Optional[str]) 
     return None
 
 
+# =============================================================================
+# P2 MCP tools - clipboard, notifications, wifi, airplane, shell, device info
+# =============================================================================
+
+# 允许的 shell 命令前缀 / Allowed command prefixes for execute_shell
+_SHELL_WHITELIST = frozenset(
+    [
+        "pm",
+        "am",
+        "dumpsys",
+        "getprop",
+        "cmd",
+        "input",
+        "wm",
+        "settings",
+        "content",
+        "service",
+        "logcat",
+        "ps",
+        "top",
+        "cat",
+        "ls",
+        "df",
+        "id",
+    ]
+)
+
+# 禁止的命令前缀 / Forbidden command prefixes
+_SHELL_FORBIDDEN = frozenset(["su", "reboot", "shutdown", "mkfs", "dd"])
+
+
+def get_clipboard_text(device_serial: Optional[str] = None) -> dict:
+    """获取剪贴板文本（Android 10+）。
+    Get clipboard text (Android 10+).
+
+    Args:
+        device_serial: 设备序列号 / Device serial
+
+    Returns:
+        dict: {"ok": True, "text": str} 或 {"ok": False, "error": str}
+    """
+    try:
+        cmd = adb_prefix(device_serial) + ["shell", "cmd", "clipboard", "get-primary-clip"]
+        proc = CommandRunner.run(cmd, check=False, log_output=False)
+        if proc.returncode != 0:
+            return {"ok": False, "error": f"clipboard command failed: {proc.stderr or proc.stdout}"}
+        return {"ok": True, "text": (proc.stdout or "").strip()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def get_notifications(device_serial: Optional[str] = None) -> dict:
+    """获取通知栏通知列表。
+    Get notification list from notification bar.
+
+    Args:
+        device_serial: 设备序列号 / Device serial
+
+    Returns:
+        dict: {"ok": True, "notifications": [{"package": str, "title": str, "text": str}]}
+    """
+    try:
+        cmd = adb_prefix(device_serial) + ["shell", "dumpsys", "notification", "--noredact"]
+        proc = CommandRunner.run(cmd, check=False, log_output=False)
+        if proc.returncode != 0:
+            return {"ok": False, "error": f"dumpsys notification failed: {proc.stderr or proc.stdout}", "notifications": []}
+        out = proc.stdout or ""
+        notifications: list[dict[str, str]] = []
+        # 按 NotificationRecord 分段 / Split by NotificationRecord blocks
+        blocks = re.split(r"\n\s*NotificationRecord\s*\(", out)
+        for block in blocks:
+            pkg = ""
+            title = ""
+            text = ""
+            for line in block.splitlines():
+                line_stripped = line.strip()
+                # pkg from first line or inside block: pkg=com.example
+                pkg_m = re.search(r"pkg=([^\s]+)", line_stripped)
+                if pkg_m:
+                    pkg = pkg_m.group(1).strip()
+                # android.title=Value or android.title=String (Value)
+                if "android.title=" in line_stripped:
+                    m = re.search(r"android\.title=String\s*\(\s*([^)]*)\s*\)", line_stripped)
+                    if m:
+                        title = m.group(1).strip()
+                    else:
+                        title = line_stripped.split("android.title=", 1)[1].strip()
+                if "android.text=" in line_stripped:
+                    m = re.search(r"android\.text=String\s*\(\s*([^)]*)\s*\)", line_stripped)
+                    if m:
+                        text = m.group(1).strip()
+                    else:
+                        text = line_stripped.split("android.text=", 1)[1].strip()
+            if pkg:
+                notifications.append({"package": pkg, "title": title, "text": text})
+        return {"ok": True, "notifications": notifications}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "notifications": []}
+
+
+def set_wifi_enabled(device_serial: Optional[str] = None, enabled: bool = True) -> dict:
+    """开关 WiFi。
+    Toggle WiFi on/off.
+
+    Args:
+        device_serial: 设备序列号 / Device serial
+        enabled: True 开启 / False 关闭 / True to enable, False to disable
+
+    Returns:
+        dict: {"ok": True, "wifi_on": bool}
+    """
+    try:
+        action = "enable" if enabled else "disable"
+        cmd = adb_prefix(device_serial) + ["shell", "svc", "wifi", action]
+        proc = CommandRunner.run(cmd, check=False, log_output=False)
+        if proc.returncode != 0:
+            return {"ok": False, "error": f"svc wifi {action} failed: {proc.stderr or proc.stdout}", "wifi_on": enabled}
+        return {"ok": True, "wifi_on": enabled}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "wifi_on": enabled}
+
+
+def set_airplane_mode(device_serial: Optional[str] = None, enabled: bool = True) -> dict:
+    """开关飞行模式。
+    Toggle airplane mode.
+
+    Args:
+        device_serial: 设备序列号 / Device serial
+        enabled: True 开启 / False 关闭 / True to enable, False to disable
+
+    Returns:
+        dict: {"ok": True, "airplane_on": bool}
+    """
+    try:
+        val = "1" if enabled else "0"
+        cmd1 = adb_prefix(device_serial) + ["shell", "settings", "put", "global", "airplane_mode_on", val]
+        proc1 = CommandRunner.run(cmd1, check=False, log_output=False)
+        if proc1.returncode != 0:
+            return {"ok": False, "error": f"settings put failed: {proc1.stderr or proc1.stdout}", "airplane_on": enabled}
+        cmd2 = adb_prefix(device_serial) + ["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE"]
+        CommandRunner.run(cmd2, check=False, log_output=False)
+        return {"ok": True, "airplane_on": enabled}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "airplane_on": enabled}
+
+
+def execute_shell(
+    device_serial: Optional[str] = None,
+    command: str = "",
+    timeout_s: float = 30.0,
+) -> dict:
+    """执行受限 shell 命令（白名单限制）。
+    Execute restricted shell command (whitelist limited).
+
+    Args:
+        device_serial: 设备序列号 / Device serial
+        command: shell 命令 / Shell command
+        timeout_s: 超时秒数 / Timeout in seconds
+
+    Returns:
+        dict: {"ok": True, "stdout": str, "stderr": str, "returncode": int}
+        或 {"ok": False, "error": str}
+    """
+    try:
+        cmd_stripped = (command or "").strip()
+        if not cmd_stripped:
+            return {"ok": False, "error": "command is required"}
+        parts = cmd_stripped.split()
+        first = parts[0] if parts else ""
+        # 检查白名单 / Check whitelist
+        if first not in _SHELL_WHITELIST:
+            return {"ok": False, "error": f"command prefix '{first}' not in whitelist"}
+        # 检查禁止前缀 / Check forbidden prefixes
+        for forbidden in _SHELL_FORBIDDEN:
+            if cmd_stripped.startswith(forbidden):
+                return {"ok": False, "error": f"command prefix '{forbidden}' is forbidden"}
+        if cmd_stripped.startswith("rm -rf") or cmd_stripped.startswith("rm -fr"):
+            return {"ok": False, "error": "rm -rf is forbidden"}
+        full_cmd = adb_prefix(device_serial) + ["shell"] + parts
+        proc = CommandRunner.run(full_cmd, check=False, log_output=False, timeout_s=timeout_s)
+        return {
+            "ok": True,
+            "stdout": (proc.stdout or "").strip(),
+            "stderr": (proc.stderr or "").strip(),
+            "returncode": proc.returncode,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def get_device_model_and_version(device_serial: Optional[str]) -> tuple[str, str]:
+    """获取设备型号和系统版本（用于 phone_get_device_info）。
+    Get device model and OS version from getprop.
+    """
+    model = _getprop(device_serial, "ro.product.model") or ""
+    version = _getprop(device_serial, "ro.build.version.release") or ""
+    return (model, version)
+

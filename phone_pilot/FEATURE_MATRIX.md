@@ -2,7 +2,7 @@
 
 > 本文档追踪 phone_pilot 在三个平台上的功能实现状态。  
 > 每实现一个功能后必须更新本文档。  
-> 最后更新: 2026-02-10 (v0.5.0 发布: 存储路径统一至 .recordings/、接口文档完善、内存分析集成)
+> 最后更新: 2026-02-06 (MCP 工具层文档更新)
 
 ## 状态说明
 
@@ -264,6 +264,41 @@
 | auto_report 开关 | 已实现 | 已实现 | 已实现 | ScriptContext.auto_report |
 | 深/浅色自适应 | 已实现 | 已实现 | 已实现 | @media prefers-color-scheme |
 
+## 21. MCP 工具层 (MCP Tools) — 新增
+
+> 以下为 MCP server 暴露的 `phone_*` 工具，Agent 通过 MCP 协议直接调用。
+
+| 功能点 | Android | Harmony | iOS | 备注 |
+|--------|---------|---------|-----|------|
+| phone_go_home (返回桌面) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.go_home |
+| phone_go_back (返回上一页) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.go_back |
+| phone_unlock (解锁) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.unlock |
+| phone_clear_background (清后台) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.clear_background |
+| phone_clear_data (清数据) | 已实现 | 已实现 | 未实现(有方案) | AppDriver.clear_data |
+| phone_open_deeplink (深链接) | 已实现 | 未实现(有方案) | 未实现(有方案) | DeviceDriver.open_deeplink |
+| phone_start_recording (开始录屏) | 已实现 | 已实现 | 未实现(有方案) | MCP 状态管理 |
+| phone_stop_recording (停止录屏) | 已实现 | 已实现 | 未实现(有方案) | 自动 pull + remove |
+| phone_start_logcat (开始日志) | 已实现 | 已实现 | 未实现(有方案) | MCP 状态管理 |
+| phone_stop_logcat (停止日志) | 已实现 | 已实现 | 未实现(有方案) | 自动停止采集 |
+| phone_search_logcat (搜索日志) | 已实现 | 已实现 | 未实现(有方案) | 支持正则 |
+| phone_scroll_to_find (滚动查找) | 已实现 | 已实现 | 未实现(有方案) | 复用 script_api |
+| phone_wait_for_element (等待元素) | 已实现 | 已实现 | 未实现(有方案) | 轮询 UI 树 |
+| phone_dismiss_popup (关闭弹窗) | 已实现 | 已实现 | 未实现(有方案) | PopupGuard |
+| phone_smart_find (智能查找) | 已实现 | 已实现 | 未实现(有方案) | UIA+OCR+弹窗 |
+| phone_launch_from_home (桌面启动) | 已实现 | 已实现 | 未实现(有方案) | script_api |
+| phone_install_app (安装) | 已实现 | 已实现 | 未实现(有方案) | APK/HAP |
+| phone_uninstall_app (卸载) | 已实现 | 已实现 | 未实现(有方案) | AppDriver.uninstall |
+| phone_memory_snapshot (内存快照) | 已实现 | 不适用 | 未实现(有方案) | Android meminfo |
+| phone_memory_check_leak (泄漏检测) | 已实现 | 不适用 | 未实现(有方案) | Activity 泄漏 |
+| phone_pull_file (拉取文件) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.pull_file |
+| phone_push_file (推送文件) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.push_file |
+| phone_read_clipboard (读剪贴板) | 已实现 | 未实现(有方案) | 未实现(有方案) | Android 10+ |
+| phone_get_notifications (通知) | 已实现 | 未实现(有方案) | 未实现(有方案) | dumpsys notification |
+| phone_toggle_wifi (WiFi) | 已实现 | 未实现(有方案) | 未实现(有方案) | svc wifi |
+| phone_toggle_airplane (飞行模式) | 已实现 | 未实现(有方案) | 未实现(有方案) | settings + broadcast |
+| phone_execute_shell (受限 shell) | 已实现 | 未实现(有方案) | 未实现(有方案) | 白名单限制 |
+| phone_get_device_info (设备信息) | 已实现 | 已实现 | 未实现(有方案) | 轻量级信息 |
+
 ---
 
 ## iOS 技术路线 (规划中)
@@ -280,6 +315,6 @@ iOS 目前仅有 stub 文件，所有方法抛出 `NotImplementedError`。技术
 
 | 平台 | 已实现 | 部分实现 | 未实现(有方案) | 未实现 | 不适用 |
 |------|--------|----------|----------------|--------|--------|
-| Android | ~90 | 0 | 0 | ~5 | 0 |
-| Harmony | ~72 | 0 | ~10 | ~5 | ~8 |
+| Android | ~120 | 0 | 0 | ~5 | 0 |
+| Harmony | ~90 | 0 | ~20 | ~5 | ~8 |
 | iOS | 0 | 0 | ~80 | ~5 | ~8 |

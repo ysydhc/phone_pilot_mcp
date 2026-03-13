@@ -127,6 +127,19 @@ class AppDriver(Protocol):
         """Clear application data."""
         ...
 
+    def uninstall(self, package: str, keep_data: bool = False) -> dict:
+        """卸载应用。
+        Uninstall an application.
+
+        Args:
+            package: 应用包名 / Package name to uninstall
+            keep_data: 是否保留数据 / Whether to keep app data
+
+        Returns:
+            dict: {"ok": bool, ...}
+        """
+        ...
+
 
 @runtime_checkable
 class DeviceDriver(Protocol):
@@ -199,6 +212,20 @@ class DeviceDriver(Protocol):
 
     # ---- high-level skills ----
 
+    def open_deeplink(self, uri: str, package: Optional[str] = None, **kwargs) -> dict:
+        """通过深链接/scheme URI 打开页面。
+        Open a page via deeplink/scheme URI.
+
+        Args:
+            uri: 深链接地址 / Deeplink URI (e.g. "myapp://page/detail")
+            package: 可选，限定目标应用包名 / Optional target package name
+            **kwargs: 额外参数 / Extra arguments
+
+        Returns:
+            dict: {"ok": bool, ...}
+        """
+        ...
+
     def launch_from_home(self, app_name: str, **kwargs) -> dict:
         """Launch an app from the home screen (go home → find icon → tap)."""
         ...
@@ -208,6 +235,19 @@ class DeviceDriver(Protocol):
         ...
 
     # ---- file transfer ----
+
+    def push_file(self, local_path: str, remote_path: str) -> dict:
+        """推送本地文件到设备。
+        Push a local file to device.
+
+        Args:
+            local_path: 本地文件路径 / Local file path
+            remote_path: 设备目标路径 / Remote destination path
+
+        Returns:
+            dict: {"ok": bool, ...}
+        """
+        ...
 
     def pull_file(self, remote_path: str, local_path: str) -> dict:
         """Pull a file from device to host.

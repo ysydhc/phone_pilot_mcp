@@ -114,6 +114,47 @@ phone_run_script(path="workflow/navigate.py")
 phone_verify(device_serial, assertions='[...]')
 phone_checkpoint_save(device_serial, name="before")
 phone_checkpoint_diff(device_serial, name="before")
+
+# 导航与设备控制
+phone_go_home(device_serial)
+phone_go_back(device_serial)
+phone_unlock(device_serial, pin="1234")
+phone_clear_background(device_serial)
+phone_clear_data(device_serial, package="com.example.app")
+phone_open_deeplink(device_serial, uri="myapp://page/detail")
+
+# 录屏与日志
+phone_start_recording(device_serial, name="test")
+phone_stop_recording(device_serial)  # 自动拉取到本地
+phone_start_logcat(device_serial, tags="MyTag", level="D")
+phone_stop_logcat(device_serial)
+phone_search_logcat(device_serial, pattern="Error", regex=True)
+
+# 智能查找与等待
+phone_scroll_to_find(device_serial, text="目标文本", direction="up_down")
+phone_wait_for_element(device_serial, text="加载完成", timeout_s=15)
+phone_dismiss_popup(device_serial)
+phone_smart_find(device_serial, text="目标", use_ocr=True)
+
+# 应用管理（扩展）
+phone_install_app(device_serial, apk_path="/path/to/app.apk")
+phone_uninstall_app(device_serial, package="com.example.app")
+phone_launch_from_home(device_serial, query="微信")
+
+# 内存分析
+phone_memory_snapshot(device_serial, package="com.example.app")
+phone_memory_check_leak(device_serial, package="com.example.app")
+
+# 文件操作
+phone_pull_file(device_serial, remote_path="/sdcard/log.txt")
+phone_push_file(device_serial, local_path="test.txt", remote_path="/sdcard/test.txt")
+
+# 高级功能
+phone_read_clipboard(device_serial)
+phone_get_notifications(device_serial)
+phone_toggle_wifi(device_serial, enabled=False)
+phone_execute_shell(device_serial, command="dumpsys battery")
+phone_get_device_info(device_serial)
 ```
 
 `phone_get_page_state` 是 LLM 交互的核心工具：一次调用获取当前页面的 Activity、所有可交互元素（带编号和坐标）、可滚动区域和全部文本。设置 `annotate_elements=True` 会在截图上叠加元素编号和边框标注，LLM 看图后可直接用 `phone_tap_element(index=3)` 点击目标元素，无需多次往返查询。

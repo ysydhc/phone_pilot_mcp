@@ -379,6 +379,25 @@ class AndroidAppDriver:
             "stderr": (proc.stderr or "").strip(),
         }
 
+    def uninstall(self, package: str, keep_data: bool = False) -> dict:
+        """卸载应用（通过 adb shell pm uninstall）。
+        Uninstall app via adb shell pm uninstall.
+        """
+        from phone_pilot.android.adb.runner import CommandRunner
+        from phone_pilot.android.adb.utils import adb_prefix
+
+        cmd = adb_prefix(self._device_serial) + ["shell", "pm", "uninstall"]
+        if keep_data:
+            cmd.append("-k")
+        cmd.append(package)
+        try:
+            proc = CommandRunner.run(cmd, check=False)
+            # pm uninstall 成功时 stdout 包含 "Success"
+            success = proc.returncode == 0 and "Success" in (proc.stdout or "")
+            return {"ok": success, "package": package, "output": (proc.stdout or "").strip()}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "package": package}
+
 
 class AndroidDriver:
     """
@@ -463,6 +482,18 @@ class AndroidDriver:
 
     # ---- file transfer ----
 
+    def push_file(self, local_path: str, remote_path: str) -> dict:
+        """推送文件到设备，委托 adb/utils.push_file。
+        Push file to device, delegating to adb/utils.push_file.
+        """
+        from phone_pilot.android.adb.utils import push_file as _push
+
+        try:
+            _push(self._device_serial, local_path, remote_path)
+            return {"ok": True, "local_path": local_path, "remote_path": remote_path}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def pull_file(self, remote_path: str, local_path: str) -> dict:
         """Pull a file from device to host via ``adb pull``."""
         from phone_pilot.android.adb.utils import adb_prefix
@@ -496,6 +527,13 @@ class AndroidDriver:
         }
 
     # ---- high-level skills ----
+
+    def open_deeplink(self, uri: str, package: Optional[str] = None, **kwargs) -> dict:
+        """通过深链接打开页面，委托 device/utils.open_deeplink。
+        Open page via deeplink, delegating to device/utils.open_deeplink.
+        """
+        from phone_pilot.android.device.utils import open_deeplink
+        return open_deeplink(self._device_serial, uri, package=package)
 
     def launch_from_home(self, app_name: str, **kwargs) -> dict:
         """Launch an app from the home screen."""

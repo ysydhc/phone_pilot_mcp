@@ -418,6 +418,16 @@ class HarmonyAppDriver:
             from phone_pilot.harmony.device.utils import clear_app_data
             return clear_app_data(self._serial, package)
 
+    def uninstall(self, package: str, keep_data: bool = False) -> dict:
+        """卸载应用（委托 uninstall_app，Harmony 暂不支持 keep_data）。
+        Uninstall app, delegating to uninstall_app (keep_data not supported on Harmony).
+        """
+        try:
+            result = self.uninstall_app(package)
+            return {"ok": result.get("ok", True), "package": package, **result}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "package": package}
+
     # -- Extra methods (not in Protocol) --
 
     def install_app(self, hap_path: str) -> dict:
@@ -546,6 +556,23 @@ class HarmonyDriver:
 
     # ---- file transfer ----
 
+    def push_file(self, local_path: str, remote_path: str) -> dict:
+        """推送本地文件到设备，委托 hdc/utils.push_file。
+        Push local file to device, delegating to hdc/utils.push_file.
+        """
+        from phone_pilot.harmony.hdc.utils import push_file as _push
+
+        try:
+            result = _push(self._device_serial, local_path, remote_path)
+            return {
+                **result,
+                "ok": result.get("ok", False),
+                "local_path": local_path,
+                "remote_path": remote_path,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def pull_file(self, remote_path: str, local_path: str) -> dict:
         """Pull a file from device to host via ``hdc file recv``."""
         from phone_pilot.harmony.hdc.utils import pull_file as _hdc_pull
@@ -567,6 +594,12 @@ class HarmonyDriver:
         }
 
     # ---- high-level skills ----
+
+    def open_deeplink(self, uri: str, package: Optional[str] = None, **kwargs) -> dict:
+        """深链接 — HarmonyOS 暂不支持。
+        Deeplink — not supported on HarmonyOS yet.
+        """
+        return {"ok": False, "error": "not_supported", "platform": "harmony"}
 
     def launch_from_home(self, app_name: str, **kwargs) -> dict:
         """Launch an app from the home screen (HarmonyOS flow)."""

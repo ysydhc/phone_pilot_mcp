@@ -27,6 +27,9 @@ import asyncio
 import base64
 import json
 import pathlib
+import re
+import time
+from pathlib import Path
 from typing import Any, Optional
 
 import sys
@@ -42,6 +45,7 @@ def _import_fastmcp():
     try:
         from mcp.server import FastMCP  # type: ignore
         import mcp.server as _mcp_server  # type: ignore
+
         mod_path = getattr(_mcp_server, "__file__", "") or ""
         # If it resolves to our local package, fall back to site-packages search.
         if "phone_pilot/mcp" not in mod_path.replace("\\", "/"):
@@ -66,10 +70,13 @@ def _import_fastmcp():
         sys.path = cleaned
 
         mod = sys.modules.get("mcp")
-        if mod and "phone_pilot/mcp" in (getattr(mod, "__file__", "") or "").replace("\\", "/"):
+        if mod and "phone_pilot/mcp" in (getattr(mod, "__file__", "") or "").replace(
+            "\\", "/"
+        ):
             del sys.modules["mcp"]
 
         from mcp.server import FastMCP as ExternalFastMCP  # type: ignore
+
         return ExternalFastMCP
     finally:
         sys.path = original_sys_path
@@ -89,30 +96,50 @@ from phone_pilot.core.resource import (  # noqa: E402
     resolve_or_cache_path,
 )
 from phone_pilot.android.driver import AndroidDriver  # noqa: E402
+from phone_pilot.android.device.utils import (  # noqa: E402
+    execute_shell,
+    get_clipboard_text,
+    get_device_model_and_version,
+    get_notifications,
+    set_airplane_mode,
+    set_wifi_enabled,
+)
 from phone_pilot.harmony.driver import HarmonyDriver  # noqa: E402
+from phone_pilot.script_api.context import ScriptContext, RetryExhausted  # noqa: E402
+from phone_pilot.script_api.runner import scroll_to_find  # noqa: E402
+from phone_pilot.script_api.popup_guard import PopupGuard  # noqa: E402
+from phone_pilot.script_api.find import find_text  # noqa: E402
+from phone_pilot.script_api.actions import launch_from_home  # noqa: E402
 
 # Create MCP server instance
 mcp = FastMCP("phone_pilot")
 
+# 按设备保存录屏远程/本地路径，stop 时拉取并清理
+# Per-device recording paths for pull and cleanup on stop
+_recording_state: dict[str, dict] = {}
+
+# 按设备保存当前 logcat 输出路径 / Per-device logcat output path
+_logcat_state: dict[str, str] = {}
 
 
 # =============================================================================
 # Driver Factory
 # =============================================================================
 
+
 def get_driver(device_serial: str, platform: str = "android") -> DeviceDriver:
     """
     Get a device driver instance based on platform.
-    
+
     Args:
         device_serial: Device serial/identifier
         platform: Platform type ("android", "ios", "harmony")
-        
+
     Returns:
         DeviceDriver instance
     """
     platform = (platform or "android").strip().lower()
-    
+
     if platform == "android":
         return AndroidDriver(device_serial)
     if platform == "ios":
@@ -128,7 +155,37 @@ def get_skills(device_serial: str, platform: str = "android") -> DeviceSkills:
     return DeviceSkills(driver)
 
 
-def _resolve_device_serial(device_serial: Optional[str], platform: str = "auto") -> tuple[Optional[str], Optional[str], Optional[dict]]:
+def _make_script_context(device_serial: str, platform: str) -> ScriptContext:
+    """构造仅含 device 的 ScriptContext，不创建 RunSession。
+    Build minimal ScriptContext for MCP reuse without RunSession.
+
+    仅设置 device_serial 和 platform，其他观测/自愈均关闭，
+    适用于 MCP 单次调用场景。
+    Only sets device_serial and platform, disables observations,
+    suitable for stateless MCP single-call usage.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        ScriptContext: 最小化上下文 / Minimal context
+    """
+    return ScriptContext(
+        device_serial=device_serial,
+        platform=platform,
+        auto_log=False,
+        auto_screenshot=False,
+        auto_dump_hprof=False,
+        auto_meminfo=False,
+        auto_report=False,
+        popup_guard=False,
+    )
+
+
+def _resolve_device_serial(
+    device_serial: Optional[str], platform: str = "auto"
+) -> tuple[Optional[str], Optional[str], Optional[dict]]:
     """
     Resolve device_serial and platform from adb/hdc.
     Returns: (resolved_serial, resolved_platform, error_dict_or_none)
@@ -183,14 +240,18 @@ def _resolve_device_serial(device_serial: Optional[str], platform: str = "auto")
         # Check if it's a Harmony device
         if device_serial in harmony_serials:
             return device_serial, "harmony", None
-        return None, None, {
-            "ok": False,
-            "error": "device_not_found",
-            "device_serial": device_serial,
-            "note": "设备未找到。请确认设备已连接且授权调试。",
-            "available_android": android_serials,
-            "available_harmony": harmony_serials,
-        }
+        return (
+            None,
+            None,
+            {
+                "ok": False,
+                "error": "device_not_found",
+                "device_serial": device_serial,
+                "note": "设备未找到。请确认设备已连接且授权调试。",
+                "available_android": android_serials,
+                "available_harmony": harmony_serials,
+            },
+        )
 
     # Auto-select: prefer the specified platform, then any available
     if platform == "android" and android_serials:
@@ -202,16 +263,21 @@ def _resolve_device_serial(device_serial: Optional[str], platform: str = "auto")
     if harmony_serials:
         return harmony_serials[0], "harmony", None
 
-    return None, None, {
-        "ok": False,
-        "error": "no_device_connected",
-        "note": "未发现可用设备。请连接 Android 或 HarmonyOS 设备。",
-    }
+    return (
+        None,
+        None,
+        {
+            "ok": False,
+            "error": "no_device_connected",
+            "note": "未发现可用设备。请连接 Android 或 HarmonyOS 设备。",
+        },
+    )
 
 
 # =============================================================================
 # Device Management Tools
 # =============================================================================
+
 
 @mcp.tool()
 async def phone_list_devices() -> dict:
@@ -228,7 +294,7 @@ async def phone_list_devices() -> dict:
     from phone_pilot.android.adb.utils import adb_executable
     from phone_pilot.android.adb.runner import CommandRunner
     from phone_pilot.android.adb.parsers import parse_adb_devices
-    
+
     result = []
 
     # Android devices (adb)
@@ -266,6 +332,7 @@ async def phone_list_devices() -> dict:
                 device_info = None
                 try:
                     from phone_pilot.harmony.hmdriver_bridge import get_hmdriver
+
                     hm = get_hmdriver(serial)
                     info = hm.device_info
                     device_info = {
@@ -320,7 +387,9 @@ async def phone_build_device_profile(
         return {"ok": False, "error": "device_serial is required"}
 
     # Detect platform if auto
-    resolved_serial, resolved_platform, err = _resolve_device_serial(device_serial, platform)
+    resolved_serial, resolved_platform, err = _resolve_device_serial(
+        device_serial, platform
+    )
     if err:
         return err
     plat = resolved_platform or "android"
@@ -328,9 +397,11 @@ async def phone_build_device_profile(
     try:
         if plat == "harmony":
             from phone_pilot.harmony.device.store import capture_device_profile
+
             return capture_device_profile(resolved_serial, out_dir=out_dir)
         else:
             from phone_pilot.android.device.store import capture_device_profile
+
             return capture_device_profile(
                 resolved_serial,
                 out_dir=out_dir,
@@ -397,9 +468,13 @@ def _render_device_markdown(
     lines.append(f"- Updated At: {_fmt_value(device.get('updated_at'))}")
     lines.append("")
     lines.append("## Screen & Touch")
-    lines.append(f"- Screen: {_fmt_value(device.get('screen_w'))}x{_fmt_value(device.get('screen_h'))}")
+    lines.append(
+        f"- Screen: {_fmt_value(device.get('screen_w'))}x{_fmt_value(device.get('screen_h'))}"
+    )
     lines.append(f"- Density DPI: {_fmt_value(device.get('density_dpi'))}")
-    lines.append(f"- Touch Abs Max: {_fmt_value(device.get('abs_max_x'))} x {_fmt_value(device.get('abs_max_y'))}")
+    lines.append(
+        f"- Touch Abs Max: {_fmt_value(device.get('abs_max_x'))} x {_fmt_value(device.get('abs_max_y'))}"
+    )
     lines.append("")
     lines.append("## Launcher")
     lines.append(f"- Package: `{_fmt_value(device.get('launcher_package'))}`")
@@ -408,7 +483,9 @@ def _render_device_markdown(
     lines.append("")
     lines.append(f"## Apps ({len(apps)})")
     if apps:
-        lines.append("| AppName | Package | VersionCode | VersionName | IconPath | IconSource | IconError |")
+        lines.append(
+            "| AppName | Package | VersionCode | VersionName | IconPath | IconSource | IconError |"
+        )
         lines.append("| --- | --- | --- | --- | --- | --- | --- |")
         subset = apps if apps_limit <= 0 else apps[: int(apps_limit)]
         for app in subset:
@@ -438,7 +515,9 @@ def _render_device_markdown(
             comp = _fmt_value(lp.get("component"))
             cmd = _fmt_value(lp.get("adb_cmd"))
             src = _fmt_value(lp.get("source"))
-            lines.append(f"| `{_md_escape(pkg)}` | {_md_escape(act)} | `{_md_escape(comp)}` | `{_md_escape(cmd)}` | {_md_escape(src)} |")
+            lines.append(
+                f"| `{_md_escape(pkg)}` | {_md_escape(act)} | `{_md_escape(comp)}` | `{_md_escape(cmd)}` | {_md_escape(src)} |"
+            )
     else:
         lines.append("_No launch profiles found._")
     lines.append("")
@@ -478,22 +557,29 @@ async def phone_export_device_info_md(
     from phone_pilot.android.device.store import get_device_profile_from_store
 
     from phone_pilot.core.storage import recordings_root
+
     out_root = recordings_root(out_dir)
-    snapshot = load_device_snapshot(str(out_root), device_id=device_id, device_serial=device_serial)
+    snapshot = load_device_snapshot(
+        str(out_root), device_id=device_id, device_serial=device_serial
+    )
 
     if snapshot.get("ok"):
         device = snapshot.get("device") or {}
         apps = list(snapshot.get("apps") or [])
         launch_profiles = list(snapshot.get("launch_profiles") or [])
     else:
-        prof = get_device_profile_from_store(device_id or device_serial or "", out_dir=str(out_root))
+        prof = get_device_profile_from_store(
+            device_id or device_serial or "", out_dir=str(out_root)
+        )
         if not (isinstance(prof, dict) and prof.get("ok")):
             return {"ok": False, "error": "device_not_found", "detail": snapshot}
         p = prof.get("profile") or {}
         os_info = (p.get("os") or {}) if isinstance(p.get("os"), dict) else {}
         screen = (p.get("screen") or {}) if isinstance(p.get("screen"), dict) else {}
         touch = (p.get("touch") or {}) if isinstance(p.get("touch"), dict) else {}
-        launcher = (p.get("launcher") or {}) if isinstance(p.get("launcher"), dict) else {}
+        launcher = (
+            (p.get("launcher") or {}) if isinstance(p.get("launcher"), dict) else {}
+        )
         device = {
             "device_id": p.get("device_id"),
             "device_serial": p.get("device_serial"),
@@ -520,15 +606,28 @@ async def phone_export_device_info_md(
             "updated_at": p.get("updated_at"),
             "ts": p.get("ts"),
         }
-        apps = list(((p.get("apps") or {}) if isinstance(p.get("apps"), dict) else {}).get("apps") or [])
-        launch_profiles = _load_launch_profiles_from_json(out_root, device_serial or device_id or "")
+        apps = list(
+            ((p.get("apps") or {}) if isinstance(p.get("apps"), dict) else {}).get(
+                "apps"
+            )
+            or []
+        )
+        launch_profiles = _load_launch_profiles_from_json(
+            out_root, device_serial or device_id or ""
+        )
 
-    md = _render_device_markdown(device, apps, launch_profiles, apps_limit=int(apps_limit or 0))
+    md = _render_device_markdown(
+        device, apps, launch_profiles, apps_limit=int(apps_limit or 0)
+    )
     if not md_path:
         did = device.get("device_id") or device_id or device_serial or "device"
         md_path = str(out_root / "devices" / f"device_info_{did}.md")
     md_file = pathlib.Path(md_path).expanduser().resolve()
-    legacy = (out_root / f"device_info_{device_serial or device_id}.md") if (device_serial or device_id) else None
+    legacy = (
+        (out_root / f"device_info_{device_serial or device_id}.md")
+        if (device_serial or device_id)
+        else None
+    )
     if legacy and legacy.exists() and not md_file.exists():
         try:
             md_file.parent.mkdir(parents=True, exist_ok=True)
@@ -537,13 +636,21 @@ async def phone_export_device_info_md(
             pass
     md_file.parent.mkdir(parents=True, exist_ok=True)
     md_file.write_text(md, encoding="utf-8")
-    return {"ok": True, "md_path": str(md_file), "device_id": device.get("device_id"), "device_serial": device.get("device_serial")}
+    return {
+        "ok": True,
+        "md_path": str(md_file),
+        "device_id": device.get("device_id"),
+        "device_serial": device.get("device_serial"),
+    }
 
 
-def _load_launch_profiles_from_json(out_root: pathlib.Path, device_serial: str) -> list[dict[str, Any]]:
+def _load_launch_profiles_from_json(
+    out_root: pathlib.Path, device_serial: str
+) -> list[dict[str, Any]]:
     idx = out_root / "launch_profiles" / "index.json"
     legacy = out_root / "launch_profiles" / "index.jsonl"
     from phone_pilot.core.storage import migrate_jsonl_to_json, read_json
+
     migrate_jsonl_to_json(idx, legacy)
     if not idx.exists():
         return []
@@ -600,7 +707,7 @@ async def phone_screenshot(
     try:
         driver = get_driver(device_serial, platform)
         png_bytes = driver.screen.screenshot()
-        
+
         if save_path:
             path = pathlib.Path(save_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -652,9 +759,300 @@ async def phone_get_screen_size(
         return {"ok": False, "error": str(e)}
 
 
+@mcp.tool()
+async def phone_start_recording(
+    device_serial: str = "",
+    name: str = "rec",
+    out_dir: str = "./.recordings",
+    platform: str = "auto",
+) -> dict:
+    """开始录屏。
+    Start screen recording on device.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        name: 录屏文件名前缀 / Recording file name prefix
+        out_dir: 输出根目录 / Output root directory
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "local_path": str, "device_serial": str}
+        或 {"ok": False, "error": "already_recording"} / {"ok": False, "error": str}
+    """
+    try:
+        resolved_serial, resolved_platform, err = _resolve_device_serial(
+            device_serial or None, platform
+        )
+        if err:
+            return err
+
+        if resolved_serial in _recording_state:
+            return {"ok": False, "error": "already_recording"}
+
+        ts = int(time.time())
+        local_path = Path(out_dir) / "recordings" / f"{name}_{ts}.mp4"
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+
+        remote_filename = f"phone_pilot_rec_{ts}.mp4"
+        driver = get_driver(resolved_serial, resolved_platform or "android")
+        result = driver.screen.start_screenrecord(path=remote_filename)
+
+        if not result.get("ok"):
+            return {
+                "ok": False,
+                "error": result.get("error", "start_screenrecord_failed"),
+            }
+
+        # Android 内部拼 /sdcard/{path}；Harmony 返回 remote_path
+        remote_path = result.get("remote_path") or f"/sdcard/{remote_filename}"
+        _recording_state[resolved_serial] = {
+            "remote_path": remote_path,
+            "local_path": str(local_path),
+        }
+
+        return {
+            "ok": True,
+            "local_path": str(local_path),
+            "device_serial": resolved_serial,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool()
+async def phone_stop_recording(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """停止录屏并拉取文件到本地。
+    Stop screen recording and pull file to local.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "local_path": str}
+        或 {"ok": False, "error": "not_recording"} / {"ok": False, "error": str}
+    """
+    try:
+        resolved_serial, resolved_platform, err = _resolve_device_serial(
+            device_serial or None, platform
+        )
+        if err:
+            return err
+
+        state = _recording_state.pop(resolved_serial, None)
+        if not state:
+            return {"ok": False, "error": "not_recording"}
+
+        driver = get_driver(resolved_serial, resolved_platform or "android")
+        driver.screen.stop_screenrecord()
+        driver.pull_file(state["remote_path"], state["local_path"])
+        driver.remove_remote_file(state["remote_path"])
+
+        return {
+            "ok": True,
+            "local_path": state["local_path"],
+            "device_serial": resolved_serial,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# =============================================================================
+# Navigation & Device Management Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def phone_go_home(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """返回桌面。
+    Navigate to home screen.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "platform": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        # 调用协议方法返回桌面 / Call protocol method to go home
+        result = driver.go_home()
+        result["platform"] = plat
+        result["device_serial"] = resolved
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool()
+async def phone_go_back(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """返回上一页。
+    Press back button.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "platform": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        # 调用协议方法返回上一页 / Call protocol method to go back
+        result = driver.go_back()
+        result["platform"] = plat
+        result["device_serial"] = resolved
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool()
+async def phone_unlock(
+    device_serial: str = "",
+    pin: str = "",
+    platform: str = "auto",
+) -> dict:
+    """解锁设备屏幕。
+    Wake and unlock device screen.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        pin: 解锁 PIN 码，空则仅唤醒并滑动解锁 / PIN code, empty for swipe unlock only
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "platform": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        # 唤醒并解锁 / Wake and unlock
+        result = driver.unlock(pin=pin or None)
+        result["platform"] = plat
+        result["device_serial"] = resolved
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool()
+async def phone_clear_background(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """清除后台应用进程。
+    Clear background apps.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "platform": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        # 清除后台应用 / Clear background apps
+        result = driver.clear_background()
+        result["platform"] = plat
+        result["device_serial"] = resolved
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool()
+async def phone_clear_data(
+    package: str,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """清除应用数据。
+    Clear application data.
+
+    Parameters / 参数:
+        package: 应用包名 / Package name
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "package": str, "platform": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        # 清除指定应用数据 / Clear data for the specified app
+        result = driver.app.clear_data(package)
+        result["platform"] = plat
+        result["device_serial"] = resolved
+        result["package"] = package
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool()
+async def phone_open_deeplink(
+    uri: str,
+    package: str = "",
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """通过深链接打开页面。
+    Open a page via deeplink/scheme URI.
+
+    Parameters / 参数:
+        uri: 深链接地址 / Deeplink URI (e.g. "myapp://page/detail")
+        package: 可选目标应用包名 / Optional target package name
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "uri": str, "platform": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        # 通过协议方法打开深链接 / Open deeplink via protocol method
+        result = driver.open_deeplink(uri, package=package or None)
+        result["platform"] = plat
+        result["device_serial"] = resolved
+        result["uri"] = uri
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # =============================================================================
 # Input Tools
 # =============================================================================
+
 
 @mcp.tool()
 async def phone_tap(
@@ -812,6 +1210,7 @@ async def phone_keyevent(
 # UI Tools
 # =============================================================================
 
+
 @mcp.tool()
 async def phone_find_element(
     device_serial: str,
@@ -846,7 +1245,7 @@ async def phone_find_element(
     """
     try:
         driver = get_driver(device_serial, platform)
-        
+
         selector = {}
         if text is not None:
             selector["text"] = text
@@ -864,9 +1263,9 @@ async def phone_find_element(
             selector["clickable"] = clickable
         if enabled is not None:
             selector["enabled"] = enabled
-        
+
         elements = driver.ui.find_elements(selector)
-        
+
         return {
             "ok": True,
             "device_serial": device_serial,
@@ -911,6 +1310,7 @@ async def phone_get_current_activity(
 # Image Tools
 # =============================================================================
 
+
 @mcp.tool()
 async def phone_find_image(
     device_serial: str,
@@ -944,7 +1344,12 @@ async def phone_find_image(
         try:
             template_path = resolve_or_cache_path(template_path)
         except Exception as e:
-            return {"ok": False, "error": "resource_not_found", "detail": str(e), "template_path": template_path}
+            return {
+                "ok": False,
+                "error": "resource_not_found",
+                "detail": str(e),
+                "template_path": template_path,
+            }
         skills = get_skills(device_serial, platform)
         result = skills.find_image_on_screen(
             template_path,
@@ -964,6 +1369,7 @@ async def phone_find_image(
 # =============================================================================
 # OCR Tools
 # =============================================================================
+
 
 @mcp.tool()
 async def phone_ocr_find(
@@ -1011,6 +1417,7 @@ async def phone_ocr_find(
 # =============================================================================
 # App Management Tools
 # =============================================================================
+
 
 @mcp.tool()
 async def phone_launch_app(
@@ -1104,6 +1511,7 @@ async def phone_list_packages(
 # Screenshot Comparison Tools
 # =============================================================================
 
+
 @mcp.tool()
 async def phone_compare_screenshot(
     device_serial: str,
@@ -1128,10 +1536,15 @@ async def phone_compare_screenshot(
         try:
             baseline_path = resolve_or_cache_path(baseline_path)
         except Exception as e:
-            return {"ok": False, "error": "resource_not_found", "detail": str(e), "baseline_path": baseline_path}
+            return {
+                "ok": False,
+                "error": "resource_not_found",
+                "detail": str(e),
+                "baseline_path": baseline_path,
+            }
         skills = get_skills(device_serial, platform)
         baseline_bytes = pathlib.Path(baseline_path).read_bytes()
-        
+
         result = skills.compare_screenshot(
             baseline_bytes,
             threshold=threshold,
@@ -1311,26 +1724,28 @@ async def phone_recordings_list(
     列出录制的工作流和触摸录制。
     """
     from phone_pilot.core.storage import recordings_root
-    
+
     out_root = recordings_root(out_dir)
-    
+
     recordings = []
-    
+
     # List workflow recordings
     workflows_dir = out_root / "workflows"
     if workflows_dir.exists():
         for d in sorted(workflows_dir.iterdir(), reverse=True):
             if d.is_dir():
                 meta_path = d / "meta.json"
-                recordings.append({
-                    "type": "workflow",
-                    "name": d.name,
-                    "path": str(d),
-                    "has_meta": meta_path.exists(),
-                })
+                recordings.append(
+                    {
+                        "type": "workflow",
+                        "name": d.name,
+                        "path": str(d),
+                        "has_meta": meta_path.exists(),
+                    }
+                )
                 if len(recordings) >= limit:
                     break
-    
+
     return {
         "ok": True,
         "recordings": recordings[:limit],
@@ -1349,6 +1764,7 @@ async def phone_recordings_get(
     根据键获取录制详情。
     """
     from phone_pilot.core.storage import load_recording_by_key
+
     return await asyncio.to_thread(
         load_recording_by_key,
         recording_key,
@@ -1366,7 +1782,7 @@ async def phone_replay_recording(
     """
     Replay a recorded touch sequence.
     重放录制的触摸序列。
-    
+
     Args:
         recording_key: Recording key/name / 录制键/名称
         device_serial: Device serial / 设备序列号
@@ -1376,33 +1792,33 @@ async def phone_replay_recording(
     from phone_pilot.core.storage import load_recording_by_key
     from phone_pilot.android.recording.touch import push_script
     from phone_pilot.android.touch.monkey import MonkeyRunner
-    
+
     rec = load_recording_by_key(recording_key, out_dir)
     if not rec.get("ok"):
         return rec
-    
+
     mks_data = rec.get("mks_data")
     if not mks_data:
         return {"ok": False, "error": "no_mks_data", "recording_key": recording_key}
-    
+
     if not device_serial:
         return {"ok": False, "error": "device_serial_required"}
-    
+
     # Scale timing by speed
     if speed != 1.0:
         for event in mks_data:
             if "t" in event:
                 event["t"] = int(event["t"] / speed)
-    
+
     # Push and run
     result = push_script(device_serial, mks_data)
     if not result.get("ok"):
         return result
-    
+
     remote_path = result.get("remote_path")
     runner = MonkeyRunner(device_serial)
     run_result = runner.run_script(remote_path)
-    
+
     return {
         "ok": run_result.get("ok", False),
         "device_serial": device_serial,
@@ -1422,14 +1838,14 @@ async def phone_push_and_run_monkey(
     推送并运行 Monkey 脚本。
     """
     from phone_pilot.android.touch.monkey import MonkeyRunner
-    
+
     p = pathlib.Path(script_path).expanduser().resolve()
     if not p.exists():
         return {"ok": False, "error": "script_not_found", "script_path": str(p)}
-    
+
     runner = MonkeyRunner(device_serial)
     result = runner.push_and_run(str(p))
-    
+
     return {
         "ok": result.get("ok", False),
         "device_serial": device_serial,
@@ -1441,6 +1857,7 @@ async def phone_push_and_run_monkey(
 # =============================================================================
 # Verification & Pipeline Tools (验证管道工具)
 # =============================================================================
+
 
 @mcp.tool()
 async def phone_run_script(
@@ -1679,6 +2096,853 @@ async def phone_checkpoint_diff(
 
 
 # =============================================================================
+# Logcat Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def phone_start_logcat(
+    device_serial: str = "",
+    output_path: str = "",
+    tags: str = "",
+    exclude_tags: str = "",
+    level: str = "",
+    process: str = "",
+    out_dir: str = "./.recordings",
+    platform: str = "auto",
+) -> dict:
+    """开始后台日志采集。
+    Start background logcat/hilog capture.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        output_path: 日志输出路径，空则自动生成 / Log output path, auto-generate if empty
+        tags: 逗号分隔的 tag 过滤 / Comma-separated tag filters
+        exclude_tags: 排除的 tag / Tags to exclude
+        level: 最低日志级别 (D/I/W/E/F) / Minimum log level
+        process: 按进程名或 PID 过滤 / Filter by process name or PID
+        out_dir: 输出根目录 / Output root directory
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "path": str, "pid": int}
+        或 {"ok": False, "error": "already_capturing"} / {"ok": False, "error": str}
+    """
+    resolved_serial, resolved_platform, err = _resolve_device_serial(
+        device_serial or None, platform
+    )
+    if err:
+        return err
+
+    # 检查是否已在采集 / Check if already capturing
+    if resolved_serial in _logcat_state:
+        return {
+            "ok": False,
+            "error": "already_capturing",
+            "device_serial": resolved_serial,
+        }
+
+    if not output_path:
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        out_root = Path(out_dir).expanduser().resolve()
+        output_path = str(out_root / "logcat" / f"{ts}_{resolved_serial}.log")
+        out_root.joinpath("logcat").mkdir(parents=True, exist_ok=True)
+
+    try:
+        plat = resolved_platform or "android"
+        driver = get_driver(resolved_serial, plat)
+        res = driver.start_log_capture(
+            output_path,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            level=level,
+            process=process,
+        )
+        if not res.get("ok"):
+            return {
+                "ok": False,
+                "error": res.get("error", "unknown"),
+                "device_serial": resolved_serial,
+            }
+
+        _logcat_state[resolved_serial] = output_path
+        return {
+            "ok": True,
+            "path": output_path,
+            "pid": res.get("pid"),
+            "device_serial": resolved_serial,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved_serial}
+
+
+@mcp.tool()
+async def phone_stop_logcat(
+    device_serial: str = "",
+    output_path: str = "",
+    platform: str = "auto",
+) -> dict:
+    """停止日志采集。
+    Stop logcat/hilog capture.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        output_path: 日志输出路径，空则从状态获取 / Log path, auto-retrieve from state if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "lines": int, ...}
+        或 {"ok": False, "error": "no_logcat_capture"} / {"ok": False, "error": str}
+    """
+    resolved_serial, resolved_platform, err = _resolve_device_serial(
+        device_serial or None, platform
+    )
+    if err:
+        return err
+
+    path = output_path or _logcat_state.pop(resolved_serial, "")
+    if not path:
+        return {
+            "ok": False,
+            "error": "no_logcat_capture",
+            "device_serial": resolved_serial,
+        }
+
+    # 若通过 output_path 指定，也需从状态中移除 / Remove from state when output_path provided
+    _logcat_state.pop(resolved_serial, None)
+
+    try:
+        plat = resolved_platform or "android"
+        driver = get_driver(resolved_serial, plat)
+        result = driver.stop_log_capture(path)
+        result["device_serial"] = resolved_serial
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved_serial}
+
+
+@mcp.tool()
+async def phone_search_logcat(
+    device_serial: str = "",
+    pattern: str = "",
+    lines: int = 5000,
+    regex: bool = False,
+    platform: str = "auto",
+) -> dict:
+    """搜索设备日志。
+    Search device logcat for pattern.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        pattern: 搜索关键词或正则 / Search keyword or regex pattern
+        lines: 读取最近行数 / Number of recent lines to read
+        regex: 是否使用正则匹配 / Use regex matching
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "matches": [str], "count": int}
+    """
+    resolved_serial, resolved_platform, err = _resolve_device_serial(
+        device_serial or None, platform
+    )
+    if err:
+        return err
+
+    try:
+        plat = resolved_platform or "android"
+        driver = get_driver(resolved_serial, plat)
+        log_text = driver.read_log(lines=lines)
+
+        matches: list[str] = []
+        for line in log_text.splitlines():
+            if regex:
+                if re.search(pattern, line):
+                    matches.append(line)
+            else:
+                if pattern in line:
+                    matches.append(line)
+
+        return {
+            "ok": True,
+            "matches": matches,
+            "count": len(matches),
+            "device_serial": resolved_serial,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved_serial}
+
+
+# =============================================================================
+# Page Interaction Tools (scroll / wait / dismiss)
+# =============================================================================
+
+
+@mcp.tool()
+async def phone_scroll_to_find(
+    text: str,
+    device_serial: str = "",
+    direction: str = "up_down",
+    max_count: int = 10,
+    use_ocr: bool = False,
+    exact: bool = False,
+    platform: str = "auto",
+) -> dict:
+    """滚动查找页面中的文本元素。
+    Scroll to find a text element on the page.
+
+    Parameters / 参数:
+        text: 要查找的文本 / Text to find
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        direction: 滚动方向 "up_down"/"left_right" / Scroll direction
+        max_count: 单方向最大滚动次数 / Max scrolls per direction
+        use_ocr: 是否使用 OCR 识别 / Use OCR for text recognition
+        exact: 精确匹配文本 / Exact text match
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "center": [x, y], "bounds": [...], "text": str}
+        或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        ctx = _make_script_context(resolved, plat)
+        elem = scroll_to_find(
+            ctx,
+            text,
+            direction=direction,
+            max_count=max_count,
+            use_ocr=use_ocr,
+            exact=exact,
+        )
+        if elem is None:
+            return {
+                "ok": False,
+                "error": f"text '{text}' not found after scrolling",
+                "device_serial": resolved,
+            }
+        center = elem.center() if hasattr(elem, "center") and callable(elem.center) else None
+        bounds = elem.bounds() if hasattr(elem, "bounds") and callable(elem.bounds) else None
+        display_text = getattr(elem, "display_text", None) or getattr(elem, "text", str(elem))
+        return {
+            "ok": True,
+            "center": list(center) if center else None,
+            "bounds": list(bounds) if bounds else None,
+            "text": display_text,
+            "device_serial": resolved,
+            "platform": plat,
+        }
+    except RetryExhausted as e:
+        return {
+            "ok": False,
+            "error": str(e),
+            "device_serial": resolved,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_wait_for_element(
+    text: str = "",
+    resource_id: str = "",
+    timeout_s: float = 10.0,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """等待元素出现在页面上。
+    Wait for an element to appear on the page.
+
+    Parameters / 参数:
+        text: 等待出现的文本 / Text to wait for
+        resource_id: 等待出现的资源 ID / Resource ID to wait for
+        timeout_s: 超时秒数，默认 10 / Timeout in seconds, default 10
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "found": True, "element": {...}} 如果找到
+        dict: {"ok": True, "found": False} 如果超时未找到
+        dict: {"ok": False, "error": str} 如果出错
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            try:
+                nodes = driver.ui.dump_ui_nodes()
+            except Exception:
+                time.sleep(0.8)
+                continue
+            for node in nodes:
+                node_text = getattr(node, "text", "") or ""
+                node_desc = getattr(node, "content_desc", "") or ""
+                node_rid = getattr(node, "resource_id", "") or ""
+                if text and (text in node_text or text in node_desc):
+                    bounds = node.bounds_tuple() if hasattr(node, "bounds_tuple") and callable(node.bounds_tuple) else None
+                    center = node.center() if hasattr(node, "center") and callable(node.center) else None
+                    cx, cy = center if center else (0, 0)
+                    return {
+                        "ok": True,
+                        "found": True,
+                        "element": {
+                            "text": node_text,
+                            "content_desc": node_desc,
+                            "resource_id": node_rid,
+                            "center": [cx, cy],
+                            "bounds": list(bounds) if bounds else None,
+                        },
+                        "device_serial": resolved,
+                        "platform": plat,
+                    }
+                if resource_id and resource_id in node_rid:
+                    bounds = node.bounds_tuple() if hasattr(node, "bounds_tuple") and callable(node.bounds_tuple) else None
+                    center = node.center() if hasattr(node, "center") and callable(node.center) else None
+                    cx, cy = center if center else (0, 0)
+                    return {
+                        "ok": True,
+                        "found": True,
+                        "element": {
+                            "text": node_text,
+                            "content_desc": node_desc,
+                            "resource_id": node_rid,
+                            "center": [cx, cy],
+                            "bounds": list(bounds) if bounds else None,
+                        },
+                        "device_serial": resolved,
+                        "platform": plat,
+                    }
+            time.sleep(0.8)
+        return {"ok": True, "found": False, "device_serial": resolved, "platform": plat}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_dismiss_popup(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """检测并关闭弹窗。
+    Detect and dismiss popup dialogs.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "dismissed": True, "detail": {...}} 如果关闭了弹窗
+        dict: {"ok": True, "dismissed": False} 如果无弹窗
+        dict: {"ok": False, "error": str} 如果出错
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        ctx = _make_script_context(resolved, plat)
+        guard = PopupGuard(ctx)
+        detail = guard.check_and_dismiss()
+        return {
+            "ok": True,
+            "dismissed": detail is not None,
+            "detail": detail or {},
+            "device_serial": resolved,
+            "platform": plat,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_smart_find(
+    text: str,
+    device_serial: str = "",
+    use_ocr: bool = False,
+    exact: bool = False,
+    try_dismiss_popup: bool = True,
+    platform: str = "auto",
+) -> dict:
+    """智能查找：UIA + OCR + 弹窗重试。
+    Smart find: UIA, OCR, and popup retry.
+
+    Parameters / 参数:
+        text: 要查找的文本 / Text to search for
+        device_serial: 设备序列号 / Device serial
+        use_ocr: 是否使用 OCR / Use OCR recognition
+        exact: 精确匹配 / Exact match
+        try_dismiss_popup: 首次未找到时尝试关闭弹窗再查找 / Dismiss popup and retry if not found
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "center": [x,y], "bounds": [...], "text": str}
+        或 {"ok": False, "error": "not_found"}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        ctx = _make_script_context(resolved, plat)
+        elem = find_text(ctx, text, use_ocr=use_ocr, exact=exact, retry_attempts=1)
+        # 首次未找到且启用弹窗重试时，尝试关闭弹窗再查找 / Retry after dismiss if not found
+        if elem is None and try_dismiss_popup:
+            PopupGuard(ctx).check_and_dismiss()
+            elem = find_text(ctx, text, use_ocr=use_ocr, exact=exact, retry_attempts=1)
+        if elem:
+            center = elem.center() if hasattr(elem, "center") and callable(elem.center) else None
+            bounds = elem.bounds() if hasattr(elem, "bounds") and callable(elem.bounds) else None
+            display_text = getattr(elem, "display_text", None) or getattr(elem, "text", str(elem))
+            return {
+                "ok": True,
+                "center": list(center) if center else None,
+                "bounds": list(bounds) if bounds else None,
+                "text": display_text,
+                "device_serial": resolved,
+                "platform": plat,
+            }
+        return {"ok": False, "error": "not_found", "device_serial": resolved}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_launch_from_home(
+    query: str,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """从桌面搜索并启动应用。
+    Search and launch app from home screen.
+
+    Parameters / 参数:
+        query: 应用名称关键词 / App name keyword to search
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, ...} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        ctx = _make_script_context(resolved, plat)
+        return launch_from_home(ctx, query)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_install_app(
+    apk_path: str,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """安装 APK 到设备。
+    Install APK on device.
+
+    Parameters / 参数:
+        apk_path: APK 文件本地路径 / Local APK file path
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "apk_path": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    # 仅支持 Android / Android only
+    if plat != "android":
+        return {"ok": False, "error": "install_app only supports Android", "platform": plat}
+    apk = Path(apk_path).expanduser().resolve()
+    if not apk.exists():
+        return {"ok": False, "error": f"apk not found: {apk_path}"}
+    try:
+        from phone_pilot.android.touch.agent import install_apk
+
+        install_apk(resolved, apk)
+        return {"ok": True, "apk_path": str(apk), "device_serial": resolved}
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_uninstall_app(
+    package: str,
+    device_serial: str = "",
+    keep_data: bool = False,
+    platform: str = "auto",
+) -> dict:
+    """卸载应用。
+    Uninstall an application.
+
+    Parameters / 参数:
+        package: 应用包名 / Package name
+        device_serial: 设备序列号 / Device serial
+        keep_data: 是否保留数据 / Keep app data
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "package": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        result = driver.app.uninstall(package, keep_data=keep_data)
+        result["device_serial"] = resolved
+        result["package"] = package
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_memory_snapshot(
+    package: str,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """获取应用内存快照。
+    Capture application memory snapshot.
+
+    Parameters / 参数:
+        package: 应用包名 / Package name
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "summary": {...}, ...} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    if plat != "android":
+        return {"ok": False, "error": "memory_snapshot only supports Android", "platform": plat}
+    try:
+        from phone_pilot.memory_analyze.meminfo import capture_meminfo
+
+        return capture_meminfo(resolved, package)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_memory_check_leak(
+    package: str,
+    device_serial: str = "",
+    gc_wait_s: float = 5.0,
+    save_hprof: bool = False,
+    platform: str = "auto",
+) -> dict:
+    """Activity 泄漏检测。
+    Check for Activity memory leaks.
+
+    Parameters / 参数:
+        package: 应用包名 / Package name
+        device_serial: 设备序列号 / Device serial
+        gc_wait_s: GC 后等待时间秒 / Wait after GC in seconds
+        save_hprof: 泄漏确认后是否 dump hprof / Dump hprof if leak confirmed
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "leaked": bool, "detail": {...}} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    if plat != "android":
+        return {"ok": False, "error": "memory_check_leak only supports Android", "platform": plat}
+    try:
+        from phone_pilot.memory_analyze.meminfo import check_activity_leak
+
+        hprof_dir = str(Path("./.recordings").expanduser().resolve() / "meminfo")
+        return check_activity_leak(
+            resolved, package, gc_wait_s=gc_wait_s, save_hprof=save_hprof, hprof_out_dir=hprof_dir
+        )
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_pull_file(
+    remote_path: str,
+    local_path: str = "",
+    device_serial: str = "",
+    out_dir: str = "./.recordings",
+    platform: str = "auto",
+) -> dict:
+    """从设备拉取文件到本地。
+    Pull a file from device to local.
+
+    Parameters / 参数:
+        remote_path: 设备上文件路径 / Remote file path on device
+        local_path: 本地保存路径，空则自动生成 / Local save path, auto-generate if empty
+        device_serial: 设备序列号 / Device serial
+        out_dir: 输出根目录 / Output root directory
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "local_path": str, "remote_path": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        if local_path:
+            local = Path(local_path).expanduser().resolve()
+        else:
+            local = Path(out_dir).expanduser().resolve() / "pulled" / Path(remote_path).name
+        local.parent.mkdir(parents=True, exist_ok=True)
+        driver = get_driver(resolved, plat)
+        result = driver.pull_file(remote_path, str(local))
+        if not result.get("ok"):
+            return {
+                "ok": False,
+                "error": result.get("stderr") or result.get("error", "pull_failed"),
+                "device_serial": resolved,
+            }
+        return {
+            "ok": True,
+            "local_path": str(local),
+            "remote_path": remote_path,
+            "device_serial": resolved,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+@mcp.tool()
+async def phone_push_file(
+    local_path: str,
+    remote_path: str,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """推送本地文件到设备。
+    Push a local file to device.
+
+    Parameters / 参数:
+        local_path: 本地文件路径 / Local file path
+        remote_path: 设备目标路径 / Remote destination path on device
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "local_path": str, "remote_path": str} 或 {"ok": False, "error": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        local = Path(local_path).expanduser().resolve()
+        if not local.exists():
+            return {"ok": False, "error": f"local file not found: {local_path}", "device_serial": resolved}
+        driver = get_driver(resolved, plat)
+        result = driver.push_file(str(local), remote_path)
+        result["device_serial"] = resolved
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+# =============================================================================
+# P2 MCP Tools - clipboard, notifications, wifi, airplane, shell, device info
+# =============================================================================
+
+
+@mcp.tool()
+async def phone_read_clipboard(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """读取设备剪贴板文本。
+    Read device clipboard text.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "text": str} 或 {"ok": False, "error": str}
+    仅支持 Android / Android only.
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    if plat != "android":
+        return {"ok": False, "error": "phone_read_clipboard only supports Android", "platform": plat}
+    result = await asyncio.to_thread(get_clipboard_text, resolved)
+    result["device_serial"] = resolved
+    return result
+
+
+@mcp.tool()
+async def phone_get_notifications(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """获取通知栏通知列表。
+    Get notification list from notification bar.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "notifications": [{"package": str, "title": str, "text": str}]}
+    仅支持 Android / Android only.
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    if plat != "android":
+        return {"ok": False, "error": "phone_get_notifications only supports Android", "platform": plat}
+    result = await asyncio.to_thread(get_notifications, resolved)
+    result["device_serial"] = resolved
+    return result
+
+
+@mcp.tool()
+async def phone_toggle_wifi(
+    enabled: bool = True,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """开关 WiFi。
+    Toggle WiFi on/off.
+
+    Parameters / 参数:
+        enabled: True 开启 / False 关闭 / True to enable, False to disable
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "wifi_on": bool} 或 {"ok": False, "error": str}
+    仅支持 Android / Android only.
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    if plat != "android":
+        return {"ok": False, "error": "phone_toggle_wifi only supports Android", "platform": plat}
+    result = await asyncio.to_thread(set_wifi_enabled, resolved, enabled)
+    result["device_serial"] = resolved
+    return result
+
+
+@mcp.tool()
+async def phone_toggle_airplane(
+    enabled: bool = True,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """开关飞行模式。
+    Toggle airplane mode.
+
+    Parameters / 参数:
+        enabled: True 开启 / False 关闭 / True to enable, False to disable
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "airplane_on": bool} 或 {"ok": False, "error": str}
+    仅支持 Android / Android only.
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    if plat != "android":
+        return {"ok": False, "error": "phone_toggle_airplane only supports Android", "platform": plat}
+    result = await asyncio.to_thread(set_airplane_mode, resolved, enabled)
+    result["device_serial"] = resolved
+    return result
+
+
+@mcp.tool()
+async def phone_execute_shell(
+    command: str,
+    device_serial: str = "",
+    timeout_s: float = 30.0,
+    platform: str = "auto",
+) -> dict:
+    """执行受限 shell 命令（白名单限制）。
+    Execute restricted shell command (whitelist limited).
+
+    Parameters / 参数:
+        command: shell 命令 / Shell command
+        device_serial: 设备序列号 / Device serial
+        timeout_s: 超时秒数 / Timeout in seconds
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "stdout": str, "stderr": str, "returncode": int}
+        或 {"ok": False, "error": str}
+    仅支持 Android / Android only.
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    if plat != "android":
+        return {"ok": False, "error": "phone_execute_shell only supports Android", "platform": plat}
+    result = await asyncio.to_thread(execute_shell, resolved, command, timeout_s)
+    result["device_serial"] = resolved
+    return result
+
+
+@mcp.tool()
+async def phone_get_device_info(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """获取轻量设备信息。
+    Get lightweight device info.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "screen": {"width": int, "height": int}, "activity": {...}, "model": str, "os_version": str}
+    """
+    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat or "android")
+        # 获取 screen_size、current_activity / Get screen_size, current_activity
+        try:
+            width, height = driver.screen.get_screen_size()
+            screen = {"width": width, "height": height}
+        except Exception:
+            screen = {"width": 0, "height": 0}
+        try:
+            activity = driver.ui.get_current_activity()
+        except Exception:
+            activity = {"package": None, "activity": None}
+        # 从 getprop 获取 model、os_version / Get model, os_version from getprop (Android)
+        model = ""
+        os_version = ""
+        if plat == "android":
+            model, os_version = await asyncio.to_thread(get_device_model_and_version, resolved)
+        return {
+            "ok": True,
+            "screen": screen,
+            "activity": activity,
+            "model": model,
+            "os_version": os_version,
+            "device_serial": resolved,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
+# =============================================================================
 # Page State Tool (LLM-Optimized)
 # =============================================================================
 
@@ -1754,6 +3018,7 @@ def _collect_page_elements(
 
     # Collect all visible texts
     from phone_pilot.core.ui_node import collect_ui_texts
+
     all_texts = collect_ui_texts(nodes)
 
     # Build interactive elements list
@@ -1769,31 +3034,47 @@ def _collect_page_elements(
                 w_b = max(1, x2 - x1)
                 h_b = max(1, y2 - y1)
                 direction = "horizontal" if w_b > h_b * 1.2 else "vertical"
-                scrollable_areas.append({
-                    "bounds": list(b),
-                    "direction": direction,
-                    "class": node.class_name or "",
-                })
+                scrollable_areas.append(
+                    {
+                        "bounds": list(b),
+                        "direction": direction,
+                        "class": node.class_name or "",
+                    }
+                )
 
         # Filter elements: keep those with text/desc, or interactive
         has_text = bool(node.text or node.content_desc or node.hint)
         is_interactive = bool(
-            node.clickable or node.long_clickable
-            or node.checkable or node.focusable
+            node.clickable
+            or node.long_clickable
+            or node.checkable
+            or node.focusable
             or node.scrollable
         )
         is_input = "edittext" in (node.class_name or "").lower()
 
-        if not include_invisible and not has_text and not is_interactive and not is_input:
+        if (
+            not include_invisible
+            and not has_text
+            and not is_interactive
+            and not is_input
+        ):
             continue
 
         # Skip pure container nodes with no useful info
         if not has_text and not is_interactive and not is_input:
             cn = (node.class_name or "").lower()
-            if any(skip in cn for skip in [
-                "framelayout", "linearlayout", "relativelayout",
-                "constraintlayout", "coordinatorlayout", "viewgroup",
-            ]):
+            if any(
+                skip in cn
+                for skip in [
+                    "framelayout",
+                    "linearlayout",
+                    "relativelayout",
+                    "constraintlayout",
+                    "coordinatorlayout",
+                    "viewgroup",
+                ]
+            ):
                 continue
 
         center = node.center()
@@ -1809,16 +3090,18 @@ def _collect_page_elements(
         label = _build_element_label(node)
         elem_type = _classify_element(node.class_name)
 
-        elements.append({
-            "index": len(elements),
-            "type": elem_type,
-            "label": label,
-            "center": list(center),
-            "bounds": list(bounds) if bounds else None,
-            "clickable": bool(node.clickable),
-            "scrollable": bool(node.scrollable),
-            "resource_id": rid,
-        })
+        elements.append(
+            {
+                "index": len(elements),
+                "type": elem_type,
+                "label": label,
+                "center": list(center),
+                "bounds": list(bounds) if bounds else None,
+                "clickable": bool(node.clickable),
+                "scrollable": bool(node.scrollable),
+                "resource_id": rid,
+            }
+        )
 
     # Sort elements by visual position (top-to-bottom, left-to-right)
     elements.sort(key=lambda e: (e["center"][1], e["center"][0]))
@@ -1923,7 +3206,10 @@ async def phone_get_page_state(
 
         if annotate_elements and png_bytes:
             try:
-                from phone_pilot.extensions.vision.annotate import annotate_elements_on_screenshot
+                from phone_pilot.extensions.vision.annotate import (
+                    annotate_elements_on_screenshot,
+                )
+
                 annotated_png = annotate_elements_on_screenshot(png_bytes, elements)
                 annotated_b64 = base64.b64encode(annotated_png).decode("ascii")
             except Exception:
@@ -1993,7 +3279,9 @@ async def phone_tap_element(
                 "error": "index_out_of_range",
                 "index": index,
                 "element_count": len(elements),
-                "note": f"有效范围 0-{len(elements) - 1}" if elements else "页面无可交互元素",
+                "note": f"有效范围 0-{len(elements) - 1}"
+                if elements
+                else "页面无可交互元素",
             }
 
         elem = elements[index]
@@ -2001,6 +3289,7 @@ async def phone_tap_element(
 
         # Tap
         import time as _time
+
         driver.input.tap(cx, cy)
         if wait_ms > 0:
             _time.sleep(wait_ms / 1000.0)
@@ -2022,6 +3311,7 @@ async def phone_tap_element(
 # =============================================================================
 # Server Entry Point
 # =============================================================================
+
 
 def run_server(transport: str = "stdio"):
     """Run the MCP server."""
