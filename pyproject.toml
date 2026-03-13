@@ -57,7 +57,7 @@ include = ["phone_pilot*"]
 "phone_pilot.core" = ["templates/*.j2"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "phone_pilot/tests"]
 
 [tool.ruff]
 exclude = [
