@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Minimal stdio MCP client for calling tools exposed by the installed `mcp_android` module.
+Minimal stdio MCP client for calling tools exposed by phone-pilot MCP server.
 
 Examples:
   phone-pilot-call --list-tools
-  phone-pilot-call android_list_devices
-  phone-pilot-call android_device_capture --args '{"device_serial":"ZY22J7FWVJ","out_dir":"./.recordings"}'
-  phone-pilot-call android_record_start --args '{"name":"输入法_搜索","device_serial":"ZY22J7FWVJ"}'
+  phone-pilot-call phone_list_devices
+  phone-pilot-call phone_screenshot --args '{"device_serial":"<serial>"}'
+  phone-pilot-call phone_go_home --args '{}'
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ async def _run(tool_name: str | None, args: dict[str, Any], list_tools: bool) ->
     env.setdefault("ANDROID_ADB_PATH", adb_executable())
     server = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "mcp_android"],
+        args=["-m", "phone_pilot.cli"],
         cwd=None,
         env=env,
     )
