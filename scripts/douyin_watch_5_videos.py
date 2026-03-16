@@ -1,66 +1,93 @@
 #!/usr/bin/env python3
-"""MCP 前置链路验证：通过 phone-pilot-call 快速确认设备/链路可用。
+"""抖音观看 5 个视频：回到桌面 → 清空后台 → 打开抖音 → 每 10 秒向上滑动到下一个视频，共 5 个。
 
-本脚本仅用于 agent 通过 MCP 调用做前置验证，确认环境能跑通。
-实际可运行、需随安装包交付给外部项目的脚本是：
+使用 phone_pilot.script_api，安装 phone_pilot 后直接运行：
   python easy_use/douyin_watch_5_videos.py
-该脚本使用 phone_pilot.script_api（与 example_script.py 一致），安装 phone_pilot 后即可运行。
 
-用法（前置验证）:
-  python scripts/douyin_watch_5_videos.py   # 调用 MCP 检查设备并打印应运行的脚本路径
+包名默认 com.ss.android.ugc.aweme；极速版请设置环境变量：
+  DOUYIN_PACKAGE=com.ss.android.ugc.aweme.lite
 """
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import sys
-from pathlib import Path
+import time
 
-ROOT = Path(__file__).resolve().parent.parent
+from phone_pilot.core.log import _log as _runner_log
+from phone_pilot.script_api import (
+    ScriptContext,
+    dump_ui,
+    reset_home_screen,
+    run_script,
+    swipe_up,
+)
 
+# ---------------------------------------------------------------------------
+# 配置 / Configuration
+# ---------------------------------------------------------------------------
+
+DEFAULT_PACKAGE = "com.ss.android.ugc.aweme"
+STAY_SECONDS = 10
+VIDEO_COUNT = 5
+
+# 进入抖音后/每次滑动前检测：若出现这些文案视为阻塞页（登录/引导等），中止脚本
+BLOCKING_KEYWORDS = ("登录", "同意", "青少年", "跳过", "验证", "获取验证码")
+
+ctx = ScriptContext(
+    auto_screenshot=True,
+    auto_report=True,
+    popup_guard=True,
+    llm_healing=False,
+    auto_meminfo=False,
+)
+
+
+def _douyin_package() -> str:
+    return os.environ.get("DOUYIN_PACKAGE", "").strip() or DEFAULT_PACKAGE
+
+
+def _is_blocking_page(ctx: ScriptContext) -> tuple[bool, str | None]:
+    """检测当前是否为登录/引导等阻塞页（基于 UI dump 文本）。返回 (是否阻塞, 命中的关键词)。"""
+    try:
+        raw = dump_ui(ctx)
+        for kw in BLOCKING_KEYWORDS:
+            if kw in (raw or ""):
+                return True, kw
+    except Exception:
+        pass
+    return False, None
+
+
+# ---------------------------------------------------------------------------
+# 主流程 / Main Flow
+# ---------------------------------------------------------------------------
 
 def main() -> int:
-    # 通过 MCP 做最小链路验证：list_devices
-    cmd = [
-        sys.executable,
-        "-m",
-        "phone_pilot.mcp_call",
-        "phone_list_devices",
-        "--args",
-        "{}",
-    ]
-    try:
-        r = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=ROOT,
-        )
-    except subprocess.TimeoutExpired:
-        print("MCP 前置验证超时（phone_list_devices）", file=sys.stderr)
-        print("可运行脚本: python easy_use/douyin_watch_5_videos.py", file=sys.stderr)
-        return 1
-    text = (r.stdout or "").strip()
-    if not text:
-        print("MCP 前置验证无输出", file=sys.stderr)
-        print("可运行脚本: python easy_use/douyin_watch_5_videos.py", file=sys.stderr)
-        return 1
-    try:
-        data = json.loads(text)
-        content = data.get("content") or []
-        if content and isinstance(content[0], dict):
-            inner = json.loads(content[0].get("text") or "{}")
-            if inner.get("ok") and inner.get("devices"):
-                print("MCP 前置验证通过，设备:", [d.get("serial") for d in inner["devices"]])
-            else:
-                print("MCP 返回异常:", inner, file=sys.stderr)
-    except Exception as e:
-        print("MCP 前置验证解析失败:", e, file=sys.stderr)
-    print("可运行脚本（交付用）: python easy_use/douyin_watch_5_videos.py")
+    _runner_log("  Step 1: 回到桌面")
+    reset_home_screen(ctx)
+    time.sleep(0.5)
+
+    package = _douyin_package()
+    _runner_log(f"  Step 2: 打开抖音 (包名: {package})")
+    launch_res = ctx.driver.app.launch_app(package)
+    if not (isinstance(launch_res, dict) and launch_res.get("ok")):
+        raise RuntimeError(f"launch_app({package}) 失败: {launch_res}")
+    time.sleep(3)
+
+    blocking, kw = _is_blocking_page(ctx)
+    if blocking:
+        raise RuntimeError(f"检测到阻塞页（含「{kw}」），无法继续滑动，请先手动登录或跳过引导")
+
+    for i in range(VIDEO_COUNT - 1):
+        _runner_log(f"  Step 3.{i + 1}: 等待 {STAY_SECONDS}s 后滑动到下一个视频")
+        time.sleep(STAY_SECONDS)
+        blocking, kw = _is_blocking_page(ctx)
+        if blocking:
+            raise RuntimeError(f"滑动前检测到阻塞页（含「{kw}」），已中止")
+        swipe_up(ctx, duration_ms=500, wait_s=0.5)
+
+    _runner_log("  完成：已观看 5 个视频")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_script(main, ctx=ctx)

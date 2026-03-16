@@ -1,25 +1,9 @@
 {
   "mcpServers": {
-    "// 方式一：uvx（推荐，无需安装）": {},
+    "// 注意：uvx 需要 PyPI 上有 phone-pilot 包，若包未发布会导致 MCP 启动失败、工具全部不可用。推荐用下方「本地项目」或「已安装命令」。": {},
+
+    "// 推荐：本地项目（无需 PyPI，把 <PROJECT_PATH> 换成仓库绝对路径）": {},
     "phone_pilot": {
-      "command": "uvx",
-      "args": ["phone-pilot-mcp"],
-      "env": {
-        "PYTHONUNBUFFERED": "1"
-      }
-    },
-
-    "// 方式二：pip install 后直接使用": {},
-    "phone_pilot_installed": {
-      "command": "phone-pilot-mcp",
-      "args": [],
-      "env": {
-        "PYTHONUNBUFFERED": "1"
-      }
-    },
-
-    "// 方式三：开发模式（本地源码）": {},
-    "phone_pilot_dev": {
       "command": "uv",
       "args": [
         "run",
@@ -29,7 +13,24 @@
       ],
       "cwd": "<PROJECT_PATH>",
       "env": {
-        "ADB_PATH": "<ANDROID_SDK>/platform-tools/adb",
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+
+    "// 方式二：pip install phone-pilot 后使用（需保证 Cursor 能解析到 phone-pilot-mcp 命令）": {},
+    "phone_pilot_installed": {
+      "command": "phone-pilot-mcp",
+      "args": [],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+
+    "// 方式三：uvx（仅当 PyPI 已发布 phone-pilot 且入口为 phone-pilot-mcp 时可用）": {},
+    "phone_pilot_uvx": {
+      "command": "uvx",
+      "args": ["phone-pilot-mcp"],
+      "env": {
         "PYTHONUNBUFFERED": "1"
       }
     }
