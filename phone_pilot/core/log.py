@@ -50,6 +50,10 @@ def _log(msg: str, *, end: str = "\n") -> None:
     向 stderr 输出，同时可选写入控制台日志文件。
     """
     print(msg, end=end, file=sys.stderr)
+    try:
+        sys.stderr.flush()
+    except Exception:
+        pass
     if _console_log_file:
         try:
             _console_log_file.write(msg + end)

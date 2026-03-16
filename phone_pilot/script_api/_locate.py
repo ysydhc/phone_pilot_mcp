@@ -315,8 +315,11 @@ def _ui_ops(ctx: ScriptContext) -> dict:
         return tap_xy(ctx, int(x), int(y))
 
     def _swipe(x1: int, y1: int, x2: int, y2: int) -> dict:
+        import time as _time
         from ._helpers import _input_swipe
-        return _input_swipe(ctx, int(x1), int(y1), int(x2), int(y2), duration_ms=320, wait_s=0.15)
+        res = _input_swipe(ctx, int(x1), int(y1), int(x2), int(y2), duration_ms=320)
+        _time.sleep(0.15)
+        return res
 
     def _screen_size():
         return _get_screen_size(ctx)

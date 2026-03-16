@@ -68,6 +68,7 @@ def input_keyevent(device_serial: Optional[str], key: str, *, wait_s: float = 0.
         delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0,
         log_output=False,
         silent=silent,
+        timeout_s=15,
     )
     return {"ok": proc.returncode == 0, "returncode": proc.returncode, "key": k, "stderr": (proc.stderr or "").strip()}
 
@@ -2476,6 +2477,41 @@ def _looks_like_leakcanary_activity(component_or_activity: Optional[str]) -> boo
     return ("leakcanary" in s) or ("leaklauncheractivity" in s)
 
 
+def get_launcher_component_for_package(device_serial: Optional[str], package: str) -> Optional[str]:
+    """
+    Get the LAUNCHER activity component for a single package (fast path).
+    Uses: cmd package resolve-activity --brief -a MAIN -c LAUNCHER <package>
+    Returns pkg/activity or None.
+    """
+    if not device_serial or not (package or "").strip():
+        return None
+    pkg = (package or "").strip()
+    proc = CommandRunner.run(
+        adb_prefix(device_serial)
+        + [
+            "shell",
+            "cmd",
+            "package",
+            "resolve-activity",
+            "--brief",
+            "-a",
+            "android.intent.action.MAIN",
+            "-c",
+            "android.intent.category.LAUNCHER",
+            pkg,
+        ],
+        check=False,
+        log_output=False,
+        timeout_s=5,
+    )
+    out = (proc.stdout or "").strip()
+    for line in out.splitlines():
+        line = line.strip()
+        if line and "/" in line and line.startswith(pkg + "/"):
+            return line
+    return None
+
+
 def list_launcher_components(device_serial: Optional[str], package: str) -> list[str]:
     """
     List LAUNCHER components (pkg/activity) for a specific package.
@@ -2505,6 +2541,7 @@ def list_launcher_components(device_serial: Optional[str], package: str) -> list
         ],
         check=False,
         log_output=False,
+        timeout_s=10,
     )
     out = proc.stdout or ""
     comps: list[str] = []
@@ -2562,16 +2599,21 @@ def restart_app(
             check=False, log_output=False,
         )
     elif package:
-        # Prefer a real launcher activity over LeakCanary launcher (common in debug builds).
-        best = pick_best_launcher_component(device_serial, package)
+        # Fast path: resolve-activity for this package only (no global query).
+        best = get_launcher_component_for_package(device_serial, package)
+        if not best or "/" not in best:
+            best = pick_best_launcher_component(device_serial, package)
         if best and "/" in best:
-            CommandRunner.run(adb_prefix(device_serial) + ["shell", "am", "start", "-n", best], check=False, log_output=False)
+            CommandRunner.run(
+                adb_prefix(device_serial) + ["shell", "am", "start", "-n", best],
+                check=False, log_output=False, timeout_s=10,
+            )
         else:
-            # Fallback: launch via a single monkey event.
+            # Fallback: launch via a single monkey event (timeout so we don't block forever).
             CommandRunner.run(
                 adb_prefix(device_serial)
                 + ["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],
-                check=False, log_output=False,
+                check=False, log_output=False, timeout_s=15,
             )
 
     if wait_s and wait_s > 0:

@@ -33,6 +33,8 @@ Documentation = "https://github.com/aspect-build/phone-pilot-mcp#readme"
 Issues = "https://github.com/aspect-build/phone-pilot-mcp/issues"
 
 [project.optional-dependencies]
+# Dev: lint & test (make lint / make test)
+dev = ["ruff>=0.8.0", "pytest>=8.0.0"]
 # HarmonyOS device automation
 harmony = ["hmdriver2>=1.4.0"]
 # Language detection & translation (for multilingual OCR/text)

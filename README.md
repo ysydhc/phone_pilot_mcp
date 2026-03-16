@@ -373,17 +373,45 @@ phone-pilot-web --no-browser
 - `adb` 已安装且设备已连接授权
 - HarmonyOS 支持需要 `hdc` 命令行工具
 
+### 可选依赖
+
+| 依赖 | 用途 | 安装方式 |
+|------|------|----------|
+| OpenCV (`cv2`) | 图像模板匹配 (`phone_find_image`)、截图对比 (`phone_compare_screenshot`) | `pip install opencv-python` |
+| Tesseract + pytesseract | OCR 文字识别 (`phone_ocr_find`) | 系统安装 `tesseract-ocr`（macOS: `brew install tesseract`；Ubuntu: `apt install tesseract-ocr`），再 `pip install pytesseract` |
+| 中文语言包 | OCR 中文识别 | macOS: `brew install tesseract-lang`；Ubuntu: `apt install tesseract-ocr-chi-sim` |
+
+> 未安装可选依赖时，相关 MCP 工具会返回错误提示而非崩溃。可通过 `python scripts/check_verification_env.py` 检查当前环境。
+
+### MCP 工具验证（A 类真机）
+
+执行 A 类验证前会通过 **adb 获取当前连接设备** 作为 `device_serial`；需 `apk_path`、`package`、资源文件等由 **运行前资源清单** 提供，执行前会提示确认：
+
+1. **资源清单**：`docs/verification/verification_resources.json`（可配置 `device_serial`、`apk_path`、`package`、`resource_file`、`resource_key`、`push_file`/`pull_file` 等）
+2. **环境自检**：`python scripts/check_verification_env.py`（4/4 通过后再跑验证）
+3. **A 类验证**：`python scripts/verify_mcp_tools_a.py`（交互确认）；加 `--yes` 跳过确认，`--write-checklist` 写回检查表
+
+### 示例脚本（script_api，随安装包交付）
+
+- **抖音观看 5 个视频**：清空后台 → 打开抖音 → 每 10 秒向上滑动到下一个视频，共 5 个。与 `example_script.py` 一致，使用 **phone_pilot.script_api**，安装 phone_pilot 后直接运行。
+  ```bash
+  python easy_use/douyin_watch_5_videos.py
+  DOUYIN_PACKAGE=com.ss.android.ugc.aweme.lite python easy_use/douyin_watch_5_videos.py
+  ```
+- **MCP 前置链路验证**（仅用于 agent 通过 MCP 调用确认环境可跑通）：`python scripts/douyin_watch_5_videos.py`。实际交付给外部项目运行的是上面 `easy_use/` 下的脚本。
+
 ## 开发
 
 ```bash
-# 安装开发依赖
+# 安装开发依赖（含 lint/test）
+pip install -e ".[dev]"
+# 或完整可选依赖
 pip install -e ".[all]"
 
-# 运行测试
-pytest
-
-# 代码风格检查
-ruff check .
+# 使用 Makefile（推荐）
+make lint   # ruff check
+make test   # pytest
+make check  # lint + test
 ```
 
 ---

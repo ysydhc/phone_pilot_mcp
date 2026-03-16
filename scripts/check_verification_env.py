@@ -64,12 +64,34 @@ def check_device(adb_cmd: str) -> tuple[bool, str]:
     return False, "no device with status 'device' (check: unauthorized/offline/empty)"
 
 
+def _read_requires_python() -> tuple[int, int]:
+    """从 pyproject.toml 读取 requires-python 最低版本。
+    Read minimum Python version from pyproject.toml.
+
+    Returns:
+        (major, minor) 最低版本元组 / minimum version tuple
+    """
+    import re as _re
+    cwd = os.environ.get("PHONE_PILOT_PROJECT_ROOT") or os.getcwd()
+    toml_path = os.path.join(cwd, "pyproject.toml")
+    if os.path.isfile(toml_path):
+        with open(toml_path, encoding="utf-8") as f:
+            for line in f:
+                m = _re.match(r'requires-python\s*=\s*">=(\d+)\.(\d+)"', line.strip())
+                if m:
+                    return int(m.group(1)), int(m.group(2))
+    # 默认回退 / fallback default
+    return 3, 13
+
+
 def check_python() -> tuple[bool, str]:
-    """检查 Python 版本与 pyproject.toml 一致（>= 3.13）。Check Python version matches pyproject.toml (>= 3.13)."""
+    """检查 Python 版本与 pyproject.toml requires-python 一致。
+    Check Python version matches pyproject.toml requires-python."""
+    req_major, req_minor = _read_requires_python()
     v = sys.version_info
-    if v.major >= 3 and v.minor >= 13:
+    if (v.major, v.minor) >= (req_major, req_minor):
         return True, f"{v.major}.{v.minor}.{v.micro}"
-    return False, f"{v.major}.{v.minor}.{v.micro} (need >= 3.13)"
+    return False, f"{v.major}.{v.minor}.{v.micro} (need >= {req_major}.{req_minor})"
 
 
 def check_project_root(cwd: str) -> tuple[bool, str]:
@@ -146,7 +168,8 @@ def main() -> None:
     if py_ok:
         required_pass += 1
     else:
-        print("        -> need >= 3.13")
+        req_major, req_minor = _read_requires_python()
+        print(f"        -> need >= {req_major}.{req_minor}")
 
     # 4. project root
     root_ok, root_msg = check_project_root(cwd)

@@ -40,3 +40,7 @@ workflow/
 dist/
 tmp_uv_cache/.DS_Store
 recordings/.DS_Store
+
+
+# 测试资源
+.test_res/

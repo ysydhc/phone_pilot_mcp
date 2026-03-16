@@ -19,6 +19,16 @@ Tool Categories:
 - OCR: phone_ocr_find
 - App: phone_launch_app, phone_force_stop, etc.
 - Verification: phone_verify, phone_checkpoint_save/diff, phone_run_script
+
+Response contract (响应约定):
+- 所有 phone_* 工具返回 dict。成功时必含 "ok": True；失败时必含 "ok": False 与 "error": str。
+- All phone_* tools return a dict. Success: "ok": True; Failure: "ok": False and "error": str.
+- 凡使用设备的工具，成功时建议包含 device_serial。
+- Tools using a device should include device_serial on success.
+- 契约与 validate_response 的校验对象均为该 dict（工具函数返回值），而非 MCP 协议层。
+- Contracts and validate_response validate this tool-returned dict, not MCP wire format.
+- 该 dict 在 MCP 中的序列化约定：JSON 形式放入 CallToolResult 的 content[0].text，由客户端反序列化得到同一 dict。
+- MCP serialization: JSON in CallToolResult content[0].text, deserialized by client to the same dict.
 """
 
 from __future__ import annotations
@@ -1201,6 +1211,7 @@ async def phone_keyevent(
         driver = get_driver(device_serial, platform)
         result = driver.input.keyevent(keycode)
         result["platform"] = platform
+        result["key"] = result.get("key") or result.get("keycode") or keycode
         return result
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -1470,6 +1481,7 @@ async def phone_force_stop(
         result = driver.app.force_stop(package)
         result["device_serial"] = device_serial
         result["platform"] = platform
+        result["package"] = result.get("package") or result.get("PackageName") or package
         return result
     except Exception as e:
         return {"ok": False, "error": str(e)}

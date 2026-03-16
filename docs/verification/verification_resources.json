@@ -1,0 +1,17 @@
+{
+  "description": "MCP 工具验证运行前资源清单。执行 scripts/verify_mcp_tools_a.py 前请确认以下路径与包名存在。device_serial 为 auto 时由脚本通过 adb devices 自动获取。",
+  "device_serial": "auto",
+  "apk_path": ".test_res/AdMasterSDKDemoAS-debug.apk",
+  "package": "cc.admaster.android.demo",
+  "settings_package": "com.android.settings",
+  "resource_file": ".test_res/keyboard_笑脸.png",
+  "resource_key": "keyboard_笑脸",
+  "push_file": {
+    "local_path": ".test_res/keyboard_笑脸.png",
+    "remote_path": "/sdcard/Download/verification_push_pull_test.png"
+  },
+  "pull_file": {
+    "remote_path": "/sdcard/Download/verification_push_pull_test.png",
+    "local_path": ""
+  }
+}

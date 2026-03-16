@@ -469,11 +469,11 @@ class AndroidDriver:
         return self._input.keyevent("KEYCODE_POWER")
 
     def clear_background(self) -> dict:
-        """Best-effort clear background apps."""
+        """Best-effort clear background apps (only currently running 3p apps)."""
         from phone_pilot.android.device.utils import (
             clear_background_processes as _clear,
         )
-        return _clear(self._device_serial)
+        return _clear(self._device_serial, mode="force_stop_running_3p")
 
     def device_info(self) -> dict:
         """Return device profile dict."""

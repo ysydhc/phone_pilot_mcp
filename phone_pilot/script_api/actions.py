@@ -239,7 +239,10 @@ def swipe(
         y2 = int(round(float(y2_pct if y2_pct is not None else 0.2) * h))
     if None in (x1, y1, x2, y2):
         return {"ok": False, "error": "swipe_coordinates_unavailable"}
-    return _input_swipe(ctx, int(x1), int(y1), int(x2), int(y2), duration_ms=duration_ms, wait_s=wait_s)
+    res = _input_swipe(ctx, int(x1), int(y1), int(x2), int(y2), duration_ms=duration_ms)
+    if wait_s and wait_s > 0:
+        time.sleep(float(wait_s))
+    return res
 
 
 def swipe_up(

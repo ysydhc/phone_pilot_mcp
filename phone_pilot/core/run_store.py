@@ -51,7 +51,7 @@ def _git_info(cwd: Optional[str] = None) -> dict:
         "dirty_files_count": 0,
         "has_patch": False,
     }
-    kw = {"cwd": cwd, "check": False, "capture_output": True, "text": True, "timeout": 5}
+    kw = {"cwd": cwd, "check": False, "capture_output": True, "text": True, "timeout": 2}
     try:
         r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], **kw)
         if r.returncode == 0:
@@ -79,7 +79,7 @@ def _git_diff_patch(cwd: Optional[str] = None) -> Optional[str]:
     try:
         r = subprocess.run(
             ["git", "diff", "HEAD"],
-            cwd=cwd, check=False, capture_output=True, text=True, timeout=10,
+            cwd=cwd, check=False, capture_output=True, text=True, timeout=3,
         )
         patch = (r.stdout or "").strip()
         return patch if patch else None
@@ -178,13 +178,21 @@ class RunSession:
         session.logcat_dir.mkdir(exist_ok=True)
         session.meminfo_dir.mkdir(exist_ok=True)
 
-        # Save git info
+        # Save git info (commit + dirty); diff in background thread
         _write_json(run_dir / "git_info.json", ginfo)
+
+        def _write_diff_async() -> None:
+            try:
+                patch = _git_diff_patch(git_cwd)
+                if patch and ginfo.get("dirty"):
+                    (run_dir / "git_diff.patch").write_text(patch, encoding="utf-8")
+            except Exception:
+                pass
+
         if ginfo.get("dirty"):
-            patch = _git_diff_patch(git_cwd)
-            if patch:
-                (run_dir / "git_diff.patch").write_text(patch, encoding="utf-8")
-                ginfo["has_patch"] = True
+            import threading
+            _t = threading.Thread(target=_write_diff_async, daemon=True)
+            _t.start()
 
         # Copy script source
         if script_path:

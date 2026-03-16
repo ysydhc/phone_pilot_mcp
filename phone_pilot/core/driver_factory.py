@@ -133,9 +133,9 @@ def _first_adb_device() -> Optional[str]:
             check=False, delay_s=0, log_output=False,
         )
         devices = parse_adb_devices(proc.stdout or "")
-        for serial, state in devices:
-            if state == "device":
-                return serial
+        for d in devices:
+            if d.get("state") == "device" and d.get("serial"):
+                return d.get("serial")
     except Exception:
         pass
     return None
@@ -171,8 +171,8 @@ def _is_adb_device(serial: str) -> bool:
             [adb_executable(), "devices"],
             check=False, delay_s=0, log_output=False,
         )
-        for s, state in parse_adb_devices(proc.stdout or ""):
-            if s == serial and state == "device":
+        for d in parse_adb_devices(proc.stdout or ""):
+            if d.get("serial") == serial and d.get("state") == "device":
                 return True
     except Exception:
         pass

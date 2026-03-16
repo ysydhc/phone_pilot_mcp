@@ -82,6 +82,42 @@ def mock_get_driver(mock_driver):
 
 
 # ---------------------------------------------------------------------------
+# Device Management Tools / 设备管理工具
+# ---------------------------------------------------------------------------
+
+
+class TestDeviceManagement:
+    """设备管理工具契约测试 / Device management tools contract tests."""
+
+    def test_phone_list_devices_ok(self):
+        """list_devices 正常返回 {"ok": True, "devices": [...]}.
+        list_devices returns ok=True with devices list."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = "List of devices attached\ntest_123\tdevice\n"
+        # mock adb runner 和解析器所在的源模块
+        # Mock the source modules where adb runner and parser are defined
+        with patch("phone_pilot.android.adb.runner.CommandRunner.run", return_value=mock_proc), \
+             patch("phone_pilot.android.adb.parsers.parse_adb_devices") as mock_parse, \
+             patch("phone_pilot.android.adb.utils.adb_executable", return_value="adb"):
+            mock_parse.return_value = [
+                {"serial": "test_123", "status": "device", "description": "Pixel 6"}
+            ]
+            from phone_pilot.mcp.server import phone_list_devices
+            result = _run(phone_list_devices())
+
+        assert result["ok"] is True
+        assert "devices" in result
+        assert isinstance(result["devices"], list)
+        assert len(result["devices"]) >= 1
+        assert result["devices"][0]["serial"] == "test_123"
+        # 契约校验 / contract validation
+        ok, missing = validate_response("phone_list_devices", result)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+
+# ---------------------------------------------------------------------------
 # P0 Navigation Tools
 # ---------------------------------------------------------------------------
 
@@ -93,19 +129,27 @@ class TestP0Navigation:
         """go_home 正常返回 {"ok": True, "platform": str}."""
         from phone_pilot.mcp.server import phone_go_home
 
+        from phone_pilot.mcp.tool_contracts import validate_response
+
         result = _run(phone_go_home())
         assert result["ok"] is True
         assert "platform" in result
         assert result["platform"] == "android"
         assert result.get("device_serial") == "test_serial"
+        ok, missing = validate_response("phone_go_home", result)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
 
     def test_phone_go_back_ok(self, mock_resolve, mock_get_driver):
         """go_back 正常返回."""
         from phone_pilot.mcp.server import phone_go_back
 
+        from phone_pilot.mcp.tool_contracts import validate_response
+
         result = _run(phone_go_back())
         assert result["ok"] is True
         assert "platform" in result
+        ok, missing = validate_response("phone_go_back", result)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
 
     def test_phone_unlock_ok(self, mock_resolve, mock_get_driver):
         """unlock 正常返回."""
@@ -152,10 +196,14 @@ class TestP0Recording:
         """start_recording 正常返回 local_path."""
         from phone_pilot.mcp.server import phone_start_recording
 
+        from phone_pilot.mcp.tool_contracts import validate_response
+
         result = _run(phone_start_recording())
         assert result["ok"] is True
         assert "local_path" in result
         assert result["local_path"].endswith(".mp4")
+        ok, missing = validate_response("phone_start_recording", result)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
 
     def test_start_recording_already_recording(self, mock_resolve, mock_get_driver):
         """重复 start 返回 already_recording."""
@@ -201,10 +249,14 @@ class TestP0Logcat:
         """start_logcat 正常返回 path."""
         from phone_pilot.mcp.server import phone_start_logcat
 
+        from phone_pilot.mcp.tool_contracts import validate_response
+
         result = _run(phone_start_logcat())
         assert result["ok"] is True
         assert "path" in result
         assert result.get("pid") == 1234
+        ok, missing = validate_response("phone_start_logcat", result)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
 
     def test_start_logcat_already_capturing(self, mock_resolve, mock_get_driver):
         """重复 start 返回 already_capturing."""
@@ -221,11 +273,14 @@ class TestP0Logcat:
         """stop_logcat 正常返回."""
         from phone_pilot.mcp import server as mcp_server
         from phone_pilot.mcp.server import phone_start_logcat, phone_stop_logcat
+        from phone_pilot.mcp.tool_contracts import validate_response
 
         _run(phone_start_logcat())
         result = _run(phone_stop_logcat())
         assert result["ok"] is True
         assert "test_serial" not in mcp_server._logcat_state or mcp_server._logcat_state.get("test_serial") is None
+        ok, missing = validate_response("phone_stop_logcat", result)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
 
     def test_stop_logcat_no_capture(self, mock_resolve, mock_get_driver):
         """未 start 时 stop 返回 no_logcat_capture."""
@@ -562,3 +617,79 @@ class TestMCPErrorHandling:
         assert result["ok"] is False
         assert "error" in result
         assert "device disconnected" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Contract validation / 契约校验
+# ---------------------------------------------------------------------------
+
+
+class TestContractValidation:
+    """契约校验函数测试 / Contract validation function tests."""
+
+    def test_validate_response_success_path(self):
+        """成功路径：传入完整 response，期望 (True, [])。Success path: full response, expect (True, [])."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        result = validate_response(
+            "phone_go_home",
+            {"ok": True, "platform": "android", "device_serial": "abc"},
+        )
+        assert result == (True, [])
+
+    def test_validate_response_missing_key(self):
+        """成功路径缺键：缺少 platform 键。Success path missing key: platform."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        ok, missing = validate_response("phone_go_home", {"ok": True})
+        assert ok is False
+        assert "platform" in missing
+
+    def test_validate_response_error_path_complete(self):
+        """失败路径完整：含 ok=False 和 error。Error path complete: ok=False and error."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        result = validate_response(
+            "phone_go_home",
+            {"ok": False, "error": "device not found"},
+        )
+        assert result == (True, [])
+
+    def test_validate_response_error_path_missing_error(self):
+        """失败路径缺 error 键 → (False, ["error"])。Error path missing error key."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        ok, missing = validate_response("phone_go_home", {"ok": False})
+        assert ok is False
+        assert "error" in missing
+
+    def test_validate_response_no_ok_key(self):
+        """缺少 ok 键 → (False, ["ok"])。Missing ok key."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        ok, missing = validate_response("phone_go_home", {"platform": "android"})
+        assert ok is False
+        assert "ok" in missing
+
+    def test_validate_response_not_dict(self):
+        """传入非 dict → (False, ["response_not_dict"])。Non-dict input."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        ok, missing = validate_response("phone_go_home", "not a dict")
+        assert ok is False
+        assert "response_not_dict" in missing
+
+    def test_validate_response_unknown_tool(self):
+        """未知工具 → (False, [...])。Unknown tool returns (False, [...])."""
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        ok, missing = validate_response("phone_nonexistent", {"ok": True})
+        assert ok is False
+        assert len(missing) > 0
+
+    def test_all_contracts_count(self):
+        """契约表总数应为 62。Contract table should have 62 entries."""
+        from phone_pilot.mcp.tool_contracts import get_all_contracts
+
+        contracts = get_all_contracts()
+        assert len(contracts) == 62, f"Expected 62 contracts, got {len(contracts)}"
