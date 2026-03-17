@@ -323,6 +323,7 @@ def find_text(
     roi = _roi_from_box(ctx, box) if box else None
 
     def _try_ocr_first() -> Optional[UIElement]:
+        effective_ocr_exact = exact or ocr_exact
         for lang in ocr_langs:
             if regex:
                 boxes = _ocr_find_text_boxes_regex(
@@ -338,7 +339,7 @@ def find_text(
                     texts=[raw_text],
                     roi=roi,
                     lang=lang,
-                    exact=bool(ocr_exact),
+                    exact=bool(effective_ocr_exact),
                     case_sensitive=bool(ocr_case_sensitive),
                     psm=int(ocr_psm),
                 )
@@ -347,7 +348,7 @@ def find_text(
                     ctx,
                     texts=[raw_text],
                     lang=lang,
-                    exact=bool(ocr_exact),
+                    exact=bool(effective_ocr_exact),
                     case_sensitive=bool(ocr_case_sensitive),
                     psm=int(ocr_psm),
                 )
@@ -394,7 +395,7 @@ def find_text(
         )
 
     def _find_once() -> Optional[UIElement]:
-        if use_ocr and len(norm_query) <= 2:
+        if use_ocr and len(norm_query) <= 2 and not exact:
             hit = _try_ocr_first()
             if hit:
                 return hit
