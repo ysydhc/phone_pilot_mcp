@@ -129,6 +129,35 @@
 - 若启动 MCP 时能传 env，建议仍设置：`ADB_PATH`、`ANDROID_HOME`、`PATH`（含 platform-tools）、`HOME`，与 Cursor 的 mcp.json 中 `phone_pilot.env` 一致，兼容性最好。
 - 即使不传，服务端也会在首次设备相关调用时自动发现并设置 env，多数单机部署可恢复正常。
 
+## 外部调用时 Connection closed / Client closed
+
+### 现象
+
+使用 **PyPI 包**在外部客户端连接 MCP 时，日志出现：
+
+- `connected -> error: Client closed`
+- `Error calling tool 'phone_go_home': MCP error -32000: Connection closed`
+- 后续再调工具或 `listOfferingsForUI` 报 **Not connected**
+
+即：先连接成功，随后连接被关闭，之后所有调用都报「Not connected」（实为客户端已无 MCP 连接）。
+
+### 原因
+
+- MCP 服务器是 **async**，但部分工具（如 `phone_go_home`、`phone_force_stop`）内部直接执行**同步阻塞**的 adb/设备调用（`_resolve_device_serial`、`get_driver()`、`driver.go_home()` 等）。
+- 这些调用会**阻塞 asyncio 事件循环**，导致服务器在工具执行期间无法及时响应客户端（如心跳、其他请求）。客户端或传输层**超时**后主动断开 → 表现为「Client closed」/「Connection closed」。
+- 断开后客户端处于未连接状态，后续任何调用（含 listOfferingsForUI）都会报 **Not connected**。
+
+### 代码侧修复（已实现）
+
+- 在 **`phone_pilot.mcp.server`** 中，将 `phone_go_home`、`phone_force_stop` 的同步设备逻辑放入 **`asyncio.to_thread()`** 中执行，事件循环不再被阻塞，客户端不易因超时断开。
+- 若你使用的版本仍出现 Connection closed，请升级到包含该修复的版本（如 0.5.3 及以上）。
+
+### 外部接入建议
+
+- **升级**：`pip install -U phone-pilot` 或使用带上述修复的版本。
+- **环境变量**：启动 MCP 时尽量传入 `ADB_PATH` 或 `ANDROID_HOME`，减少 adb 发现耗时，进一步降低首包延迟。
+- **客户端超时**：若客户端可配置 MCP 请求/读超时，可适当调大，避免偶发慢设备下仍被误判超时。
+
 ## 验证是否修复
 
 1. 保存上述配置后，**完全重启 Cursor**（或重载 MCP 配置，视 Cursor 版本而定）。
@@ -143,5 +172,6 @@
 | MCP 工具大量不可用 / 全部找不到 | MCP 服务器未成功启动 | 让 Cursor 用**本地项目**或**已安装命令**启动，不要用 `uvx phone-pilot-mcp`（或依赖未发布包的 uvx） |
 | 配置里用了 uvx | PyPI 无 `phone-pilot-mcp` 包（或 `phone-pilot` 不可用） | 改为 `uv run --project <本仓库路径> phone-pilot-mcp` 或 `phone-pilot-mcp` / `python -m phone_pilot.cli` |
 | 无 tools/ 目录 | Cursor 从未与该 MCP 建立连接 | 服务器启动成功后，Cursor 会拉取工具列表并生成 tools/ |
+| 外部调用时 Connection closed / Client closed，随后 Not connected | 工具内同步 adb 调用阻塞事件循环，客户端超时断开 | 升级到含 asyncio.to_thread 修复的版本（如 0.5.3+）；必要时设 ADB_PATH/ANDROID_HOME、调大客户端超时 |
 
 按上述方式修正 MCP 启动配置并重启 Cursor 后，phone_pilot 的 MCP 工具应可正常使用。

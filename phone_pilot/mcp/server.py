@@ -879,6 +879,21 @@ async def phone_stop_recording(
 # =============================================================================
 
 
+def _phone_go_home_sync(device_serial: Optional[str], platform: str) -> dict:
+    """Sync body for phone_go_home to run in thread (avoid blocking event loop)."""
+    resolved, plat, err = _resolve_device_serial(device_serial, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat)
+        result = driver.go_home()
+        result["platform"] = plat
+        result["device_serial"] = resolved
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @mcp.tool()
 async def phone_go_home(
     device_serial: str = "",
@@ -894,18 +909,9 @@ async def phone_go_home(
     Returns / 返回值:
         dict: {"ok": True, "platform": str} 或 {"ok": False, "error": str}
     """
-    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
-    if err:
-        return err
-    try:
-        driver = get_driver(resolved, plat)
-        # 调用协议方法返回桌面 / Call protocol method to go home
-        result = driver.go_home()
-        result["platform"] = plat
-        result["device_serial"] = resolved
-        return result
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    return await asyncio.to_thread(
+        _phone_go_home_sync, device_serial or None, platform
+    )
 
 
 @mcp.tool()
@@ -1463,6 +1469,21 @@ async def phone_launch_app(
         return {"ok": False, "error": str(e)}
 
 
+def _phone_force_stop_sync(
+    device_serial: str, package: str, platform: str
+) -> dict:
+    """Sync body for phone_force_stop to run in thread (avoid blocking event loop)."""
+    try:
+        driver = get_driver(device_serial, platform)
+        result = driver.app.force_stop(package)
+        result["device_serial"] = device_serial
+        result["platform"] = platform
+        result["package"] = result.get("package") or result.get("PackageName") or package
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @mcp.tool()
 async def phone_force_stop(
     device_serial: str,
@@ -1480,15 +1501,9 @@ async def phone_force_stop(
     Returns / 返回值:
         dict: {"ok": True, "package", "device_serial", "platform"} 或 {"ok": False, "error": str}
     """
-    try:
-        driver = get_driver(device_serial, platform)
-        result = driver.app.force_stop(package)
-        result["device_serial"] = device_serial
-        result["platform"] = platform
-        result["package"] = result.get("package") or result.get("PackageName") or package
-        return result
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    return await asyncio.to_thread(
+        _phone_force_stop_sync, device_serial, package, platform
+    )
 
 
 @mcp.tool()
