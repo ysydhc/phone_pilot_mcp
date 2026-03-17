@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-- **本地已提交**：变更已 commit（`chore: 提交 MCP 文档与配置，准备发布`）。
-- **构建已完成**：`dist/` 下已有 `phone_pilot-0.5.1-py3-none-any.whl` 和 `phone_pilot-0.5.1.tar.gz`。
-- **发布未完成**：需在本地配置 PyPI 凭证后执行一次发布命令。
+- **本地已提交**：0.5.2 变更已 commit（fix: 外部接入时 ensure_adb_env 避免首调成功后续 Not connected）。
+- **构建已完成**：`dist/` 下已有 `phone_pilot-0.5.2-py3-none-any.whl` 和 `phone_pilot-0.5.2.tar.gz`。
+- **发布未完成**：需在本地配置 PyPI 凭证后执行一次 `uv publish`。
 
 ## 发布前准备
 
@@ -26,26 +26,46 @@
 uv publish
 
 # 或使用 twine（需先 pip install twine）
-twine upload dist/phone_pilot-0.5.1*
+twine upload dist/phone_pilot-0.5.2*
 # 按提示输入用户名 __token__ 和密码（即 API token）
 ```
 
-发布成功后，外部可通过以下方式安装并使用 MCP：
+## 外部如何更新
+
+发布成功后，**外部用户**可以这样升级并使用：
+
+### 1. 升级安装
 
 ```bash
-pip install phone-pilot
-phone-pilot-mcp
+# 使用 pip
+pip install -U phone-pilot
+
+# 或使用 uv
+uv pip install -U phone-pilot
 ```
 
-或：
+若通过 **uvx** 直接跑 MCP（不先 pip 安装），每次会拉取 PyPI 最新版，一般无需单独升级；若要固定到新版本可显式指定：
 
 ```bash
-uvx phone-pilot-mcp
-# 注：uvx 会拉取 PyPI 上的 phone-pilot 包并执行其入口 phone-pilot-mcp
+uvx phone-pilot-mcp@0.5.2
 ```
+
+### 2. 环境变量（推荐）
+
+为避免「首次成功、后续 Not connected」，建议在启动 MCP 的环境里设置 ADB 相关变量之一（或保证 `adb` 在 PATH 中）：
+
+- `ADB_PATH`：adb 可执行文件完整路径；或  
+- `ANDROID_HOME`：Android SDK 根目录（我们会用 `$ANDROID_HOME/platform-tools/adb`）。
+
+未设置时，0.5.2 会尝试从常见路径自动发现并写入环境，多数场景可工作；若仍报 Not connected，请按 [MCP工具不可用排查与修复](MCP工具不可用排查与修复.md) 检查。
+
+### 3. 使新版本生效
+
+- 若 Cursor/IDE 通过 MCP 连接 phone_pilot：**重载 MCP** 或 **重启客户端** 后，会使用新安装的版本。
+- 若用 `phone-pilot-mcp` 命令行：重新执行一次即可。
 
 ## 版本与重新发布
 
-- 当前版本：`0.5.1`（见 `pyproject.toml`）。
+- 当前版本：`0.5.2`（见 `pyproject.toml`）。
 - 若需发布新版本：修改 `pyproject.toml` 中 `version`，重新执行 `uv build` 和 `uv publish`。
 - PyPI 不允许同一版本号重复上传，改版本后需重新 build 再 publish。
