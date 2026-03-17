@@ -127,6 +127,10 @@ mcp = FastMCP("phone_pilot")
 # 按设备保存录屏远程/本地路径，stop 时拉取并清理
 # Per-device recording paths for pull and cleanup on stop
 _recording_state: dict[str, dict] = {}
+# 录屏时缓存 driver，stop 时用同一实例终止进程（get_driver 每次新建实例无法 stop）
+_recording_driver_cache: dict[str, Any] = {}
+# 方案 B：录屏状态，供 phone_recording_status 轮询。device_serial -> {"status": "starting"|"started"|"failed", "local_path"?: str, "error"?: str}
+_recording_status: dict[str, dict] = {}
 
 # 按设备保存当前 logcat 输出路径 / Per-device logcat output path
 _logcat_state: dict[str, str] = {}
@@ -785,11 +789,22 @@ def _phone_start_recording_sync(
 ) -> dict:
     """Sync body for phone_start_recording (run in thread to avoid blocking event loop)."""
     try:
-        resolved_serial, resolved_platform, err = _resolve_device_serial(
-            device_serial, platform
-        )
-        if err:
-            return err
+        from phone_pilot.android.adb.utils import ensure_adb_env
+
+        ensure_adb_env()
+
+        # 快速路径：调用方已提供 device_serial 时跳过耗时的 adb devices
+        if device_serial and str(device_serial).strip():
+            resolved_serial = str(device_serial).strip()
+            resolved_platform = (platform or "auto").strip().lower()
+            if resolved_platform == "auto":
+                resolved_platform = "android"
+        else:
+            resolved_serial, resolved_platform, err = _resolve_device_serial(
+                device_serial, platform
+            )
+            if err:
+                return err
 
         if resolved_serial in _recording_state:
             return {"ok": False, "error": "already_recording"}
@@ -813,6 +828,7 @@ def _phone_start_recording_sync(
             "remote_path": remote_path,
             "local_path": str(local_path),
         }
+        _recording_driver_cache[resolved_serial] = driver
 
         return {
             "ok": True,
@@ -823,6 +839,35 @@ def _phone_start_recording_sync(
         return {"ok": False, "error": str(e)}
 
 
+async def _start_recording_background(
+    device_serial: str, name: str, out_dir: str, platform: str
+) -> None:
+    """后台执行录屏启动，完成后更新 _recording_status（方案 B）."""
+    try:
+        result = await asyncio.to_thread(
+            _phone_start_recording_sync,
+            device_serial,
+            name,
+            out_dir,
+            platform,
+        )
+        if result.get("ok"):
+            _recording_status[device_serial] = {
+                "status": "started",
+                "local_path": result.get("local_path", ""),
+            }
+        else:
+            _recording_status[device_serial] = {
+                "status": "failed",
+                "error": result.get("error", "unknown"),
+            }
+    except Exception as e:
+        _recording_status[device_serial] = {
+            "status": "failed",
+            "error": str(e),
+        }
+
+
 @mcp.tool()
 async def phone_start_recording(
     device_serial: str = "",
@@ -830,26 +875,67 @@ async def phone_start_recording(
     out_dir: str = "./.recordings",
     platform: str = "auto",
 ) -> dict:
-    """开始录屏。
+    """开始录屏（方案 B：带 device_serial 时立即返回，后台启动，可轮询 phone_recording_status）。
     Start screen recording on device.
 
     Parameters / 参数:
-        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        device_serial: 设备序列号；**传入时立即返回**，录屏在后台启动，请轮询 phone_recording_status 至 started 后再调 stop / Device serial; when provided, returns immediately and starts in background
         name: 录屏文件名前缀 / Recording file name prefix
         out_dir: 输出根目录 / Output root directory
         platform: 平台类型 / Platform type
 
     Returns / 返回值:
-        dict: {"ok": True, "local_path": str, "device_serial": str}
-        或 {"ok": False, "error": "already_recording"} / {"ok": False, "error": str}
+        若传入 device_serial: {"ok": True, "status": "starting", "device_serial": str}，请轮询 phone_recording_status 至 started 后调用 phone_stop_recording
+        若未传 device_serial: 同步等待结果，{"ok": True, "local_path", "device_serial"} 或 {"ok": False, "error": str}
     """
+    serial = (device_serial or "").strip()
+    if serial:
+        # 方案 B：立即返回，后台执行，避免客户端读超时断开
+        if serial in _recording_state:
+            return {"ok": False, "error": "already_recording"}
+        _recording_status[serial] = {"status": "starting"}
+        asyncio.create_task(
+            _start_recording_background(serial, name, out_dir, platform)
+        )
+        return {
+            "ok": True,
+            "status": "starting",
+            "device_serial": serial,
+            "message": "录屏已在后台启动，请轮询 phone_recording_status 至 status=started 后调用 phone_stop_recording",
+        }
+    # 未传 device_serial：保持同步行为，兼容旧调用方
     return await asyncio.to_thread(
         _phone_start_recording_sync,
-        device_serial or None,
+        None,
         name,
         out_dir,
         platform,
     )
+
+
+@mcp.tool()
+def phone_recording_status(device_serial: str) -> dict:
+    """查询指定设备的录屏状态（方案 B：轮询用）。
+    Get recording status for a device (for polling after phone_start_recording).
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+
+    Returns / 返回值:
+        dict: {"ok": True, "status": "starting"|"started"|"not_recording"|"failed", "local_path"?: str, "error"?: str}
+    """
+    if not (device_serial and str(device_serial).strip()):
+        return {"ok": False, "error": "device_serial is required", "status": "not_recording"}
+    serial = str(device_serial).strip()
+    if serial in _recording_state:
+        return {
+            "ok": True,
+            "status": "started",
+            "local_path": _recording_state[serial].get("local_path", ""),
+        }
+    if serial in _recording_status:
+        return {"ok": True, **_recording_status[serial]}
+    return {"ok": True, "status": "not_recording"}
 
 
 def _phone_stop_recording_sync(
@@ -857,20 +943,33 @@ def _phone_stop_recording_sync(
 ) -> dict:
     """Sync body for phone_stop_recording (run in thread to avoid blocking event loop)."""
     try:
-        resolved_serial, resolved_platform, err = _resolve_device_serial(
-            device_serial, platform
-        )
-        if err:
-            return err
+        from phone_pilot.android.adb.utils import ensure_adb_env
+
+        ensure_adb_env()
+
+        if device_serial and str(device_serial).strip():
+            resolved_serial = str(device_serial).strip()
+        else:
+            resolved_serial, _, err = _resolve_device_serial(device_serial, platform)
+            if err:
+                return err
 
         state = _recording_state.pop(resolved_serial, None)
         if not state:
             return {"ok": False, "error": "not_recording"}
 
-        driver = get_driver(resolved_serial, resolved_platform or "android")
+        driver = _recording_driver_cache.pop(resolved_serial, None)
+        if not driver:
+            return {
+                "ok": False,
+                "error": "not_recording",
+                "detail": "no_cached_driver",
+            }
+
         driver.screen.stop_screenrecord()
         driver.pull_file(state["remote_path"], state["local_path"])
         driver.remove_remote_file(state["remote_path"])
+        _recording_status.pop(resolved_serial, None)
 
         return {
             "ok": True,
@@ -886,7 +985,7 @@ async def phone_stop_recording(
     device_serial: str = "",
     platform: str = "auto",
 ) -> dict:
-    """停止录屏并拉取文件到本地。
+    """停止录屏并拉取文件到本地（方案 B：仅当 phone_recording_status 为 started 时可调用）。
     Stop screen recording and pull file to local.
 
     Parameters / 参数:
@@ -895,8 +994,23 @@ async def phone_stop_recording(
 
     Returns / 返回值:
         dict: {"ok": True, "local_path": str}
-        或 {"ok": False, "error": "not_recording"} / {"ok": False, "error": str}
+        或 {"ok": False, "error": "recording_still_starting"|"not_recording", "message": str} / {"ok": False, "error": str}
     """
+    serial = (device_serial or "").strip()
+    if serial and serial not in _recording_state:
+        # 方案 B：未就绪时直接返回错误，不阻塞
+        st = _recording_status.get(serial, {})
+        if st.get("status") == "starting":
+            return {
+                "ok": False,
+                "error": "recording_still_starting",
+                "message": "请稍后重试或先调用 phone_recording_status 确认 status=started 后再调用 phone_stop_recording",
+            }
+        return {
+            "ok": False,
+            "error": "not_recording",
+            "message": "请先调用 phone_start_recording（传入 device_serial）并轮询 phone_recording_status 至 started 后再调用 phone_stop_recording",
+        }
     return await asyncio.to_thread(
         _phone_stop_recording_sync, device_serial or None, platform
     )
@@ -909,9 +1023,17 @@ async def phone_stop_recording(
 
 def _phone_go_home_sync(device_serial: Optional[str], platform: str) -> dict:
     """Sync body for phone_go_home to run in thread (avoid blocking event loop)."""
-    resolved, plat, err = _resolve_device_serial(device_serial, platform)
-    if err:
-        return err
+    from phone_pilot.android.adb.utils import ensure_adb_env
+
+    ensure_adb_env()
+    if device_serial and str(device_serial).strip():
+        resolved = str(device_serial).strip()
+        plat = (platform or "auto").strip().lower()
+        plat = "android" if plat == "auto" else plat
+    else:
+        resolved, plat, err = _resolve_device_serial(device_serial, platform)
+        if err:
+            return err
     try:
         driver = get_driver(resolved, plat)
         result = driver.go_home()
@@ -1513,8 +1635,13 @@ def _phone_force_stop_sync(
     device_serial: str, package: str, platform: str
 ) -> dict:
     """Sync body for phone_force_stop to run in thread (avoid blocking event loop)."""
+    from phone_pilot.android.adb.utils import ensure_adb_env
+
+    ensure_adb_env()
+    plat = (platform or "android").strip().lower()
+    plat = "android" if plat == "auto" else plat
     try:
-        driver = get_driver(device_serial, platform)
+        driver = get_driver(device_serial.strip(), plat)
         result = driver.app.force_stop(package)
         result["device_serial"] = device_serial
         result["platform"] = platform
@@ -3391,8 +3518,83 @@ async def phone_tap_element(
 # =============================================================================
 
 
+def _patch_stdio_skip_empty_lines():
+    """
+    Patch MCP SDK stdio to skip empty lines before JSON parsing.
+
+    Some clients (e.g. Cursor) send bare newlines on stdio; the SDK's
+    JSONRPCMessage.model_validate_json(line) then fails with
+    "Invalid JSON: EOF while parsing a value at line 2 column 0".
+    Skipping empty/whitespace-only lines avoids the error and the noisy logs.
+    """
+    from contextlib import asynccontextmanager
+
+    import mcp.server.stdio as stdio_mod
+
+    if getattr(stdio_mod, "_phone_pilot_stdio_patched", False):
+        return
+
+    @asynccontextmanager
+    async def _stdio_server_patched(stdin=None, stdout=None):
+        import sys
+        from io import TextIOWrapper
+
+        import anyio
+        import anyio.lowlevel
+        from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
+
+        import mcp.types as types
+        from mcp.shared.message import SessionMessage
+
+        if stdin is None:
+            stdin = anyio.wrap_file(TextIOWrapper(sys.stdin.buffer, encoding="utf-8"))
+        if stdout is None:
+            stdout = anyio.wrap_file(TextIOWrapper(sys.stdout.buffer, encoding="utf-8"))
+
+        read_stream_writer, read_stream = anyio.create_memory_object_stream(0)
+        write_stream, write_stream_reader = anyio.create_memory_object_stream(0)
+
+        async def stdin_reader():
+            try:
+                async with read_stream_writer:
+                    async for line in stdin:
+                        if not line or not line.strip():
+                            continue
+                        try:
+                            message = types.JSONRPCMessage.model_validate_json(line)
+                        except Exception as exc:
+                            await read_stream_writer.send(exc)
+                            continue
+                        session_message = SessionMessage(message)
+                        await read_stream_writer.send(session_message)
+            except anyio.ClosedResourceError:
+                await anyio.lowlevel.checkpoint()
+
+        async def stdout_writer():
+            try:
+                async with write_stream_reader:
+                    async for session_message in write_stream_reader:
+                        json_str = session_message.message.model_dump_json(
+                            by_alias=True, exclude_none=True
+                        )
+                        await stdout.write(json_str + "\n")
+                        await stdout.flush()
+            except anyio.ClosedResourceError:
+                await anyio.lowlevel.checkpoint()
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(stdin_reader)
+            tg.start_soon(stdout_writer)
+            yield read_stream, write_stream
+
+    stdio_mod.stdio_server = _stdio_server_patched
+    stdio_mod._phone_pilot_stdio_patched = True
+
+
 def run_server(transport: str = "stdio"):
     """Run the MCP server."""
+    if transport == "stdio":
+        _patch_stdio_skip_empty_lines()
     mcp.run(transport)
 
 

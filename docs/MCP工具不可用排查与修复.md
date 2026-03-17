@@ -108,6 +108,39 @@
 
 同样把 `cwd` 和（如有）`command` 中的 `python` 换成你实际使用的解释器路径（如 `/path/to/python3`）。
 
+## 日志中 Repeated「Invalid JSON: EOF while parsing a value」/「input_value='\n'」
+
+### 现象
+
+运行 `uv run python -m phone_pilot.cli` 或 Cursor 连接 MCP 时，终端/日志里反复出现：
+
+```text
+ERROR  Received exception from stream: 1 validation error for JSONRPCMessage
+  Invalid JSON: EOF while parsing a value at line 2 column 0
+  input_value='\n'
+```
+
+### 原因
+
+MCP 协议在 stdio 上使用 **NDJSON**（一行一条 JSON）。部分客户端（如 Cursor）会向 stdin 发送**空行**（仅 `\n`）；当前 MCP Python SDK 的 stdio 服务端会把每一行都交给 `JSONRPCMessage.model_validate_json(line)` 解析，空行导致解析失败并产生上述错误日志。服务端会继续运行，但日志会持续刷屏。
+
+### 解决（已做）
+
+本工程在 **`run_server()`** 里对 **stdio 传输**做了 **monkey-patch**：在调用 MCP SDK 的 `stdio_server` 前，用自带的 stdio 封装替换 SDK 的封装，在 **解析前跳过空行/仅空白行**（`if not line or not line.strip(): continue`），从而避免把 `\n` 当 JSON 解析。  
+无需额外配置，用 `phone-pilot-mcp` 或 `python -m phone_pilot.cli` 启动即可生效。若将来上游 [modelcontextprotocol/python-sdk](https://github.com/modelcontextprotocol/python-sdk) 在 stdio 中官方支持跳过空行，可考虑移除该 patch。
+
+## 模拟外部接入时如何保证代码是最新的
+
+在工程内开发时，若要**模拟外部客户端接入 MCP**（例如 Cursor、Claude Desktop、或自研 MCP 客户端），又希望调到的接口是**当前仓库最新代码**，需保证 **MCP 服务进程从本工程启动**，而不是用已安装的旧包。
+
+| 方式 | 是否保证最新代码 | 说明 |
+|------|------------------|------|
+| **方式 A**（`uv run --project <repo> phone-pilot-mcp`） | ✅ 是 | Cursor/客户端用 `uv run --project <工程根路径>` 启动 MCP，进程加载的是工程内源码与依赖，改完即生效。 |
+| **方式 C**（`python -m phone_pilot.cli` 且 `cwd` 为工程根） | ✅ 是 | 用工程目录下的 Python 解释器（或 `uv run python`）跑 `-m phone_pilot.cli`，并设置 `cwd` 为工程根，同样跑的是工程代码。 |
+| **方式 B**（直接 `phone-pilot-mcp`） | ⚠️ 取决于安装方式 | 若为 `pip install phone-pilot`（非 -e），用的是发布版，不是最新代码；若为 `pip install -e .` 可编辑安装，则指向工程目录，算最新。 |
+
+**结论**：模拟外部接入且要用最新代码时，MCP 配置里应使用 **方式 A 或 方式 C**，让服务由**工程根目录**下的环境启动；外部客户端只是连到该进程的 stdio，不关心代码路径，只要进程从工程起，接口就是最新的。
+
 ## 外部接入时「首次成功、后续 Not connected」的修复
 
 ### 现象
@@ -162,7 +195,9 @@
   - **设备/列表**：`phone_list_devices`、`phone_get_device_info`
   - **导航/应用**：`phone_go_home`、`phone_force_stop`、`phone_launch_app`
   - **录屏**：`phone_start_recording`、`phone_stop_recording`
-- 若你使用的版本仍出现 Connection closed 或「获取设备信息成功、开始录屏起 Not connected」，请升级到包含上述 to_thread 修复的版本（如 **0.5.5 及以上**），并**重载 MCP / 重启客户端**后再试。
+- **快速路径**：当调用方已传入 `device_serial` 时，`phone_start_recording`、`phone_go_home`、`phone_force_stop`、`phone_stop_recording` 会跳过耗时的 `adb devices` 解析，直接使用该 serial，**尽快返回**，降低客户端读超时导致 Connection closed 的概率。
+- **录屏 driver 缓存**：开始录屏时缓存当前设备的 driver 实例，停止录屏时用同一实例调用 `stop_screenrecord()`，否则每次 `get_driver()` 新建实例无法终止录屏进程。
+- 若你使用的版本仍出现 Connection closed 或「开始录屏时 Connection closed」，请升级到 **0.5.6 及以上**，并**重载 MCP / 重启客户端**后再试。
 
 ### 外部接入建议
 

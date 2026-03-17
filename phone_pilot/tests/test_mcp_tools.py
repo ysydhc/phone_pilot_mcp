@@ -236,6 +236,43 @@ class TestP0Recording:
         assert result["ok"] is False
         assert result.get("error") == "not_recording"
 
+    def test_start_recording_with_serial_returns_starting(self, mock_resolve, mock_get_driver):
+        """方案 B：传入 device_serial 时立即返回 status=starting."""
+        from phone_pilot.mcp.server import phone_start_recording
+
+        result = _run(phone_start_recording(device_serial="dev123"))
+        assert result["ok"] is True
+        assert result.get("status") == "starting"
+        assert result.get("device_serial") == "dev123"
+
+    def test_recording_status_requires_serial(self):
+        """phone_recording_status 必须传入 device_serial."""
+        from phone_pilot.mcp.server import phone_recording_status
+
+        result = phone_recording_status("")
+        assert result["ok"] is False
+        assert result.get("status") == "not_recording"
+        assert "device_serial" in result.get("error", "")
+
+    def test_recording_status_not_recording(self):
+        """无录屏时 status 返回 not_recording."""
+        from phone_pilot.mcp.server import phone_recording_status
+
+        result = phone_recording_status("unknown_serial")
+        assert result["ok"] is True
+        assert result.get("status") == "not_recording"
+
+    def test_stop_recording_still_starting_returns_error(self, mock_resolve, mock_get_driver):
+        """方案 B：status 为 starting 时 stop 返回 recording_still_starting."""
+        from phone_pilot.mcp import server as mcp_server
+        from phone_pilot.mcp.server import phone_stop_recording
+
+        mcp_server._recording_status["s1"] = {"status": "starting"}
+        result = _run(phone_stop_recording(device_serial="s1"))
+        assert result["ok"] is False
+        assert result.get("error") == "recording_still_starting"
+        mcp_server._recording_status.pop("s1", None)
+
 
 # ---------------------------------------------------------------------------
 # P0 Logcat
