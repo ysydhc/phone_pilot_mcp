@@ -29,6 +29,7 @@ def _run_git(args: list[str], cwd: str) -> str:
             capture_output=True,
             text=True,
             timeout=15,
+            stdin=subprocess.DEVNULL,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
     except Exception:

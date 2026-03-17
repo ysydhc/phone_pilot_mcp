@@ -60,6 +60,7 @@ def _run_shark(hprof_path: str, *, timeout_s: float = 120.0) -> dict:
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            stdin=subprocess.DEVNULL,
         )
         output = proc.stdout + "\n" + proc.stderr
     except subprocess.TimeoutExpired:

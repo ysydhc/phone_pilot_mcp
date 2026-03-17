@@ -63,7 +63,7 @@ def _pull_file(device_serial: Optional[str], remote_path: str, local_path: pathl
     """Pull a remote file to local_path and return transfer metadata."""
     local_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = adb_prefix(device_serial) + ["pull", remote_path, str(local_path)]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
     size = None
     try:
         if local_path.exists():
@@ -85,7 +85,7 @@ def _pull_file(device_serial: Optional[str], remote_path: str, local_path: pathl
 def _rm_remote(device_serial: Optional[str], remote_path: str) -> dict:
     """Remove a remote file and return execution metadata."""
     cmd = adb_prefix(device_serial) + ["shell", "rm", "-f", remote_path]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
     return {
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,
@@ -121,7 +121,7 @@ def start_screenrecord_detached(
     # NOTE: We run through `sh -c` to get background pid ($!).
     sh_cmd = " ".join(args) + " >/dev/null 2>&1 & echo $!"
     cmd = adb_prefix(device_serial) + ["shell", sh_cmd]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
     out = (proc.stdout or "").strip()
     pid = None
     try:
@@ -161,7 +161,7 @@ def stop_screenrecord_detached(
     kill_res = None
     if pid:
         cmd = adb_prefix(device_serial) + ["shell", "kill", "-2", str(int(pid))]
-        proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+        proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
         kill_res = {
             "ok": proc.returncode == 0,
             "returncode": proc.returncode,
@@ -334,7 +334,7 @@ class WorkflowScreenRecorder:
             cmd.append(remote_path)
 
             print(f"[screenrecord] start: {' '.join(cmd)}", file=sys.stderr)
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
             with self._lock:
                 self._cur_proc = proc
 

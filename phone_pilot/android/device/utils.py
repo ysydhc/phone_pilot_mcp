@@ -315,6 +315,7 @@ def _aapt_dump_badging_info(aapt_bin: str, apk_path: pathlib.Path) -> dict:
             check=False,
             text=True,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -382,6 +383,7 @@ def _aapt2_dump_xmltree_icon_ref(aapt2_bin: str, apk_path: pathlib.Path) -> Opti
             check=False,
             text=True,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
         )
     except Exception:
         return None
@@ -757,6 +759,7 @@ def _run_apkanalyzer(args: list[str]) -> dict:
             text=True,
             capture_output=True,
             env=env,
+            stdin=subprocess.DEVNULL,
             timeout=30,
         )
     except Exception as e:
@@ -825,6 +828,7 @@ def _run_bundletool(args: list[str]) -> dict:
             text=True,
             capture_output=True,
             timeout=60,
+            stdin=subprocess.DEVNULL,
         )
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -892,6 +896,7 @@ def _aapt2_dump_resources(apk_path: pathlib.Path) -> str:
             check=False,
             text=True,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
         )
     except Exception:
         return ""
@@ -1187,6 +1192,7 @@ def _pull_apk(device_serial: str, remote_path: str, local_path: pathlib.Path) ->
         text=True,
         capture_output=True,
         timeout=90,
+        stdin=subprocess.DEVNULL,
     )
     return proc.returncode == 0 and local_path.exists()
 
@@ -1363,6 +1369,7 @@ def get_app_info(
             text=True,
             capture_output=True,
             timeout=60,
+            stdin=subprocess.DEVNULL,
         )
         if pull_proc.returncode != 0 or not local_apk.exists():
             return {
@@ -1598,6 +1605,7 @@ def get_app_label_via_pyaxmlparser(
             text=True,
             capture_output=True,
             timeout=100,
+            stdin=subprocess.DEVNULL,
         )
         if proc.returncode == 0:
             label = _extract_label_from_dumpsys(proc.stdout or "")
@@ -1635,6 +1643,7 @@ def get_app_label_via_pyaxmlparser(
             text=True,
             capture_output=True,
             timeout=30,
+            stdin=subprocess.DEVNULL,
         )
         if pull_proc.returncode != 0 or not pathlib.Path(temp_apk_path).exists():
             return {
@@ -1653,6 +1662,7 @@ def get_app_label_via_pyaxmlparser(
                 text=True,
                 capture_output=True,
                 timeout=20,
+                stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
             return {"ok": False, "PackageName": pkg, "error": "aapt dump badging timeout", "remote_apk": remote_apk}
@@ -1721,6 +1731,7 @@ def _aapt_dump_label(aapt_bin: str, apk_path: pathlib.Path) -> Optional[str]:
             check=False,
             text=True,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
         )
     except Exception:
         return None

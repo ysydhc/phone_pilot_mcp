@@ -24,7 +24,7 @@ def get_display_state(device_serial: Optional[str]) -> dict:
     cmd = adb_prefix(device_serial) + ["shell", "dumpsys", "power"]
     timed_out = False
     try:
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=2.0)
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=2.0, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         timed_out = True
         proc = None

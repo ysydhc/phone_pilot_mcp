@@ -1255,6 +1255,82 @@ async def phone_tap(
 
 
 @mcp.tool()
+async def phone_tap_text(
+    device_serial: str,
+    text: str,
+    platform: str = "android",
+    match_mode: str = "contains",
+    index: int = 0,
+    wait_s: float = 0.5,
+) -> dict:
+    """通过文本查找 UI 元素并点击（find + tap 合一）。
+    Find a UI element by text and tap it.
+
+    Parameters / 参数:
+        device_serial: 设备序列号 / Device serial
+        text: 要查找的文本 / Text to search for
+        platform: 平台类型 / Platform type
+        match_mode: "exact" 精确匹配 | "contains" 包含匹配（默认）/ Match mode
+        index: 匹配到多个元素时点击第几个（0-based，默认 0）/ Which match to tap
+        wait_s: 点击后等待秒数，默认 0.5 / Wait seconds after tap
+
+    Returns / 返回值:
+        dict: {"ok": True, "text", "center_x", "center_y", "matched_count", ...}
+        或 {"ok": False, "error": str}
+    """
+    try:
+        driver = get_driver(device_serial, platform)
+
+        selector = {}
+        if match_mode == "exact":
+            selector["text"] = text
+        else:
+            selector["text_contains"] = text
+
+        elements = driver.ui.find_elements(selector)
+
+        if not elements:
+            return {
+                "ok": False,
+                "error": "element_not_found",
+                "text": text,
+                "match_mode": match_mode,
+                "device_serial": device_serial,
+            }
+
+        if index < 0 or index >= len(elements):
+            return {
+                "ok": False,
+                "error": "index_out_of_range",
+                "text": text,
+                "index": index,
+                "matched_count": len(elements),
+                "device_serial": device_serial,
+            }
+
+        elem = elements[index]
+        cx = elem.get("center_x") or elem.get("center", [0, 0])[0]
+        cy = elem.get("center_y") or elem.get("center", [0, 0])[1]
+
+        driver.input.tap(cx, cy, wait_s=wait_s)
+
+        return {
+            "ok": True,
+            "text": text,
+            "match_mode": match_mode,
+            "matched_count": len(elements),
+            "index": index,
+            "center_x": cx,
+            "center_y": cy,
+            "element": elem,
+            "device_serial": device_serial,
+            "platform": platform,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": device_serial}
+
+
+@mcp.tool()
 async def phone_swipe(
     device_serial: str,
     x1: int,

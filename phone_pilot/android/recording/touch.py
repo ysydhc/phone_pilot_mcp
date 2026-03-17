@@ -56,7 +56,7 @@ def start_getevent_recording(device: Optional[str], raw_log: pathlib.Path) -> Ge
     cmd = adb_prefix(device) + ["shell", "getevent", "-lt"]
     # IMPORTANT: stderr for logs so MCP stdio transport isn't corrupted.
     print(f"[recorder] 开始录制触摸事件: {' '.join(cmd)}", file=sys.stderr)
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL)
     stop_event = threading.Event()
 
     def pump_stdout() -> None:
@@ -105,7 +105,7 @@ def start_getevent_recording_detached(
     out_f = open(raw_log, "w", encoding="utf-8")
     err_f = open(err_log, "w", encoding="utf-8")
     # Detach from the parent session so it survives client/server lifetime.
-    popen_kwargs = dict(stdout=out_f, stderr=err_f, text=True)
+    popen_kwargs = dict(stdout=out_f, stderr=err_f, text=True, stdin=subprocess.DEVNULL)
     if os.name != "nt":
         popen_kwargs["start_new_session"] = True
     proc = subprocess.Popen(cmd, **popen_kwargs)  # type: ignore[arg-type]

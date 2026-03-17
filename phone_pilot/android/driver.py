@@ -128,6 +128,7 @@ class AndroidScreenDriver:
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
         )
 
         return {

@@ -155,7 +155,8 @@ class CommandRunner:
 
         try:
             proc = subprocess.run(
-                cmd, check=False, text=True, capture_output=True, timeout=timeout_s
+                cmd, check=False, text=True, capture_output=True, timeout=timeout_s,
+                stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired as e:
             proc = subprocess.CompletedProcess(

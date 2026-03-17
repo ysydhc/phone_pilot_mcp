@@ -51,7 +51,7 @@ def _git_info(cwd: Optional[str] = None) -> dict:
         "dirty_files_count": 0,
         "has_patch": False,
     }
-    kw = {"cwd": cwd, "check": False, "capture_output": True, "text": True, "timeout": 2}
+    kw = {"cwd": cwd, "check": False, "capture_output": True, "text": True, "timeout": 2, "stdin": subprocess.DEVNULL}
     try:
         r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], **kw)
         if r.returncode == 0:
@@ -80,6 +80,7 @@ def _git_diff_patch(cwd: Optional[str] = None) -> Optional[str]:
         r = subprocess.run(
             ["git", "diff", "HEAD"],
             cwd=cwd, check=False, capture_output=True, text=True, timeout=3,
+            stdin=subprocess.DEVNULL,
         )
         patch = (r.stdout or "").strip()
         return patch if patch else None

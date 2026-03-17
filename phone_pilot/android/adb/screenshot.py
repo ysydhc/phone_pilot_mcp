@@ -30,7 +30,7 @@ def _normalize_png_stream(data: bytes) -> bytes:
 def _try_screencap_cmd(cmd: list[str], *, timeout_s: float = 6.0) -> bytes:
     """Run a screencap command and validate the PNG signature."""
     png_sig = b"\x89PNG\r\n\x1a\n"
-    proc = subprocess.run(cmd, check=False, capture_output=True, timeout=timeout_s)
+    proc = subprocess.run(cmd, check=False, capture_output=True, timeout=timeout_s, stdin=subprocess.DEVNULL)
     if proc.returncode != 0:
         err = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"screencap failed (rc={proc.returncode}): {err}")
@@ -48,9 +48,9 @@ def _fallback_screencap_file(device_serial: Optional[str]) -> bytes:
     local_tmp.close()
     try:
         cmd_capture = adb_prefix(device_serial) + ["shell", "screencap", "-p", remote_path]
-        subprocess.run(cmd_capture, check=False, capture_output=True, timeout=8.0)
+        subprocess.run(cmd_capture, check=False, capture_output=True, timeout=8.0, stdin=subprocess.DEVNULL)
         cmd_pull = adb_prefix(device_serial) + ["pull", remote_path, local_tmp.name]
-        subprocess.run(cmd_pull, check=False, capture_output=True, timeout=8.0)
+        subprocess.run(cmd_pull, check=False, capture_output=True, timeout=8.0, stdin=subprocess.DEVNULL)
         data = pathlib.Path(local_tmp.name).read_bytes()
         data = _normalize_png_stream(data)
         if data and data.startswith(png_sig):
@@ -58,7 +58,7 @@ def _fallback_screencap_file(device_serial: Optional[str]) -> bytes:
         raise RuntimeError(f"screencap failed: invalid_png_stream(bytes={len(data)})")
     finally:
         try:
-            subprocess.run(adb_prefix(device_serial) + ["shell", "rm", "-f", remote_path], check=False, capture_output=True, timeout=6.0)
+            subprocess.run(adb_prefix(device_serial) + ["shell", "rm", "-f", remote_path], check=False, capture_output=True, timeout=6.0, stdin=subprocess.DEVNULL)
         except Exception:
             pass
         try:

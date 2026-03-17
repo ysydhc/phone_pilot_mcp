@@ -2,9 +2,9 @@
 
 ## 当前状态
 
-- **本地已提交**：0.5.2 变更已 commit（fix: 外部接入时 ensure_adb_env 避免首调成功后续 Not connected）。
-- **构建已完成**：`dist/` 下已有 `phone_pilot-0.5.2-py3-none-any.whl` 和 `phone_pilot-0.5.2.tar.gz`。
-- **发布未完成**：需在本地配置 PyPI 凭证后执行一次 `uv publish`。
+- **当前版本**：0.5.6（见 `pyproject.toml`）。
+- **构建已完成**：`dist/` 下已有 `phone_pilot-0.5.6-py3-none-any.whl` 和 `phone_pilot-0.5.6.tar.gz`。
+- **发布**：需在本地配置 PyPI 凭证后执行 `uv publish`。
 
 ## 发布前准备
 
@@ -26,7 +26,7 @@
 uv publish
 
 # 或使用 twine（需先 pip install twine）
-twine upload dist/phone_pilot-0.5.2*
+twine upload dist/phone_pilot-0.5.6*
 # 按提示输入用户名 __token__ 和密码（即 API token）
 ```
 
@@ -47,7 +47,7 @@ uv pip install -U phone-pilot
 若通过 **uvx** 直接跑 MCP（不先 pip 安装），每次会拉取 PyPI 最新版，一般无需单独升级；若要固定到新版本可显式指定：
 
 ```bash
-uvx phone-pilot-mcp@0.5.2
+uvx phone-pilot-mcp@0.5.6
 ```
 
 ### 2. 环境变量（推荐）
@@ -66,6 +66,6 @@ uvx phone-pilot-mcp@0.5.2
 
 ## 版本与重新发布
 
-- 当前版本：`0.5.2`（见 `pyproject.toml`）。
+- 当前版本：`0.5.6`（见 `pyproject.toml`）。
 - 若需发布新版本：修改 `pyproject.toml` 中 `version`，重新执行 `uv build` 和 `uv publish`。
 - PyPI 不允许同一版本号重复上传，改版本后需重新 build 再 publish。

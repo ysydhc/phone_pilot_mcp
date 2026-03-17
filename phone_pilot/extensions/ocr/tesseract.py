@@ -71,7 +71,7 @@ def _run_tesseract_tsv(
         str(int(psm)),
         "tsv",
     ]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, timeout=10)
+    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
     if proc.returncode != 0:
         raise RuntimeError(f"tesseract failed (rc={proc.returncode}): {(proc.stderr or '').strip()}")
     return proc.stdout or ""
