@@ -292,18 +292,8 @@ def _resolve_device_serial(
 # =============================================================================
 
 
-@mcp.tool()
-async def phone_list_devices() -> dict:
-    """列出已连接的设备。
-    List connected devices.
-
-    Parameters / 参数:
-        (无)
-
-    Returns / 返回值:
-        dict: {"ok": True, "devices": [{"serial", "status", "platform", "description"}]}
-        devices 包含 Android 和 HarmonyOS 设备 / devices includes Android and HarmonyOS
-    """
+def _phone_list_devices_sync() -> dict:
+    """Sync body for phone_list_devices (run in thread to avoid blocking event loop)."""
     from phone_pilot.android.adb.utils import ensure_adb_env, adb_executable
     from phone_pilot.android.adb.runner import CommandRunner
     from phone_pilot.android.adb.parsers import parse_adb_devices
@@ -342,7 +332,6 @@ async def phone_list_devices() -> dict:
                 continue
             serial = line.split()[0]
             if serial:
-                # Try to get richer device info via hmdriver2
                 device_info = None
                 try:
                     from phone_pilot.harmony.hmdriver_bridge import get_hmdriver
@@ -370,6 +359,21 @@ async def phone_list_devices() -> dict:
         pass
 
     return {"ok": True, "devices": result}
+
+
+@mcp.tool()
+async def phone_list_devices() -> dict:
+    """列出已连接的设备。
+    List connected devices.
+
+    Parameters / 参数:
+        (无)
+
+    Returns / 返回值:
+        dict: {"ok": True, "devices": [{"serial", "status", "platform", "description"}]}
+        devices 包含 Android 和 HarmonyOS 设备 / devices includes Android and HarmonyOS
+    """
+    return await asyncio.to_thread(_phone_list_devices_sync)
 
 
 @mcp.tool()
@@ -1464,6 +1468,23 @@ async def phone_ocr_find(
 # =============================================================================
 
 
+def _phone_launch_app_sync(
+    device_serial: str,
+    package: str,
+    platform: str,
+    activity: Optional[str],
+) -> dict:
+    """Sync body for phone_launch_app (run in thread to avoid blocking event loop)."""
+    try:
+        driver = get_driver(device_serial, platform)
+        result = driver.app.launch_app(package, activity)
+        result["device_serial"] = device_serial
+        result["platform"] = platform
+        return result
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @mcp.tool()
 async def phone_launch_app(
     device_serial: str,
@@ -1483,14 +1504,9 @@ async def phone_launch_app(
     Returns / 返回值:
         dict: {"ok": True, "package", "device_serial", "platform"} 或 {"ok": False, "error": str}
     """
-    try:
-        driver = get_driver(device_serial, platform)
-        result = driver.app.launch_app(package, activity)
-        result["device_serial"] = device_serial
-        result["platform"] = platform
-        return result
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    return await asyncio.to_thread(
+        _phone_launch_app_sync, device_serial, package, platform, activity
+    )
 
 
 def _phone_force_stop_sync(
@@ -2950,6 +2966,40 @@ async def phone_execute_shell(
     return result
 
 
+def _phone_get_device_info_sync(
+    device_serial: Optional[str], platform: str
+) -> dict:
+    """Sync body for phone_get_device_info (run in thread to avoid blocking event loop)."""
+    resolved, plat, err = _resolve_device_serial(device_serial, platform)
+    if err:
+        return err
+    try:
+        driver = get_driver(resolved, plat or "android")
+        try:
+            width, height = driver.screen.get_screen_size()
+            screen = {"width": width, "height": height}
+        except Exception:
+            screen = {"width": 0, "height": 0}
+        try:
+            activity = driver.ui.get_current_activity()
+        except Exception:
+            activity = {"package": None, "activity": None}
+        model = ""
+        os_version = ""
+        if plat == "android":
+            model, os_version = get_device_model_and_version(resolved)
+        return {
+            "ok": True,
+            "screen": screen,
+            "activity": activity,
+            "model": model,
+            "os_version": os_version,
+            "device_serial": resolved,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved}
+
+
 @mcp.tool()
 async def phone_get_device_info(
     device_serial: str = "",
@@ -2965,36 +3015,9 @@ async def phone_get_device_info(
     Returns / 返回值:
         dict: {"ok": True, "screen": {"width": int, "height": int}, "activity": {...}, "model": str, "os_version": str}
     """
-    resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
-    if err:
-        return err
-    try:
-        driver = get_driver(resolved, plat or "android")
-        # 获取 screen_size、current_activity / Get screen_size, current_activity
-        try:
-            width, height = driver.screen.get_screen_size()
-            screen = {"width": width, "height": height}
-        except Exception:
-            screen = {"width": 0, "height": 0}
-        try:
-            activity = driver.ui.get_current_activity()
-        except Exception:
-            activity = {"package": None, "activity": None}
-        # 从 getprop 获取 model、os_version / Get model, os_version from getprop (Android)
-        model = ""
-        os_version = ""
-        if plat == "android":
-            model, os_version = await asyncio.to_thread(get_device_model_and_version, resolved)
-        return {
-            "ok": True,
-            "screen": screen,
-            "activity": activity,
-            "model": model,
-            "os_version": os_version,
-            "device_serial": resolved,
-        }
-    except Exception as e:
-        return {"ok": False, "error": str(e), "device_serial": resolved}
+    return await asyncio.to_thread(
+        _phone_get_device_info_sync, device_serial or None, platform
+    )
 
 
 # =============================================================================

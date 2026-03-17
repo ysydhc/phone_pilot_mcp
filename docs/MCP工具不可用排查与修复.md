@@ -147,12 +147,22 @@
 - 这些调用会**阻塞 asyncio 事件循环**，导致服务器在工具执行期间无法及时响应客户端（如心跳、其他请求）。客户端或传输层**超时**后主动断开 → 表现为「Client closed」/「Connection closed」。
 - 断开后客户端处于未连接状态，后续任何调用（含 listOfferingsForUI）都会报 **Not connected**。
 
+### 为什么「同一流程」MCP 无法执行而本地直接调用可以？
+
+- **本地脚本**：在单进程内顺序调用 `AndroidDriver`、`driver.go_home()` 等，全是同步调用，没有「事件循环」概念，不会因为阻塞而断开。
+- **MCP 方式**：客户端通过 stdio/HTTP 连到 MCP 服务器；服务器是 **asyncio 单线程事件循环**。若某个 `async def` 工具内部直接执行 **同步阻塞** 的 adb/驱动调用（如 `_resolve_device_serial()`、`CommandRunner.run(adb ...)`、`driver.go_home()`），会**占满事件循环**，在这几秒内：
+  - 无法处理其他请求、无法及时回包；
+  - 客户端或传输层**读超时**后断开连接 → 日志里出现「Client closed」/「Connection closed」；
+  - 之后所有调用都报 **Not connected**（实为已无连接）。
+- 因此：**不是业务逻辑或设备问题**，而是「工具在主线程里阻塞导致连接被客户端超时断开」。本地直接调用不经过 MCP 传输，故能完整跑通。
+
 ### 代码侧修复（已实现）
 
-- 在 **`phone_pilot.mcp.server`** 中，将以下工具的同步设备逻辑放入 **`asyncio.to_thread()`** 中执行，事件循环不再被阻塞，客户端不易因超时断开：
-  - `phone_go_home`、`phone_force_stop`
-  - **`phone_start_recording`、`phone_stop_recording`**（录屏与后续步骤连续调用时最易阻塞，已一并修复）
-- 若你使用的版本仍出现 Connection closed 或「获取设备信息成功、开始录屏起 Not connected」，请升级到 **0.5.4 及以上**。
+- 在 **`phone_pilot.mcp.server`** 中，将以下工具的**整段同步设备逻辑**放入 **`asyncio.to_thread()`** 中执行，事件循环不再被阻塞，客户端不易因超时断开：
+  - **设备/列表**：`phone_list_devices`、`phone_get_device_info`
+  - **导航/应用**：`phone_go_home`、`phone_force_stop`、`phone_launch_app`
+  - **录屏**：`phone_start_recording`、`phone_stop_recording`
+- 若你使用的版本仍出现 Connection closed 或「获取设备信息成功、开始录屏起 Not connected」，请升级到包含上述 to_thread 修复的版本（如 **0.5.5 及以上**），并**重载 MCP / 重启客户端**后再试。
 
 ### 外部接入建议
 
@@ -174,6 +184,6 @@
 | MCP 工具大量不可用 / 全部找不到 | MCP 服务器未成功启动 | 让 Cursor 用**本地项目**或**已安装命令**启动，不要用 `uvx phone-pilot-mcp`（或依赖未发布包的 uvx） |
 | 配置里用了 uvx | PyPI 无 `phone-pilot-mcp` 包（或 `phone-pilot` 不可用） | 改为 `uv run --project <本仓库路径> phone-pilot-mcp` 或 `phone-pilot-mcp` / `python -m phone_pilot.cli` |
 | 无 tools/ 目录 | Cursor 从未与该 MCP 建立连接 | 服务器启动成功后，Cursor 会拉取工具列表并生成 tools/ |
-| 外部调用时 Connection closed / Client closed，随后 Not connected；或「获取设备信息成功、开始录屏起 Not connected」 | 工具内同步 adb/录屏 调用阻塞事件循环，客户端超时断开 | 升级到 0.5.4+（含录屏等 to_thread 修复）；必要时设 ADB_PATH/ANDROID_HOME、调大客户端超时 |
+| 外部调用时 Connection closed / Client closed，随后 Not connected；或「获取设备信息成功、开始录屏起 Not connected」；同一流程本地脚本可执行而 MCP 不行 | 工具内同步 adb/录屏/设备解析 调用阻塞事件循环，客户端超时断开 | 升级到含 list_devices/get_device_info/launch_app 等 to_thread 修复的版本（如 0.5.5+）；重载 MCP/重启客户端；必要时设 ADB_PATH/ANDROID_HOME、调大客户端超时 |
 
 按上述方式修正 MCP 启动配置并重启 Cursor 后，phone_pilot 的 MCP 工具应可正常使用。

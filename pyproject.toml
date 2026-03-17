@@ -1,6 +1,6 @@
 [project]
 name = "phone-pilot"
-version = "0.5.4"
+version = "0.5.5"
 description = "Multi-platform mobile automation via MCP - Control Android devices through AI agents"
 readme = "README.md"
 license = {text = "MIT"}
