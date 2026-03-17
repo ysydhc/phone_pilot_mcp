@@ -242,6 +242,13 @@ def swipe(
     res = _input_swipe(ctx, int(x1), int(y1), int(x2), int(y2), duration_ms=duration_ms)
     if wait_s and wait_s > 0:
         time.sleep(float(wait_s))
+    # 主动模式：滑动后等待 1s 再截图，保证页面 UI 稳定
+    if getattr(ctx, "auto_screenshot", False):
+        time.sleep(1)
+        try:
+            ctx._observe("swipe_after", "swipe")
+        except Exception:
+            pass
     return res
 
 

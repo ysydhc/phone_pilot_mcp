@@ -345,6 +345,15 @@ class UIElement:
         ok = all(bool(r.get("ok")) for r in results)
         if wait > 0:
             time.sleep(float(wait))
+        # 主动模式：点击/双击后等待 1s 再截图（由 observe_after_input 内 sleep）
+        obs = self._op("observe_after_input")
+        if obs:
+            detail = self.summary() or f"({x},{y})"
+            action = "tap_after" if count <= 1 else "double_tap_after"
+            try:
+                obs(action, detail)
+            except Exception:
+                pass
         return {"ok": ok, "x": x, "y": y, "times": count, "results": results}
 
     def scroll(self, pc_x: Optional[float] = None, pc_y: Optional[float] = None, *, max_attempts: int = 2) -> dict:
@@ -371,7 +380,19 @@ class UIElement:
                 dx = abs(int(refreshed.x) - int(target_x)) if pc_x is not None else 0
                 dy = abs(int(refreshed.y) - int(target_y)) if pc_y is not None else 0
                 if dx <= tolerance and dy <= tolerance:
+                    obs = self._op("observe_after_input")
+                    if obs:
+                        try:
+                            obs("swipe_after", self.summary() or "scroll")
+                        except Exception:
+                            pass
                     return {"ok": True, "result": last_res}
+        obs = self._op("observe_after_input")
+        if obs:
+            try:
+                obs("swipe_after", self.summary() or "scroll")
+            except Exception:
+                pass
         return {"ok": False, "error": "scroll_not_aligned", "result": last_res}
 
     def zoom(

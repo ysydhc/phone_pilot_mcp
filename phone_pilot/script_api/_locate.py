@@ -342,11 +342,22 @@ def _ui_ops(ctx: ScriptContext) -> dict:
         except Exception as exc:
             return {"ok": False, "error": "airtest_pinch_failed", "detail": str(exc)}
 
+    def _observe_after_input(action: str, detail: str = "") -> None:
+        """主动模式：用户输入操作（点击/滑动）后等待 1s 再截图，保证页面 UI 稳定。"""
+        if not getattr(ctx, "auto_screenshot", False):
+            return
+        time.sleep(1)
+        try:
+            ctx._observe(action, detail, element=None)
+        except Exception:
+            pass
+
     return {
         "tap_xy": _tap_xy,
         "swipe": _swipe,
         "get_screen_size": _screen_size,
         "screenshot": _screenshot,
+        "observe_after_input": _observe_after_input,
         "relative": lambda element, **kwargs: _ui_relative_find(ctx, element, **kwargs),
         "locate": lambda locator: _ui_locate(ctx, locator),
         "air_pinch": _air_pinch,
