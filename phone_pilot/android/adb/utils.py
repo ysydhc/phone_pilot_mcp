@@ -18,6 +18,64 @@ from phone_pilot.android.adb.runner import CommandRunner
 
 
 _ADB_CACHED: Optional[str] = None
+_ENV_ENSURED: bool = False
+
+
+def ensure_adb_env() -> None:
+    """
+    在未设置 ADB_PATH/ANDROID_HOME 时，从常见路径发现 adb 并写入 os.environ，
+    避免 MCP 被外部进程以空 env 启动时，首次成功、后续因 PATH/env 不一致失败。
+
+    When ADB_PATH/ANDROID_HOME are not set, discover adb from common paths and set
+    os.environ so that all tools see a consistent env (avoids "Not connected" after
+    first successful call when MCP is started by external clients without env).
+    """
+    global _ENV_ENSURED, _ADB_CACHED
+    if _ENV_ENSURED:
+        return
+    if (os.environ.get("ADB_PATH") or os.environ.get("ANDROID_ADB_PATH") or "").strip():
+        _ENV_ENSURED = True
+        return
+    if (os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "").strip():
+        _ENV_ENSURED = True
+        return
+
+    candidates: list[str] = [
+        "/opt/homebrew/bin/adb",
+        "/usr/local/bin/adb",
+        os.path.expanduser("~/Library/Android/sdk/platform-tools/adb"),
+        os.path.expanduser("~/Android/Sdk/platform-tools/adb"),
+    ]
+    if sys.platform == "darwin":
+        try:
+            import glob
+            candidates += sorted(glob.glob("/Users/*/Library/Android/sdk/platform-tools/adb"))
+            candidates += sorted(glob.glob("/Users/*/Android/Sdk/platform-tools/adb"))
+        except Exception:
+            pass
+    for p in candidates:
+        if p and os.path.exists(p) and os.access(p, os.X_OK):
+            os.environ["ADB_PATH"] = p
+            sdk_root = str(os.path.dirname(os.path.dirname(p)))
+            if not os.environ.get("ANDROID_HOME") and not os.environ.get("ANDROID_SDK_ROOT"):
+                os.environ["ANDROID_HOME"] = sdk_root
+            path_dir = os.path.dirname(p)
+            path_val = os.environ.get("PATH", "")
+            if path_dir and path_dir not in path_val:
+                os.environ["PATH"] = path_dir + os.pathsep + path_val
+            _ADB_CACHED = None
+            _ENV_ENSURED = True
+            return
+
+    which = shutil.which("adb")
+    if which:
+        os.environ["ADB_PATH"] = which
+        _ADB_CACHED = None
+        _ENV_ENSURED = True
+        return
+
+    _ENV_ENSURED = True
+    return
 
 
 def adb_executable() -> str:
@@ -110,4 +168,5 @@ __all__ = [
     "wait_for_device",
     "push_file",
     "push_script",
+    "ensure_adb_env",
 ]

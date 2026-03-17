@@ -200,6 +200,9 @@ def _resolve_device_serial(
     Resolve device_serial and platform from adb/hdc.
     Returns: (resolved_serial, resolved_platform, error_dict_or_none)
     """
+    from phone_pilot.android.adb.utils import ensure_adb_env
+
+    ensure_adb_env()
     platform = (platform or "auto").strip().lower()
     android_serials: list[str] = []
     harmony_serials: list[str] = []
@@ -301,10 +304,11 @@ async def phone_list_devices() -> dict:
         dict: {"ok": True, "devices": [{"serial", "status", "platform", "description"}]}
         devices 包含 Android 和 HarmonyOS 设备 / devices includes Android and HarmonyOS
     """
-    from phone_pilot.android.adb.utils import adb_executable
+    from phone_pilot.android.adb.utils import ensure_adb_env, adb_executable
     from phone_pilot.android.adb.runner import CommandRunner
     from phone_pilot.android.adb.parsers import parse_adb_devices
 
+    ensure_adb_env()
     result = []
 
     # Android devices (adb)

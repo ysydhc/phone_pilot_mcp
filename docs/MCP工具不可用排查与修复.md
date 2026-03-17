@@ -108,6 +108,27 @@
 
 同样把 `cwd` 和（如有）`command` 中的 `python` 换成你实际使用的解释器路径（如 `/path/to/python3`）。
 
+## 外部接入时「首次成功、后续 Not connected」的修复
+
+### 现象
+
+在**外部客户端**（非 Cursor 或未传 env）启动 MCP 时：`phone_get_device_info`、`phone_start_recording` 等第一次成功，后续 `phone_go_home`、`phone_force_stop` 等报 **Not connected**（对应底层返回 `no_device_connected` / `device_not_found`）。
+
+### 原因
+
+- 外部进程启动 MCP 时若**未传入** `ADB_PATH`、`ANDROID_HOME`、`PATH`、`HOME`，则首次解析设备时可能用到 `adb_executable()` 的 fallback（如 `expanduser("~")` 或 `which("adb")`），并缓存路径。
+- 若进程环境不一致（例如不同请求在不同子进程、或 PATH 被裁剪），后续调用可能拿到不同的 adb 或空设备列表，导致 `_resolve_device_serial` 返回「未发现设备」。
+
+### 代码侧修复（已实现）
+
+- 在 **`phone_pilot.android.adb.utils`** 中新增 **`ensure_adb_env()`**：在未设置 `ADB_PATH`/`ANDROID_HOME` 时，从常见路径发现 adb 并写入 `os.environ`（含 `PATH` 前置 platform-tools），并清空 adb 路径缓存，保证同进程内后续调用一致。
+- **`_resolve_device_serial`** 与 **`phone_list_devices`** 在入口处均调用 **`ensure_adb_env()`**，因此无论先调用哪个工具，都会先统一 env，再执行 adb，避免「首调成功、后续 Not connected」。
+
+### 外部接入建议
+
+- 若启动 MCP 时能传 env，建议仍设置：`ADB_PATH`、`ANDROID_HOME`、`PATH`（含 platform-tools）、`HOME`，与 Cursor 的 mcp.json 中 `phone_pilot.env` 一致，兼容性最好。
+- 即使不传，服务端也会在首次设备相关调用时自动发现并设置 env，多数单机部署可恢复正常。
+
 ## 验证是否修复
 
 1. 保存上述配置后，**完全重启 Cursor**（或重载 MCP 配置，视 Cursor 版本而定）。
