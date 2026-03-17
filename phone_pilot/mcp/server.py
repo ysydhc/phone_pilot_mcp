@@ -773,29 +773,16 @@ async def phone_get_screen_size(
         return {"ok": False, "error": str(e)}
 
 
-@mcp.tool()
-async def phone_start_recording(
-    device_serial: str = "",
-    name: str = "rec",
-    out_dir: str = "./.recordings",
-    platform: str = "auto",
+def _phone_start_recording_sync(
+    device_serial: Optional[str],
+    name: str,
+    out_dir: str,
+    platform: str,
 ) -> dict:
-    """开始录屏。
-    Start screen recording on device.
-
-    Parameters / 参数:
-        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
-        name: 录屏文件名前缀 / Recording file name prefix
-        out_dir: 输出根目录 / Output root directory
-        platform: 平台类型 / Platform type
-
-    Returns / 返回值:
-        dict: {"ok": True, "local_path": str, "device_serial": str}
-        或 {"ok": False, "error": "already_recording"} / {"ok": False, "error": str}
-    """
+    """Sync body for phone_start_recording (run in thread to avoid blocking event loop)."""
     try:
         resolved_serial, resolved_platform, err = _resolve_device_serial(
-            device_serial or None, platform
+            device_serial, platform
         )
         if err:
             return err
@@ -817,7 +804,6 @@ async def phone_start_recording(
                 "error": result.get("error", "start_screenrecord_failed"),
             }
 
-        # Android 内部拼 /sdcard/{path}；Harmony 返回 remote_path
         remote_path = result.get("remote_path") or f"/sdcard/{remote_filename}"
         _recording_state[resolved_serial] = {
             "remote_path": remote_path,
@@ -827,6 +813,64 @@ async def phone_start_recording(
         return {
             "ok": True,
             "local_path": str(local_path),
+            "device_serial": resolved_serial,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool()
+async def phone_start_recording(
+    device_serial: str = "",
+    name: str = "rec",
+    out_dir: str = "./.recordings",
+    platform: str = "auto",
+) -> dict:
+    """开始录屏。
+    Start screen recording on device.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        name: 录屏文件名前缀 / Recording file name prefix
+        out_dir: 输出根目录 / Output root directory
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "local_path": str, "device_serial": str}
+        或 {"ok": False, "error": "already_recording"} / {"ok": False, "error": str}
+    """
+    return await asyncio.to_thread(
+        _phone_start_recording_sync,
+        device_serial or None,
+        name,
+        out_dir,
+        platform,
+    )
+
+
+def _phone_stop_recording_sync(
+    device_serial: Optional[str], platform: str
+) -> dict:
+    """Sync body for phone_stop_recording (run in thread to avoid blocking event loop)."""
+    try:
+        resolved_serial, resolved_platform, err = _resolve_device_serial(
+            device_serial, platform
+        )
+        if err:
+            return err
+
+        state = _recording_state.pop(resolved_serial, None)
+        if not state:
+            return {"ok": False, "error": "not_recording"}
+
+        driver = get_driver(resolved_serial, resolved_platform or "android")
+        driver.screen.stop_screenrecord()
+        driver.pull_file(state["remote_path"], state["local_path"])
+        driver.remove_remote_file(state["remote_path"])
+
+        return {
+            "ok": True,
+            "local_path": state["local_path"],
             "device_serial": resolved_serial,
         }
     except Exception as e:
@@ -849,29 +893,9 @@ async def phone_stop_recording(
         dict: {"ok": True, "local_path": str}
         或 {"ok": False, "error": "not_recording"} / {"ok": False, "error": str}
     """
-    try:
-        resolved_serial, resolved_platform, err = _resolve_device_serial(
-            device_serial or None, platform
-        )
-        if err:
-            return err
-
-        state = _recording_state.pop(resolved_serial, None)
-        if not state:
-            return {"ok": False, "error": "not_recording"}
-
-        driver = get_driver(resolved_serial, resolved_platform or "android")
-        driver.screen.stop_screenrecord()
-        driver.pull_file(state["remote_path"], state["local_path"])
-        driver.remove_remote_file(state["remote_path"])
-
-        return {
-            "ok": True,
-            "local_path": state["local_path"],
-            "device_serial": resolved_serial,
-        }
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    return await asyncio.to_thread(
+        _phone_stop_recording_sync, device_serial or None, platform
+    )
 
 
 # =============================================================================
