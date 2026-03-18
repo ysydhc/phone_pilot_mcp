@@ -2,6 +2,17 @@
 
 通过 MCP (Model Context Protocol) 让 AI Agent 控制 Android 手机。支持 Cursor、Claude Desktop 等 MCP 客户端。
 
+## 为什么用 phone_pilot
+
+面向**开发者**的个人提效工具：让 Agent 从**写代码 → 真机执行 → 结果验证**一条龙完成，无需在编辑器、终端、设备之间来回切换。
+
+**全链路执行记录**：每次脚本运行自动落盘日志、步骤截图、录屏、内存快照与 HTML 报告，便于事后对比和排查。
+
+| 场景 | 说明 |
+|------|------|
+| **动画/参数微调** | 约定好「改哪段代码、改什么」的逻辑，由 Agent 按步骤做代码微调并启动脚本；通过录屏对比多版效果，快速选出最合适的参数。 |
+| **二分法定位问题** | 多次运行脚本（每次用不同代码或配置），结合日志、截图、录屏与报告，二分缩小范围，快速锁定引入问题的改动或配置。 |
+
 ## 一行安装
 
 ```bash
@@ -18,7 +29,7 @@ uvx phone-pilot-mcp
 # 核心安装（仅 Android 支持）
 pip install phone-pilot
 
-# 含 HarmonyOS 支持
+# 含 HarmonyOS 支持，暂不支持
 pip install "phone-pilot[harmony]"
 
 # 含语言检测与翻译
@@ -131,7 +142,7 @@ phone_stop_logcat(device_serial)
 phone_search_logcat(device_serial, pattern="Error", regex=True)
 
 # 智能查找与等待
-phone_scroll_to_find(device_serial, text="目标文本", direction="up_down")
+phone_scroll_to_find(device_serial, text="目标文本",direction="up_down")
 phone_wait_for_element(device_serial, text="加载完成", timeout_s=15)
 phone_dismiss_popup(device_serial)
 phone_smart_find(device_serial, text="目标", use_ocr=True)
