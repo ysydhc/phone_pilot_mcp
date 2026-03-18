@@ -44,3 +44,16 @@ recordings/.DS_Store
 
 # 测试资源
 .test_res/
+
+# 已移出 Git 管理（保留工作区，不再纳入版本）
+docs/
+# 演示/本地运行脚本（仅从 Git 移除，不删除）
+scripts/ad_demo_splash_script.py
+scripts/douyin_watch_5_videos.py
+scripts/run_demo_flow_local.py
+scripts/run_demo_open_screen_local.py
+scripts/verify_mcp_tools_a.py
+scripts/verify_mcp_tools_b.py
+# 资源图片（已从仓库移除并删除，避免误提交）
+phone_pilot/resource/*.png
+phone_pilot/resource/test/*.png
