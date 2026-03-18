@@ -2,7 +2,7 @@
 
 > 本文档追踪 phone_pilot 在三个平台上的功能实现状态。  
 > 每实现一个功能后必须更新本文档。  
-> 最后更新: 2026-02-06 (MCP 工具层文档更新)
+> 最后更新: 2026-03-18
 
 ## 状态说明
 
@@ -275,7 +275,7 @@
 | phone_unlock (解锁) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.unlock |
 | phone_clear_background (清后台) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.clear_background |
 | phone_clear_data (清数据) | 已实现 | 已实现 | 未实现(有方案) | AppDriver.clear_data |
-| phone_open_deeplink (深链接) | 已实现 | 未实现(有方案) | 未实现(有方案) | DeviceDriver.open_deeplink |
+| phone_open_deeplink (深链接) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | DeviceDriver.open_deeplink |
 | phone_start_recording (开始录屏) | 已实现 | 已实现 | 未实现(有方案) | MCP 状态管理 |
 | phone_stop_recording (停止录屏) | 已实现 | 已实现 | 未实现(有方案) | 自动 pull + remove |
 | phone_start_logcat (开始日志) | 已实现 | 已实现 | 未实现(有方案) | MCP 状态管理 |

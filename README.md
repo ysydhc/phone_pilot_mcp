@@ -102,7 +102,7 @@ phone_screenshot(device_serial)
 phone_find_element(device_serial, text_contains="设置")
 
 # 图像/OCR
-phone_find_image(device_serial, template_path="@res:icon_coin")
+phone_find_image(device_serial, template_path="@res:<key>")  # key 由 phone_res_add 添加时得到
 phone_ocr_find(device_serial, query="登录", lang="chi_sim")
 
 # 应用管理
@@ -318,11 +318,11 @@ LLM 修复成功后自动写入经验库，下次遇到相同问题可直接复�
 ## 资源缓存与 @res 引用
 
 ```bash
-# 添加资源（图片等）
-phone-pilot-call phone_res_add --args '{"path":"phone_pilot/resource/icon_Coin.png"}'
+# 添加资源（图片等，path 为本地文件路径）
+phone-pilot-call phone_res_add --args '{"path":"/path/to/your/template.png"}'
 
-# 通过 @res: 引用（在脚本或 MCP 中均可使用）
-phone-pilot-call phone_find_image --args '{"device_serial":"<serial>","template_path":"@res:icon_coin"}'
+# 通过 @res: 引用（在脚本或 MCP 中均可使用，key 为添加时自动生成的键名）
+phone-pilot-call phone_find_image --args '{"device_serial":"<serial>","template_path":"@res:<key>"}'
 ```
 
 资源缓存存储在 `.recordings/cache/pic/` 目录下。
@@ -383,22 +383,18 @@ phone-pilot-web --no-browser
 
 > 未安装可选依赖时，相关 MCP 工具会返回错误提示而非崩溃。可通过 `python scripts/check_verification_env.py` 检查当前环境。
 
-### MCP 工具验证（A 类真机）
+### MCP 工具验证（A 类真机，本地可选）
 
-执行 A 类验证前会通过 **adb 获取当前连接设备** 作为 `device_serial`；需 `apk_path`、`package`、资源文件等由 **运行前资源清单** 提供，执行前会提示确认：
+`docs/` 与部分验证用脚本已移出 Git 管理；若需在本地跑 A 类真机验证：
 
-1. **资源清单**：`docs/verification/verification_resources.json`（可配置 `device_serial`、`apk_path`、`package`、`resource_file`、`resource_key`、`push_file`/`pull_file` 等）
-2. **环境自检**：`python scripts/check_verification_env.py`（4/4 通过后再跑验证）
-3. **A 类验证**：`python scripts/verify_mcp_tools_a.py`（交互确认）；加 `--yes` 跳过确认，`--write-checklist` 写回检查表
+1. **环境自检**：`python scripts/check_verification_env.py`（通过后再跑验证）
+2. **资源清单**：在本地维护 `docs/verification/verification_resources.json`（若保留 `docs/`），配置 `device_serial`、`apk_path`、`package`、`resource_file`、`resource_key` 等
+3. **A 类验证脚本**：若本地保留 `scripts/verify_mcp_tools_a.py`，可运行并加 `--yes` 跳过确认、`--write-checklist` 写回检查表
 
-### 示例脚本（script_api，随安装包交付）
+### 示例脚本（script_api）
 
-- **抖音观看 5 个视频**：清空后台 → 打开抖音 → 每 10 秒向上滑动到下一个视频，共 5 个。与 `example_script.py` 一致，使用 **phone_pilot.script_api**，安装 phone_pilot 后直接运行。
-  ```bash
-  python easy_use/douyin_watch_5_videos.py
-  DOUYIN_PACKAGE=com.ss.android.ugc.aweme.lite python easy_use/douyin_watch_5_videos.py
-  ```
-- **MCP 前置链路验证**（仅用于 agent 通过 MCP 调用确认环境可跑通）：`python scripts/douyin_watch_5_videos.py`。实际交付给外部项目运行的是上面 `easy_use/` 下的脚本。
+- **基础示例**：`easy_use/example_script.py` — 清理启动、查找点击、滚动、录屏、日志、自愈等，使用 **phone_pilot.script_api**，安装后可直接运行：`python easy_use/example_script.py`
+- **演示脚本**：抖音观看 5 视频等演示位于 `scripts/`（已移出 Git 管理，若本地保留可运行，如 `scripts/douyin_watch_5_videos.py`，需设置 `DOUYIN_PACKAGE` 等环境变量）
 
 ## 开发
 
@@ -415,5 +411,5 @@ make check  # lint + test
 ```
 
 ---
-**版本**: 0.5.1
+**版本**: 0.5.9
 **许可**: MIT
