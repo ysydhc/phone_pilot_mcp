@@ -101,6 +101,16 @@ MCP tools (for agents) and script_api (for Python scripts) are two surfaces over
 | `phone_go_back()` / `phone_go_home()` | `ctx.driver.go_back()` / `reset_home_screen(ctx)` |
 | `phone_search_logcat(pattern)` | `logcat_find(ctx, pattern)` / `logcat_since` / `logcat_assert_sequence` |
 | `phone_run_script(path)` | `run_script(main, ctx=...)` (the harness scripts call) |
+| `phone_mock_start` / `phone_mock_set_rule` / `phone_mock_assert_switched` | `mock_server_start(ctx)` / `mock_set_rule(ctx, ...)` / `mock_assert_switched(ctx)` |
+
+### Network mocking (`phone_pilot/mock/`)
+
+A host-side local HTTP mock server for stubbing the App's network responses (design: `docs/design/mock-server.md`). It is **deliberately not part of the `DeviceDriver` protocol** — a mock server is a host-side network component, orthogonal to device operations, so it lives in its own `phone_pilot/mock/` package instead of `android/`.
+
+- **Control/data plane split** (ADR-2): `MockServer` runs two `ThreadingHTTPServer` instances. `ctrl_port` (rules read/write, `127.0.0.1`-only) and `data_port` (what the App hits, exposed to the device via `adb reverse`). Because only `data_port` is reversed, the device can never reach the control plane.
+- **Two entry points, one control plane** (ADR-1): MCP tools (`phone_mock_*`, for agents) and script_api (`mock_*`, for scripts) are both thin clients of the same `MockControlClient` over `127.0.0.1:ctrl_port`. The MCP server keeps a single handle in `_state.py`; script_api keeps it on `ctx._mock_server` and `run_script` tears it down on finalize.
+- **Rules**: `RuleStore` matches on method + path (query string stripped, exact path, v1 — ADR-7). Unmatched requests → 404 **and are still logged** (ADR-4); the request log doubles as the signal that the App actually switched over (`mock_assert_switched` / `phone_mock_assert_switched`, ADR-6). Plain HTTP only — TLS is fully bypassed; the App (debug build) must permit cleartext to `127.0.0.1`.
+- **MCP layering**: the 9 `phone_mock_*` tools live in `EXTENDED_CATEGORIES["mock"]` — hidden by default, activated via `phone_discover_tools` / `activate_category("mock")`.
 
 ### Self-healing (3 tiers, when a step fails)
 

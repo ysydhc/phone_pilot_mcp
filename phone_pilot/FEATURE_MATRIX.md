@@ -2,7 +2,7 @@
 
 > 本文档追踪 phone_pilot 在三个平台上的功能实现状态。  
 > 每实现一个功能后必须更新本文档。  
-> 最后更新: 2026-03-18
+> 最后更新: 2026-06-23
 
 ## 状态说明
 
@@ -298,6 +298,23 @@
 | phone_toggle_airplane (飞行模式) | 已实现 | 未实现(有方案) | 未实现(有方案) | settings + broadcast |
 | phone_execute_shell (受限 shell) | 已实现 | 未实现(有方案) | 未实现(有方案) | 白名单限制 |
 | phone_get_device_info (设备信息) | 已实现 | 已实现 | 未实现(有方案) | 轻量级信息 |
+
+## 22. 本地网络打桩 (Mock Server) — 新增
+
+> 主机侧独立 HTTP mock server,给被测 App 的网络返回做受控打桩。控制面/数据面双端口分离;
+> Agent 经 MCP 动态写规则,脚本经 script_api 预设种子;App 改 baseURL 指向 `127.0.0.1:DATA_PORT` +
+> 自动 `adb reverse`。明文 HTTP only(TLS 全绕过)。设计见 docs/design/mock-server.md。
+
+| 功能点 | Android | Harmony | iOS | 备注 |
+|--------|---------|---------|-----|------|
+| MockServer (双端口 ThreadingHTTPServer) | 已实现 | 不适用 | 不适用 | 纯 Python stdlib, 但 reverse 依赖 adb |
+| RuleStore / RequestLog (规则表+请求日志) | 已实现 | 已实现 | 已实现 | 纯 Python, 平台无关 |
+| ReverseManager (adb reverse 生命周期) | 已实现 | 未实现(有方案) | 未实现 | adb reverse;HDC 有 fport 可对标 |
+| MockControlClient (控制面客户端) | 已实现 | 已实现 | 已实现 | 纯 Python stdlib, 平台无关 |
+| mock_server_start/stop (script_api) | 已实现 | 未实现(有方案) | 未实现(有方案) | 含自动 reverse + 收尾 teardown |
+| mock_set_rule / mock_load_seed | 已实现 | 已实现 | 已实现 | 经控制面, 平台无关 |
+| mock_assert_switched (切换检测) | 已实现 | 已实现 | 已实现 | request_log 有流量即判定 (ADR-6) |
+| phone_mock_* (9 个 MCP 工具) | 已实现 | 未实现(有方案) | 未实现(有方案) | EXTENDED_CATEGORIES["mock"], 按需激活 |
 
 ---
 

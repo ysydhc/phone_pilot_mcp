@@ -60,6 +60,10 @@ include = ["phone_pilot*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "phone_pilot/tests"]
+markers = [
+    "unit: 单元测试 / unit tests",
+    "integration: 集成测试 / integration tests",
+]
 
 [tool.ruff]
 exclude = [

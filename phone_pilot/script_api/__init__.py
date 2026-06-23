@@ -124,6 +124,15 @@ from ._locate import (
     _ui_locate,
 )
 
+# ---- 重新导出：Mock API ----
+from .mock import (
+    mock_server_start,
+    mock_server_stop,
+    mock_set_rule,
+    mock_load_seed,
+    mock_assert_switched,
+)
+
 __all__ = [
     # Core
     "ScriptContext",
@@ -232,4 +241,10 @@ __all__ = [
     "_ui_relative_find",
     "_uia_info_from_element",
     "_ui_locate",
+    # Mock
+    "mock_server_start",
+    "mock_server_stop",
+    "mock_set_rule",
+    "mock_load_seed",
+    "mock_assert_switched",
 ]

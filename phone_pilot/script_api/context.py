@@ -179,6 +179,9 @@ class ScriptContext:
     _started_at: float = field(default_factory=time.time, repr=False)
     _self_healer: Any = field(default=None, repr=False)
     _healing_events: list = field(default_factory=list, repr=False)
+    _mock_server: Any = field(
+        default=None, repr=False
+    )  # mock server handle / Mock 服务句柄
 
     # ---- driver accessor ----
 

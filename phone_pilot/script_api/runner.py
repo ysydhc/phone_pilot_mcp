@@ -632,6 +632,15 @@ def _finalize_run(
     if ctx is None:
         return
 
+    # Stop mock server if running (best-effort, never let this break finalization)
+    if getattr(ctx, "_mock_server", None) is not None:
+        try:
+            from .mock import mock_server_stop
+
+            mock_server_stop(ctx)
+        except Exception:
+            pass
+
     # Stop any running screen recordings (pull to run dir)
     if ctx._recording:
         try:
