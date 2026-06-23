@@ -32,6 +32,7 @@ from phone_pilot.android.adb.runner import CommandRunner
 @dataclass
 class HeapprofdConfig:
     """Configuration for heapprofd profiling session."""
+
     package_name: str
     sampling_interval_bytes: int = 4096  # Sample every 4KB allocation
     duration_ms: int = 30000  # 30 seconds
@@ -44,6 +45,7 @@ class HeapprofdConfig:
 @dataclass
 class NativeAllocation:
     """Native memory allocation info with stack trace."""
+
     address: int = 0
     size: int = 0
     count: int = 1
@@ -120,15 +122,24 @@ def start_heapprofd(device_serial: Optional[str], config: HeapprofdConfig) -> di
         return {"ok": False, "error": "push_config_failed", "stderr": push_proc.stderr}
 
     # Start heapprofd
-    output_file = f"/data/local/tmp/{config.package_name}_{uuid.uuid4().hex[:8]}.heapprofd"
+    output_file = (
+        f"/data/local/tmp/{config.package_name}_{uuid.uuid4().hex[:8]}.heapprofd"
+    )
     start_cmd = adb_prefix(device_serial) + [
-        "shell", "heapprofd", f"--config={remote_cfg}", f"--out={output_file}"
+        "shell",
+        "heapprofd",
+        f"--config={remote_cfg}",
+        f"--out={output_file}",
     ]
 
     try:
         proc = CommandRunner.run(start_cmd, check=False, timeout_s=5, log_output=False)
         if proc.returncode != 0:
-            return {"ok": False, "error": "heapprofd_start_failed", "stderr": proc.stderr}
+            return {
+                "ok": False,
+                "error": "heapprofd_start_failed",
+                "stderr": proc.stderr,
+            }
     except Exception as e:
         return {"ok": False, "error": str(e)}
 

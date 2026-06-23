@@ -27,8 +27,14 @@ from phone_pilot.android.ui.query import element_exists_impl, element_query_impl
 from phone_pilot.android.adb.logcat import dump_logcat
 from phone_pilot.core.storage import now_dirname, recordings_root, safe_name
 from phone_pilot.android.adb.screenshot import save_screenshot_png
-from phone_pilot.extensions.diff.screenshot import assert_screenshot_match as _assert_screenshot_match_impl
-from phone_pilot.android.ui.automator import dump_ui_xml, parse_uiautomator_nodes, find_nodes
+from phone_pilot.extensions.diff.screenshot import (
+    assert_screenshot_match as _assert_screenshot_match_impl,
+)
+from phone_pilot.android.ui.automator import (
+    dump_ui_xml,
+    parse_uiautomator_nodes,
+    find_nodes,
+)
 
 
 def _save_evidence(
@@ -72,7 +78,7 @@ def assert_element_exists(
     """
     Assert element exists on screen.
     断言元素存在于屏幕上。
-    
+
     Args / 参数:
     - device_serial: Device serial / 设备序列号
     - query: Text to search / 要搜索的文本
@@ -85,7 +91,7 @@ def assert_element_exists(
     - name: Assertion name for evidence / 断言名称（用于证据）
     - save_evidence: Save screenshot as evidence / 保存截图作为证据
     - out_dir: Output directory / 输出目录
-    
+
     Returns / 返回:
     - ok: bool
     - passed: bool - Whether assertion passed / 断言是否通过
@@ -103,10 +109,10 @@ def assert_element_exists(
         ocr_lang=ocr_lang,
         threshold=threshold,
     )
-    
+
     passed = bool(result.get("exists"))
     evidence_path = None
-    
+
     if save_evidence:
         evidence_path = _save_evidence(
             device_serial=device_serial,
@@ -115,7 +121,7 @@ def assert_element_exists(
             assertion_type="element_exists",
             passed=passed,
         )
-    
+
     return {
         "ok": True,
         "passed": passed,
@@ -149,10 +155,10 @@ def assert_element_not_exists(
     """
     Assert element does NOT exist on screen.
     断言元素不存在于屏幕上。
-    
+
     Args / 参数:
     - Same as assert_element_exists
-    
+
     Returns / 返回:
     - ok: bool
     - passed: bool - True if element NOT found / 元素未找到时为 True
@@ -170,11 +176,11 @@ def assert_element_not_exists(
         ocr_lang=ocr_lang,
         threshold=threshold,
     )
-    
+
     # Passed if element does NOT exist
     passed = not bool(result.get("exists"))
     evidence_path = None
-    
+
     if save_evidence:
         evidence_path = _save_evidence(
             device_serial=device_serial,
@@ -183,7 +189,7 @@ def assert_element_not_exists(
             assertion_type="element_not_exists",
             passed=passed,
         )
-    
+
     return {
         "ok": True,
         "passed": passed,
@@ -215,7 +221,7 @@ def assert_text_equals(
     """
     Assert element text equals expected value.
     断言元素文本等于预期值。
-    
+
     Args / 参数:
     - device_serial: Device serial / 设备序列号
     - query: Text/resource_id to find the element / 用于查找元素的文本/resource_id
@@ -226,7 +232,7 @@ def assert_text_equals(
     - name: Assertion name / 断言名称
     - save_evidence: Save screenshot / 保存截图
     - out_dir: Output directory / 输出目录
-    
+
     Returns / 返回:
     - ok: bool
     - passed: bool - Whether text equals expected / 文本是否等于预期
@@ -239,7 +245,7 @@ def assert_text_equals(
     actual_text = None
     element_found = False
     match_detail = None
-    
+
     if selector and isinstance(selector, dict):
         result = element_query_impl(device_serial, selector, limit=1)
         if result.get("ok") and result.get("count", 0) > 0:
@@ -253,13 +259,15 @@ def assert_text_equals(
         if dump_result.get("ok"):
             xml = dump_result.get("xml", "")
             nodes = parse_uiautomator_nodes(xml)
-            hits = find_nodes(nodes, query=query, field="text_or_desc", exact=exact, limit=1)
+            hits = find_nodes(
+                nodes, query=query, field="text_or_desc", exact=exact, limit=1
+            )
             if hits:
                 element_found = True
                 node = hits[0]
                 actual_text = node.text or node.content_desc or ""
                 match_detail = node.to_dict()
-    
+
     # Compare text
     if not element_found:
         passed = False
@@ -270,7 +278,7 @@ def assert_text_equals(
         else:
             passed = (actual_text or "").lower() == (expected or "").lower()
         message = None
-    
+
     evidence_path = None
     if save_evidence:
         evidence_path = _save_evidence(
@@ -280,7 +288,7 @@ def assert_text_equals(
             assertion_type="text_equals",
             passed=passed,
         )
-    
+
     return {
         "ok": True,
         "passed": passed,
@@ -311,10 +319,10 @@ def assert_text_contains(
     """
     Assert element text contains expected substring.
     断言元素文本包含预期子串。
-    
+
     Args / 参数:
     - Same as assert_text_equals
-    
+
     Returns / 返回:
     - ok: bool
     - passed: bool - Whether text contains expected / 文本是否包含预期
@@ -327,7 +335,7 @@ def assert_text_contains(
     actual_text = None
     element_found = False
     match_detail = None
-    
+
     if selector and isinstance(selector, dict):
         result = element_query_impl(device_serial, selector, limit=1)
         if result.get("ok") and result.get("count", 0) > 0:
@@ -341,13 +349,15 @@ def assert_text_contains(
         if dump_result.get("ok"):
             xml = dump_result.get("xml", "")
             nodes = parse_uiautomator_nodes(xml)
-            hits = find_nodes(nodes, query=query, field="text_or_desc", exact=exact, limit=1)
+            hits = find_nodes(
+                nodes, query=query, field="text_or_desc", exact=exact, limit=1
+            )
             if hits:
                 element_found = True
                 node = hits[0]
                 actual_text = node.text or node.content_desc or ""
                 match_detail = node.to_dict()
-    
+
     # Check if text contains expected
     if not element_found:
         passed = False
@@ -358,7 +368,7 @@ def assert_text_contains(
         else:
             passed = (expected or "").lower() in (actual_text or "").lower()
         message = None
-    
+
     evidence_path = None
     if save_evidence:
         evidence_path = _save_evidence(
@@ -368,7 +378,7 @@ def assert_text_contains(
             assertion_type="text_contains",
             passed=passed,
         )
-    
+
     return {
         "ok": True,
         "passed": passed,
@@ -396,7 +406,7 @@ def assert_activity(
     """
     Assert current activity matches expected.
     断言当前 Activity 匹配预期。
-    
+
     Args / 参数:
     - device_serial: Device serial / 设备序列号
     - activity: Expected activity name (can be partial) / 预期的 Activity 名称（可以是部分名称）
@@ -404,7 +414,7 @@ def assert_activity(
     - name: Assertion name / 断言名称
     - save_evidence: Save screenshot / 保存截图
     - out_dir: Output directory / 输出目录
-    
+
     Returns / 返回:
     - ok: bool
     - passed: bool - Whether activity matches / Activity 是否匹配
@@ -418,33 +428,33 @@ def assert_activity(
     focus = get_current_focus(device_serial)
     current_activity = focus.get("activity") or ""
     current_package = focus.get("package") or ""
-    
+
     # Normalize activity pattern
     activity_pattern = activity.lower().strip()
     if activity_pattern.startswith("."):
         activity_pattern = activity_pattern[1:]
-    
+
     current_activity_lower = current_activity.lower()
-    
+
     # Check activity match
     activity_matched = (
-        activity_pattern in current_activity_lower or
-        current_activity_lower.endswith(activity_pattern) or
-        current_activity_lower == activity_pattern
+        activity_pattern in current_activity_lower
+        or current_activity_lower.endswith(activity_pattern)
+        or current_activity_lower == activity_pattern
     )
-    
+
     # Check package match if specified
     package_matched = True
     if package:
         package_pattern = package.lower().strip()
         current_package_lower = current_package.lower()
         package_matched = (
-            package_pattern in current_package_lower or
-            current_package_lower == package_pattern
+            package_pattern in current_package_lower
+            or current_package_lower == package_pattern
         )
-    
+
     passed = activity_matched and package_matched
-    
+
     evidence_path = None
     if save_evidence:
         evidence_path = _save_evidence(
@@ -454,7 +464,7 @@ def assert_activity(
             assertion_type="activity",
             passed=passed,
         )
-    
+
     return {
         "ok": True,
         "passed": passed,
@@ -485,7 +495,7 @@ def assert_logcat(
     """
     Assert logcat contains pattern.
     断言 logcat 包含模式。
-    
+
     Args / 参数:
     - device_serial: Device serial / 设备序列号
     - pattern: Pattern to search in logcat / 要在 logcat 中搜索的模式
@@ -497,7 +507,7 @@ def assert_logcat(
     - name: Assertion name / 断言名称
     - save_evidence: Save screenshot / 保存截图
     - out_dir: Output directory / 输出目录
-    
+
     Returns / 返回:
     - ok: bool
     - passed: bool - Whether pattern found in logcat / 模式是否在 logcat 中找到
@@ -512,7 +522,7 @@ def assert_logcat(
     ts = now_dirname()
     logcat_path = out_root / "assertions" / f"{ts}_logcat_assert.txt"
     logcat_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     dump_result = dump_logcat(
         device_serial=device_serial,
         out_path=logcat_path,
@@ -520,7 +530,7 @@ def assert_logcat(
         filter_spec=filter_spec,
         tag_filter=tag_filter,
     )
-    
+
     if not dump_result.get("ok"):
         return {
             "ok": False,
@@ -530,18 +540,18 @@ def assert_logcat(
             "detail": dump_result,
             "device_serial": device_serial,
         }
-    
+
     # Read logcat content
     logcat_content = ""
     try:
         logcat_content = logcat_path.read_text(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    
+
     # Search for pattern
     matched_lines = []
     logcat_lines = logcat_content.splitlines()
-    
+
     if regex:
         try:
             flags = 0 if case_sensitive else re.IGNORECASE
@@ -564,9 +574,9 @@ def assert_logcat(
             search_line = line if case_sensitive else line.lower()
             if search_pattern in search_line:
                 matched_lines.append(line)
-    
+
     passed = len(matched_lines) > 0
-    
+
     evidence_path = None
     if save_evidence:
         evidence_path = _save_evidence(
@@ -576,10 +586,10 @@ def assert_logcat(
             assertion_type="logcat",
             passed=passed,
         )
-    
+
     # Keep only first 10 matched lines to avoid huge response
     matched_lines_truncated = matched_lines[:10]
-    
+
     return {
         "ok": True,
         "passed": passed,
@@ -631,7 +641,7 @@ def assert_impl(
     """
     Execute assertion and save evidence.
     执行断言并保存证据。
-    
+
     Supported assertion types / 支持的断言类型:
     - element_exists: Assert element exists / 断言元素存在
     - element_not_exists: Assert element does not exist / 断言元素不存在
@@ -640,7 +650,7 @@ def assert_impl(
     - activity: Assert current activity matches / 断言当前 Activity 匹配
     - logcat: Assert logcat contains pattern / 断言 logcat 包含模式
     - screenshot_match: Assert current screenshot matches baseline / 断言当前截图与基准匹配
-    
+
     Args / 参数:
     - device_serial: Device serial / 设备序列号
     - assertion_type: Type of assertion / 断言类型
@@ -666,43 +676,47 @@ def assert_impl(
     - name: Assertion name / 断言名称
     - save_evidence: Save screenshot as evidence / 保存截图作为证据
     - out_dir: Output directory / 输出目录
-    
+
     Returns / 返回:
     - ok: bool
     - passed: bool - Whether assertion passed / 断言是否通过
     - assertion_type: str
     - evidence_path: str or None
     - detail: dict
-    
+
     Examples / 示例:
     ```python
     # Assert login button exists
     assert_impl(serial, "element_exists", query="登录")
-    
+
     # Assert loading indicator disappeared
     assert_impl(serial, "element_not_exists", query="加载中...")
-    
+
     # Assert welcome text equals expected
     assert_impl(serial, "text_equals", query="欢迎", expected="欢迎回来")
-    
+
     # Assert on MainActivity
     assert_impl(serial, "activity", activity=".MainActivity")
-    
+
     # Assert logcat contains success message
     assert_impl(serial, "logcat", logcat_pattern="登录成功")
-    
+
     # Assert screenshot matches baseline
     assert_impl(serial, "screenshot_match", baseline_path="recordings/baselines/login.png")
     ```
     """
     if not device_serial:
         return {"ok": False, "error": "device_serial_required", "passed": False}
-    
+
     assertion_type = (assertion_type or "").strip().lower()
-    
+
     if assertion_type == "element_exists":
         if not query and not template_path and not selector:
-            return {"ok": False, "error": "query_or_template_or_selector_required", "passed": False}
+            return {
+                "ok": False,
+                "error": "query_or_template_or_selector_required",
+                "passed": False,
+            }
         return assert_element_exists(
             device_serial=device_serial,
             query=query,
@@ -716,10 +730,14 @@ def assert_impl(
             save_evidence=save_evidence,
             out_dir=out_dir,
         )
-    
+
     elif assertion_type == "element_not_exists":
         if not query and not template_path and not selector:
-            return {"ok": False, "error": "query_or_template_or_selector_required", "passed": False}
+            return {
+                "ok": False,
+                "error": "query_or_template_or_selector_required",
+                "passed": False,
+            }
         return assert_element_not_exists(
             device_serial=device_serial,
             query=query,
@@ -733,12 +751,16 @@ def assert_impl(
             save_evidence=save_evidence,
             out_dir=out_dir,
         )
-    
+
     elif assertion_type == "text_equals":
         if not query and not selector:
             return {"ok": False, "error": "query_or_selector_required", "passed": False}
         if expected is None:
-            return {"ok": False, "error": "expected_required_for_text_equals", "passed": False}
+            return {
+                "ok": False,
+                "error": "expected_required_for_text_equals",
+                "passed": False,
+            }
         return assert_text_equals(
             device_serial=device_serial,
             query=query or "",
@@ -750,12 +772,16 @@ def assert_impl(
             save_evidence=save_evidence,
             out_dir=out_dir,
         )
-    
+
     elif assertion_type == "text_contains":
         if not query and not selector:
             return {"ok": False, "error": "query_or_selector_required", "passed": False}
         if expected is None:
-            return {"ok": False, "error": "expected_required_for_text_contains", "passed": False}
+            return {
+                "ok": False,
+                "error": "expected_required_for_text_contains",
+                "passed": False,
+            }
         return assert_text_contains(
             device_serial=device_serial,
             query=query or "",
@@ -767,7 +793,7 @@ def assert_impl(
             save_evidence=save_evidence,
             out_dir=out_dir,
         )
-    
+
     elif assertion_type == "activity":
         if not activity:
             return {"ok": False, "error": "activity_required", "passed": False}
@@ -779,7 +805,7 @@ def assert_impl(
             save_evidence=save_evidence,
             out_dir=out_dir,
         )
-    
+
     elif assertion_type == "logcat":
         if not logcat_pattern:
             return {"ok": False, "error": "logcat_pattern_required", "passed": False}
@@ -795,7 +821,7 @@ def assert_impl(
             save_evidence=save_evidence,
             out_dir=out_dir,
         )
-    
+
     elif assertion_type == "screenshot_match":
         if not baseline_path:
             return {"ok": False, "error": "baseline_path_required", "passed": False}
@@ -808,14 +834,22 @@ def assert_impl(
             save_evidence=save_evidence,
             out_dir=out_dir,
         )
-    
+
     else:
         return {
             "ok": False,
             "passed": False,
             "error": "unsupported_assertion_type",
             "assertion_type": assertion_type,
-            "supported": ["element_exists", "element_not_exists", "text_equals", "text_contains", "activity", "logcat", "screenshot_match"],
+            "supported": [
+                "element_exists",
+                "element_not_exists",
+                "text_equals",
+                "text_contains",
+                "activity",
+                "logcat",
+                "screenshot_match",
+            ],
         }
 
 

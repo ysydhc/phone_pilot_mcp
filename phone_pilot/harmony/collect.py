@@ -41,6 +41,7 @@ def collect_artifacts(
     # 1. Screenshot
     try:
         from phone_pilot.harmony.driver import HarmonyScreenDriver
+
         screen = HarmonyScreenDriver(device_serial)
         png_data = screen.screenshot()
         screenshot_path = out_dir / "screenshot.png"
@@ -52,10 +53,12 @@ def collect_artifacts(
     # 2. Current focus
     try:
         from phone_pilot.harmony.driver import HarmonyUIDriver
+
         ui = HarmonyUIDriver(device_serial)
         focus = ui.get_current_activity()
         focus_path = out_dir / "focus.json"
         import json
+
         focus_path.write_text(json.dumps(focus, indent=2), encoding="utf-8")
         files.append(str(focus_path))
     except Exception as exc:
@@ -64,6 +67,7 @@ def collect_artifacts(
     # 3. HiLog
     try:
         from phone_pilot.harmony.hdc.logcat import dump_hilog
+
         hilog_path = out_dir / "hilog.txt"
         dump_hilog(device_serial, str(hilog_path), lines=hilog_lines)
         files.append(str(hilog_path))

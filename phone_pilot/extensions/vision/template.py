@@ -30,6 +30,7 @@ def _require_cv2():
 @dataclass
 class MatchBox:
     """Template match result box."""
+
     x: int
     y: int
     w: int
@@ -94,70 +95,83 @@ def _match_template_shape(
     Completely insensitive to background color.
     """
     cv2, np = _require_cv2()
-    
+
     screen_roi, (ox, oy) = _crop_roi(screen_bgr, roi)
-    
+
     screen_gray = cv2.cvtColor(screen_roi, cv2.COLOR_BGR2GRAY)
     tmpl_gray = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2GRAY)
-    
+
     screen_bin = cv2.adaptiveThreshold(
         screen_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5
     )
     tmpl_bin_orig = cv2.adaptiveThreshold(
         tmpl_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 5
     )
-    
+
     tmpl_content_ratio = np.sum(tmpl_bin_orig > 0) / tmpl_bin_orig.size
     if tmpl_content_ratio < 0.01:
         return [], {"method": "shape", "error": "template_no_content"}
-    
+
     scale_list = scales or [1.0]
     sh_, sw_ = screen_bin.shape[:2]
     candidates = []
-    
+
     for sf in scale_list:
         th_orig, tw_orig = tmpl_bin_orig.shape[:2]
         th_ = max(1, int(th_orig * sf))
         tw_ = max(1, int(tw_orig * sf))
-        
+
         if th_ > sh_ or tw_ > sw_:
             continue
-        
+
         if sf != 1.0:
-            tmpl_bin = cv2.resize(tmpl_bin_orig, (tw_, th_), interpolation=cv2.INTER_NEAREST)
+            tmpl_bin = cv2.resize(
+                tmpl_bin_orig, (tw_, th_), interpolation=cv2.INTER_NEAREST
+            )
         else:
             tmpl_bin = tmpl_bin_orig
-        
+
         result = cv2.matchTemplate(screen_bin, tmpl_bin, cv2.TM_CCOEFF_NORMED)
         result_work = result.copy()
-        
+
         for _ in range(max(1, int(max_results))):
             _, max_val, _, max_loc = cv2.minMaxLoc(result_work)
-            
+
             if max_val < threshold:
                 break
-            
+
             x, y = int(max_loc[0]), int(max_loc[1])
-            
-            match_region = screen_bin[y:y+th_, x:x+tw_]
+
+            match_region = screen_bin[y : y + th_, x : x + tw_]
             content_ratio = np.sum(match_region > 0) / match_region.size
-            
+
             if content_ratio >= tmpl_content_ratio * 0.3:
-                candidates.append(MatchBox(
-                    x=ox + x, y=oy + y, w=int(tw_), h=int(th_),
-                    score=float(max_val), scale=float(sf)
-                ))
-            
+                candidates.append(
+                    MatchBox(
+                        x=ox + x,
+                        y=oy + y,
+                        w=int(tw_),
+                        h=int(th_),
+                        score=float(max_val),
+                        scale=float(sf),
+                    )
+                )
+
             x0 = max(0, x - int(tw_ * 0.5))
             y0 = max(0, y - int(th_ * 0.5))
             x1 = min(result_work.shape[1], x + int(tw_ * 0.5))
             y1 = min(result_work.shape[0], y + int(th_ * 0.5))
             result_work[y0:y1, x0:x1] = -1.0
-    
+
     candidates.sort(key=lambda b: float(b.score), reverse=True)
-    candidates = candidates[:max(1, int(max_results))]
-    
-    return candidates, {"method": "shape", "threshold": threshold, "roi": roi, "scales": scale_list}
+    candidates = candidates[: max(1, int(max_results))]
+
+    return candidates, {
+        "method": "shape",
+        "threshold": threshold,
+        "roi": roi,
+        "scales": scale_list,
+    }
 
 
 def _match_template_core(
@@ -173,7 +187,7 @@ def _match_template_core(
 ) -> tuple[list[MatchBox], dict]:
     """
     Core template matching logic.
-    
+
     Methods:
     - ccoeff_normed: Normalized cross-correlation coefficient (default)
     - ccorr_normed: Normalized cross-correlation
@@ -192,13 +206,13 @@ def _match_template_core(
         tmpl0 = tmpl_bgr
 
     m = (method or "ccoeff_normed").strip().lower()
-    
+
     method_map = {
         "sqdiff_normed": (cv2.TM_SQDIFF_NORMED, True),
         "ccorr_normed": (cv2.TM_CCORR_NORMED, False),
         "ccoeff_normed": (cv2.TM_CCOEFF_NORMED, False),
     }
-    
+
     if m == "edge":
         screen_edge = cv2.Canny(screen, 50, 150)
         tmpl_edge = cv2.Canny(tmpl0, 50, 150)
@@ -244,7 +258,11 @@ def _match_template_core(
         else:
             tw = max(1, int(round(tmpl0.shape[1] * sf)))
             th = max(1, int(round(tmpl0.shape[0] * sf)))
-            tmpl = cv2.resize(tmpl0, (tw, th), interpolation=cv2.INTER_AREA if sf < 1.0 else cv2.INTER_LINEAR)
+            tmpl = cv2.resize(
+                tmpl0,
+                (tw, th),
+                interpolation=cv2.INTER_AREA if sf < 1.0 else cv2.INTER_LINEAR,
+            )
 
         th_, tw_ = tmpl.shape[:2]
         sh_, sw_ = screen.shape[:2]
@@ -269,18 +287,33 @@ def _match_template_core(
                 break
 
             x, y = int(loc[0]), int(loc[1])
-            candidates.append(MatchBox(x=ox + x, y=oy + y, w=int(tw_), h=int(th_), score=float(out_score), scale=float(sf)))
+            candidates.append(
+                MatchBox(
+                    x=ox + x,
+                    y=oy + y,
+                    w=int(tw_),
+                    h=int(th_),
+                    score=float(out_score),
+                    scale=float(sf),
+                )
+            )
 
             x0 = max(0, x - int(tw_ * 0.5))
             y0 = max(0, y - int(th_ * 0.5))
             x1 = min(res_work.shape[1], x + int(tw_ * 0.5))
             y1 = min(res_work.shape[0], y + int(th_ * 0.5))
-            res_work[y0:y1, x0:x1] = (1.0 if better_is_lower else -1.0)
+            res_work[y0:y1, x0:x1] = 1.0 if better_is_lower else -1.0
 
     candidates.sort(key=lambda b: float(b.score), reverse=True)
     candidates = candidates[: max(1, int(max_results))]
 
-    return candidates, {"method": m, "scales": scale_list2, "roi": roi, "grayscale": bool(grayscale), "threshold": float(threshold)}
+    return candidates, {
+        "method": m,
+        "scales": scale_list2,
+        "roi": roi,
+        "grayscale": bool(grayscale),
+        "threshold": float(threshold),
+    }
 
 
 def _match_template_auto(
@@ -297,7 +330,7 @@ def _match_template_auto(
     Auto mode: try multiple methods and pick the best result.
     """
     cv2, _ = _require_cv2()
-    
+
     # 1. Standard ccoeff_normed
     matches, meta = _match_template_core(
         screen_bgr=screen_bgr,
@@ -309,15 +342,15 @@ def _match_template_auto(
         method="ccoeff_normed",
         max_results=max_results,
     )
-    
+
     if matches and matches[0].score >= threshold:
         meta["auto_method_used"] = "ccoeff_normed"
         return matches, meta
-    
+
     # 2. Multi-scale ccoeff_normed
     multi_scales = [0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.25]
     lower_threshold = threshold * 0.5
-    
+
     matches, meta = _match_template_core(
         screen_bgr=screen_bgr,
         tmpl_bgr=tmpl_bgr,
@@ -328,11 +361,11 @@ def _match_template_auto(
         method="ccoeff_normed",
         max_results=max_results,
     )
-    
+
     if matches and matches[0].score >= lower_threshold:
         meta["auto_method_used"] = "ccoeff_normed_multiscale"
         return matches, meta
-    
+
     # 3. Edge detection + multi-scale
     edge_matches, edge_meta = _match_template_core(
         screen_bgr=screen_bgr,
@@ -344,11 +377,11 @@ def _match_template_auto(
         method="edge",
         max_results=max_results,
     )
-    
+
     if edge_matches:
         edge_meta["auto_method_used"] = "edge_multiscale"
         return edge_matches, edge_meta
-    
+
     # 4. Shape matching
     shape_matches, shape_meta = _match_template_shape(
         screen_bgr=screen_bgr,
@@ -358,12 +391,17 @@ def _match_template_auto(
         scales=multi_scales,
         max_results=max_results,
     )
-    
+
     if shape_matches:
         shape_meta["auto_method_used"] = "shape"
         return shape_matches, shape_meta
-    
-    return [], {"method": "auto", "auto_method_used": "none", "threshold": threshold, "roi": roi}
+
+    return [], {
+        "method": "auto",
+        "auto_method_used": "none",
+        "threshold": threshold,
+        "roi": roi,
+    }
 
 
 def match_template(
@@ -379,7 +417,7 @@ def match_template(
 ) -> dict:
     """
     Template matching on image bytes.
-    
+
     Args:
         screen_bytes: Screenshot PNG bytes
         template_bytes: Template image PNG bytes
@@ -389,7 +427,7 @@ def match_template(
         scales: List of scales to try for multi-scale matching
         method: Matching method (ccoeff_normed, ccorr_normed, sqdiff_normed, edge, auto)
         max_results: Maximum number of matches to return
-        
+
     Returns:
         {
             "ok": bool,
@@ -434,6 +472,7 @@ def match_template(
 # Feature matching (SIFT)
 # -----------------------------------------------------------------------------
 
+
 def _find_icon_with_features_on_bgr(
     tmpl_bgr,
     screen_bgr,
@@ -445,50 +484,50 @@ def _find_icon_with_features_on_bgr(
     Returns (ok, homography_matrix, inlier_mask).
     """
     cv2, np = _require_cv2()
-    
+
     try:
         sift = cv2.SIFT_create()
     except Exception:
         return False, None, None, 0
-    
+
     tmpl_gray = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2GRAY)
     screen_gray = cv2.cvtColor(screen_bgr, cv2.COLOR_BGR2GRAY)
-    
+
     kp1, des1 = sift.detectAndCompute(tmpl_gray, None)
     kp2, des2 = sift.detectAndCompute(screen_gray, None)
-    
+
     if des1 is None or des2 is None or len(kp1) < 4 or len(kp2) < 4:
         return False, None, None, 0
-    
+
     FLANN_INDEX_KDTREE = 1
     index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
     search_params = dict(checks=50)
     flann = cv2.FlannBasedMatcher(index_params, search_params)
-    
+
     matches = flann.knnMatch(des1, des2, k=2)
-    
+
     good = []
     for m_n in matches:
         if len(m_n) == 2:
             m, n = m_n
             if m.distance < ratio_thresh * n.distance:
                 good.append(m)
-    
+
     if len(good) < max(4, min_inliers):
         return False, None, None, 0
-    
+
     src_pts = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
     dst_pts = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
-    
+
     H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-    
+
     if H is None or mask is None:
         return False, None, None, 0
-    
+
     inlier_count = int(mask.sum())
     if inlier_count < max(4, min_inliers):
         return False, None, None, 0
-    
+
     return True, H, mask, len(good)
 
 
@@ -617,23 +656,27 @@ def find_template_on_screen_with_fallback(
     import pathlib
     import datetime
     import re
-    
+
     cv2, np = _require_cv2()
-    
+
     if not device_serial:
         return {"ok": False, "error": "device_serial is required"}
 
     tmpl_path = pathlib.Path(template_path).expanduser().resolve()
     if not tmpl_path.exists():
-        return {"ok": False, "error": "template_not_found", "template_path": str(tmpl_path)}
+        return {
+            "ok": False,
+            "error": "template_not_found",
+            "template_path": str(tmpl_path),
+        }
 
     # Import screenshot function
     from phone_pilot.android.adb.screenshot import take_screenshot_png_bytes
     from phone_pilot.extensions.vision.annotate import is_mostly_black, annotate_boxes
-    
+
     png = take_screenshot_png_bytes(device_serial)
     screen_bgr = decode_png_to_bgr(png)
-    
+
     # Check for black screen
     black_check = is_mostly_black(png)
     if black_check.get("is_black"):
@@ -648,7 +691,11 @@ def find_template_on_screen_with_fallback(
     # Load template
     tmpl_bgr = cv2.imread(str(tmpl_path), cv2.IMREAD_COLOR)
     if tmpl_bgr is None:
-        return {"ok": False, "error": "failed_to_load_template", "template_path": str(tmpl_path)}
+        return {
+            "ok": False,
+            "error": "failed_to_load_template",
+            "template_path": str(tmpl_path),
+        }
 
     # ROI crop (screen-side) for shared screenshot
     ox, oy = 0, 0
@@ -665,10 +712,10 @@ def find_template_on_screen_with_fallback(
     # Helper functions
     def now_dirname():
         return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     def safe_name(s):
-        return re.sub(r'[^\w\-_.]', '_', str(s))[:50]
-    
+        return re.sub(r"[^\w\-_.]", "_", str(s))[:50]
+
     def ensure_abs(p):
         if p in (None, "./.recordings", ".recordings"):
             return recordings_root(None)
@@ -687,8 +734,14 @@ def find_template_on_screen_with_fallback(
                 min_inliers=int(feature_min_inliers),
             )
             inliers_val = int((inlier_mask.sum() if inlier_mask is not None else 0))
-            feature_score = float(inliers_val) / max(1, int(good_count or 0)) if ok else None
-            if ok and feature_score is not None and feature_score < float(feature_score_thresh):
+            feature_score = (
+                float(inliers_val) / max(1, int(good_count or 0)) if ok else None
+            )
+            if (
+                ok
+                and feature_score is not None
+                and feature_score < float(feature_score_thresh)
+            ):
                 ok, H, inlier_mask = False, None, None
             sift_debug = {
                 "ok": bool(ok),
@@ -704,7 +757,7 @@ def find_template_on_screen_with_fallback(
             sift_debug = {"ok": False, "error": str(e)}
     else:
         sift_debug = {"ok": False, "disabled": True}
-    
+
     annotated_path = None
     if ok and H is not None:
         th, tw = tmpl_bgr.shape[:2]
@@ -736,7 +789,13 @@ def find_template_on_screen_with_fallback(
                     out_root = ensure_abs(out_dir)
                     ts = now_dirname()
                     safe = safe_name(name or tmpl_path.stem or "find_image")
-                    box_dict = {"x": int(ox + x1), "y": int(oy + y1), "w": int(w), "h": int(h), "label": "sift"}
+                    box_dict = {
+                        "x": int(ox + x1),
+                        "y": int(oy + y1),
+                        "w": int(w),
+                        "h": int(h),
+                        "label": "sift",
+                    }
                     ann_png = annotate_boxes(png, [box_dict])
                     out_path = out_root / "find_image_debug" / f"{ts}_{safe}_sift.png"
                     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -761,7 +820,7 @@ def find_template_on_screen_with_fallback(
     except Exception:
         thr = 0.85
     thr = max(0.0, min(1.0, thr))
-    
+
     candidates, meta = _match_template_core(
         screen_bgr=screen_bgr,
         tmpl_bgr=tmpl_bgr,
@@ -789,7 +848,15 @@ def find_template_on_screen_with_fallback(
             safe = safe_name(name or tmpl_path.stem or "find_image")
             boxes = []
             for c in candidates:
-                boxes.append({"x": int(c.x), "y": int(c.y), "w": int(c.w), "h": int(c.h), "label": f"{c.score:.3f}"})
+                boxes.append(
+                    {
+                        "x": int(c.x),
+                        "y": int(c.y),
+                        "w": int(c.w),
+                        "h": int(c.h),
+                        "label": f"{c.score:.3f}",
+                    }
+                )
             if boxes:
                 ann_png = annotate_boxes(png, boxes)
                 out_path = out_root / "find_image_debug" / f"{ts}_{safe}.png"

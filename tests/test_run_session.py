@@ -39,6 +39,7 @@ class TestRunSessionLifecycle(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _make_session(self):

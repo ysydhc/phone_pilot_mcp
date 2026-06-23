@@ -40,6 +40,7 @@ from typing import Any, Optional
 # Git helpers
 # ---------------------------------------------------------------------------
 
+
 def _git_info(cwd: Optional[str] = None) -> dict:
     """Collect git context from the working directory. Never raises."""
     info: dict[str, Any] = {
@@ -51,7 +52,14 @@ def _git_info(cwd: Optional[str] = None) -> dict:
         "dirty_files_count": 0,
         "has_patch": False,
     }
-    kw = {"cwd": cwd, "check": False, "capture_output": True, "text": True, "timeout": 2, "stdin": subprocess.DEVNULL}
+    kw = {
+        "cwd": cwd,
+        "check": False,
+        "capture_output": True,
+        "text": True,
+        "timeout": 2,
+        "stdin": subprocess.DEVNULL,
+    }
     try:
         r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], **kw)
         if r.returncode == 0:
@@ -79,7 +87,11 @@ def _git_diff_patch(cwd: Optional[str] = None) -> Optional[str]:
     try:
         r = subprocess.run(
             ["git", "diff", "HEAD"],
-            cwd=cwd, check=False, capture_output=True, text=True, timeout=3,
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
             stdin=subprocess.DEVNULL,
         )
         patch = (r.stdout or "").strip()
@@ -103,6 +115,7 @@ def _safe(name: str, max_len: int = 60) -> str:
 # Recordings root resolver
 # ---------------------------------------------------------------------------
 
+
 def run_recordings_root(recordings_dir: Optional[str] = None) -> pathlib.Path:
     """Resolve the .recordings root for run artifacts.
 
@@ -122,6 +135,7 @@ def run_recordings_root(recordings_dir: Optional[str] = None) -> pathlib.Path:
 # ---------------------------------------------------------------------------
 # RunSession
 # ---------------------------------------------------------------------------
+
 
 class RunSession:
     """Manages artifacts for a single script run."""
@@ -192,6 +206,7 @@ class RunSession:
 
         if ginfo.get("dirty"):
             import threading
+
             _t = threading.Thread(target=_write_diff_async, daemon=True)
             _t.start()
 
@@ -206,8 +221,11 @@ class RunSession:
 
         # Open console log and tee
         try:
-            session._console_log_fh = open(run_dir / "console.log", "w", encoding="utf-8")
+            session._console_log_fh = open(
+                run_dir / "console.log", "w", encoding="utf-8"
+            )
             from phone_pilot.core.log import set_console_log_file
+
             set_console_log_file(session._console_log_fh)
         except Exception:
             pass
@@ -350,17 +368,20 @@ class RunSession:
 
         # Update global index
         try:
-            _append_run_index(self.run_dir.parent / "index.json", {
-                "script_name": self.script_name,
-                "status": status,
-                "exit_code": exit_code,
-                "duration_s": round(duration, 1),
-                "started_at": self.started_at.isoformat(timespec="seconds"),
-                "run_dir": self.run_dir.name,
-                "git_commit": self._git_info.get("commit"),
-                "git_dirty": self._git_info.get("dirty", False),
-                "device_serial": (self._device_info or {}).get("serial"),
-            })
+            _append_run_index(
+                self.run_dir.parent / "index.json",
+                {
+                    "script_name": self.script_name,
+                    "status": status,
+                    "exit_code": exit_code,
+                    "duration_s": round(duration, 1),
+                    "started_at": self.started_at.isoformat(timespec="seconds"),
+                    "run_dir": self.run_dir.name,
+                    "git_commit": self._git_info.get("commit"),
+                    "git_dirty": self._git_info.get("dirty", False),
+                    "device_serial": (self._device_info or {}).get("serial"),
+                },
+            )
         except Exception:
             pass
 
@@ -372,6 +393,7 @@ class RunSession:
         if self._console_log_fh:
             try:
                 from phone_pilot.core.log import set_console_log_file
+
                 set_console_log_file(None)
             except Exception:
                 pass
@@ -386,9 +408,12 @@ class RunSession:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_json(path: pathlib.Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _append_run_index(index_path: pathlib.Path, record: dict) -> None:

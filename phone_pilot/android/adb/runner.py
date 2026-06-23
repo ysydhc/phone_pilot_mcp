@@ -48,6 +48,7 @@ from phone_pilot.core.log import (  # noqa: E402
 # Friendly command labels
 # ---------------------------------------------------------------------------
 
+
 def _friendly_cmd(cmd: List[str]) -> str | None:
     """Return a localized friendly label for common adb commands.
 
@@ -63,6 +64,7 @@ def _friendly_cmd(cmd: List[str]) -> str | None:
     if " input tap " in s:
         # Extract coordinates for readability
         import re as _re
+
         m = _re.search(r"input tap (\d+) (\d+)", s)
         if m:
             return f"tap ({m.group(1)}, {m.group(2)})"
@@ -155,7 +157,15 @@ class CommandRunner:
 
         try:
             proc = subprocess.run(
-                cmd, check=False, text=True, capture_output=True, timeout=timeout_s,
+                cmd,
+                check=False,
+                text=True,
+                # logcat/dumpsys output can contain bytes that are not valid in
+                # the locale encoding; decode leniently so a stray byte never
+                # crashes the whole command with UnicodeDecodeError.
+                errors="replace",
+                capture_output=True,
+                timeout=timeout_s,
                 stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired as e:

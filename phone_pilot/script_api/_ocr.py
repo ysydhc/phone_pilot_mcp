@@ -3,6 +3,7 @@
 通过 Tesseract OCR 在截图中查找文本，支持多语言、ROI 裁剪和正则匹配。
 Uses Tesseract OCR to find text in screenshots with multi-language, ROI crop, and regex support.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -70,7 +71,9 @@ def _ocr_find_text_boxes(
         elif mode == "thresh":
             _, out = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         elif mode == "thresh_inv":
-            _, out = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            _, out = cv2.threshold(
+                gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+            )
         else:
             return None
         ok, enc = cv2.imencode(".png", out)
@@ -94,8 +97,14 @@ def _ocr_find_text_boxes(
         for _ in range(3):
             try:
                 img_bytes = _take_screenshot(ctx)
-                boxes = ocr_image(img_bytes, lang=normalize_ocr_lang(lang), psm=int(psm))
-                ctx._ocr_cache = {"ts": time.time(), "boxes": boxes, "img_bytes": img_bytes}
+                boxes = ocr_image(
+                    img_bytes, lang=normalize_ocr_lang(lang), psm=int(psm)
+                )
+                ctx._ocr_cache = {
+                    "ts": time.time(),
+                    "boxes": boxes,
+                    "img_bytes": img_bytes,
+                }
                 break
             except Exception as e:
                 _ = e  # noqa: F841
@@ -103,6 +112,7 @@ def _ocr_find_text_boxes(
                 time.sleep(0.15)
     if boxes is None:
         return []
+
     def _match_boxes(boxes_in: list[dict]) -> list[dict]:
         out: list[dict] = []
         for b in boxes_in:
@@ -152,7 +162,9 @@ def _ocr_find_text_boxes(
                 cx2, cy2 = _box_center(b2)
                 if abs(cy1 - cy2) > 30:
                     continue
-                gap = int(b2.get("x", 0)) - int(b1.get("x2", b1.get("x", 0) + b1.get("w", 0)))
+                gap = int(b2.get("x", 0)) - int(
+                    b1.get("x2", b1.get("x", 0) + b1.get("w", 0))
+                )
                 if gap < -5 or gap > 30:
                     continue
                 combined = dict(b1)
@@ -184,7 +196,9 @@ def _ocr_find_text_boxes(
                 if score > best_score:
                     best_score = score
                     best = b
-        threshold = 0.6 if non_ascii_query else (0.45 if any(len(q) <= 2 for q in nq) else 0.6)
+        threshold = (
+            0.6 if non_ascii_query else (0.45 if any(len(q) <= 2 for q in nq) else 0.6)
+        )
         if best is not None and best_score >= threshold:
             if "center_x" not in best or "center_y" not in best:
                 cx, cy = _box_center(best)
@@ -216,7 +230,9 @@ def _ocr_find_text_boxes(
             if int(alt_psm) == int(psm):
                 continue
             try:
-                boxes3 = ocr_image(img_bytes, lang=normalize_ocr_lang(lang), psm=int(alt_psm))
+                boxes3 = ocr_image(
+                    img_bytes, lang=normalize_ocr_lang(lang), psm=int(alt_psm)
+                )
                 out = _process_boxes(boxes3)
                 if out:
                     break
@@ -226,7 +242,9 @@ def _ocr_find_text_boxes(
                 scaled3 = _scale_png_bytes(img_bytes, scale=scale)
                 if scaled3:
                     try:
-                        boxes4 = ocr_image(scaled3, lang=normalize_ocr_lang(lang), psm=int(alt_psm))
+                        boxes4 = ocr_image(
+                            scaled3, lang=normalize_ocr_lang(lang), psm=int(alt_psm)
+                        )
                         out = _process_boxes(boxes4)
                         if out:
                             break
@@ -239,7 +257,9 @@ def _ocr_find_text_boxes(
                 if not pre:
                     continue
                 try:
-                    boxes5 = ocr_image(pre, lang=normalize_ocr_lang(lang), psm=int(alt_psm))
+                    boxes5 = ocr_image(
+                        pre, lang=normalize_ocr_lang(lang), psm=int(alt_psm)
+                    )
                     out = _process_boxes(boxes5)
                     if out:
                         break
@@ -250,7 +270,9 @@ def _ocr_find_text_boxes(
     return out
 
 
-def _ocr_texts_from_image(path: str, *, lang: Optional[str] = None, psm: int = 6) -> list[str]:
+def _ocr_texts_from_image(
+    path: str, *, lang: Optional[str] = None, psm: int = 6
+) -> list[str]:
     try:
         data = pathlib.Path(path).read_bytes()
     except Exception:
@@ -308,7 +330,11 @@ def _ocr_find_text_boxes_roi(
             continue
         txt = str(b.get("text", ""))
         t = _normalize_text(txt, case_sensitive=case_sensitive)
-        for q in [_normalize_text(s, case_sensitive=case_sensitive) for s in texts if str(s or "").strip()]:
+        for q in [
+            _normalize_text(s, case_sensitive=case_sensitive)
+            for s in texts
+            if str(s or "").strip()
+        ]:
             ok_match = (t == q) if exact else (q in t)
             if ok_match:
                 if "center_x" not in b or "center_y" not in b:

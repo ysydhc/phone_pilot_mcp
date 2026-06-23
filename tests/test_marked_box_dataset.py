@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phone_pilot.extensions.vision.template import match_template, match_template_with_features
+import pytest
+
+from phone_pilot.extensions.vision.template import (
+    match_template,
+    match_template_with_features,
+)
 from phone_pilot.extensions.vision.markup import extract_red_box_crop
 
 
@@ -72,6 +77,14 @@ def _count(res: dict) -> int:
 
 
 def test_marked_box_dataset():
+    missing = [
+        c["name"]
+        for c in CASES
+        if not Path(c["screen"]).exists() or not Path(c["template"]).exists()
+    ]
+    if missing:
+        pytest.skip(f"dataset assets not present (excluded from git): {missing}")
+
     for case in CASES:
         screen_bytes = Path(case["screen"]).read_bytes()
         template_bytes = Path(case["template"]).read_bytes()
@@ -95,4 +108,6 @@ def test_marked_box_dataset():
         full_count = _count(full_match)
 
         if case["must_fail"]:
-            assert roi_count == 0 and full_count == 0, f"{case['name']} should not match"
+            assert roi_count == 0 and full_count == 0, (
+                f"{case['name']} should not match"
+            )

@@ -59,11 +59,15 @@ def _clamp_time_limit_s(v: int) -> int:
     return max(1, min(x, 180))
 
 
-def _pull_file(device_serial: Optional[str], remote_path: str, local_path: pathlib.Path) -> dict:
+def _pull_file(
+    device_serial: Optional[str], remote_path: str, local_path: pathlib.Path
+) -> dict:
     """Pull a remote file to local_path and return transfer metadata."""
     local_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = adb_prefix(device_serial) + ["pull", remote_path, str(local_path)]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
+    proc = subprocess.run(
+        cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL
+    )
     size = None
     try:
         if local_path.exists():
@@ -85,7 +89,9 @@ def _pull_file(device_serial: Optional[str], remote_path: str, local_path: pathl
 def _rm_remote(device_serial: Optional[str], remote_path: str) -> dict:
     """Remove a remote file and return execution metadata."""
     cmd = adb_prefix(device_serial) + ["shell", "rm", "-f", remote_path]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
+    proc = subprocess.run(
+        cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL
+    )
     return {
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,
@@ -121,7 +127,9 @@ def start_screenrecord_detached(
     # NOTE: We run through `sh -c` to get background pid ($!).
     sh_cmd = " ".join(args) + " >/dev/null 2>&1 & echo $!"
     cmd = adb_prefix(device_serial) + ["shell", sh_cmd]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
+    proc = subprocess.run(
+        cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL
+    )
     out = (proc.stdout or "").strip()
     pid = None
     try:
@@ -161,7 +169,9 @@ def stop_screenrecord_detached(
     kill_res = None
     if pid:
         cmd = adb_prefix(device_serial) + ["shell", "kill", "-2", str(int(pid))]
-        proc = subprocess.run(cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL)
+        proc = subprocess.run(
+            cmd, check=False, text=True, capture_output=True, stdin=subprocess.DEVNULL
+        )
         kill_res = {
             "ok": proc.returncode == 0,
             "returncode": proc.returncode,
@@ -243,9 +253,15 @@ class WorkflowScreenRecorder:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self._started_at = _iso_now()
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name=f"screenrecord_{self.workflow_id}", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name=f"screenrecord_{self.workflow_id}", daemon=True
+        )
         self._thread.start()
-        return {"ok": True, "started_at": self._started_at, "out_dir": str(self.out_dir)}
+        return {
+            "ok": True,
+            "started_at": self._started_at,
+            "out_dir": str(self.out_dir),
+        }
 
     def stop(self, *, join_timeout_s: float = 25.0) -> dict:
         """Stop recording loop, terminate adb process, and return results."""
@@ -283,12 +299,15 @@ class WorkflowScreenRecorder:
         seg = 0
         # Fallback profiles when device fails to start codec.
         profiles: list[tuple[int, Optional[str]]] = []
-        
+
         # Try to load device preferences (if device store is available)
         try:
             from phone_pilot.android.device.store import get_device_screenrecord_prefs
+
             if self.device_serial and self.device_info_out_dir:
-                prefs = get_device_screenrecord_prefs(self.device_serial, out_dir=str(self.device_info_out_dir))
+                prefs = get_device_screenrecord_prefs(
+                    self.device_serial, out_dir=str(self.device_info_out_dir)
+                )
                 pref = prefs.get("preferred") if isinstance(prefs, dict) else None
                 if isinstance(pref, dict):
                     br0 = pref.get("bit_rate")
@@ -307,7 +326,7 @@ class WorkflowScreenRecorder:
             (2_000_000, "720x1280"),
             (1_000_000, "640x360"),
         ]
-        
+
         # Deduplicate
         seen_prof: set[str] = set()
         deduped: list[tuple[int, Optional[str]]] = []
@@ -316,25 +335,41 @@ class WorkflowScreenRecorder:
             if k in seen_prof:
                 continue
             seen_prof.add(k)
-            deduped.append((int(br), (str(sz).strip() if sz is not None else "") or None))
+            deduped.append(
+                (int(br), (str(sz).strip() if sz is not None else "") or None)
+            )
         profiles = deduped
         prof_i = 0
         consecutive_fail = 0
-        
+
         while not self._stop.is_set():
             bit_rate, size = profiles[min(prof_i, len(profiles) - 1)]
             seg_id = f"{seg:03d}"
-            remote_path = f"{self.remote_dir}/pt_workflow_{self.workflow_id}_{seg_id}.mp4"
+            remote_path = (
+                f"{self.remote_dir}/pt_workflow_{self.workflow_id}_{seg_id}.mp4"
+            )
             local_path = self.out_dir / f"screenrecord_{seg_id}.mp4"
             started_at = _iso_now()
 
-            cmd = adb_prefix(self.device_serial) + ["shell", "screenrecord", "--bit-rate", str(int(bit_rate)), "--time-limit", str(self.segment_time_limit_s)]
+            cmd = adb_prefix(self.device_serial) + [
+                "shell",
+                "screenrecord",
+                "--bit-rate",
+                str(int(bit_rate)),
+                "--time-limit",
+                str(self.segment_time_limit_s),
+            ]
             if size:
                 cmd += ["--size", str(size)]
             cmd.append(remote_path)
 
             print(f"[screenrecord] start: {' '.join(cmd)}", file=sys.stderr)
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+            )
             with self._lock:
                 self._cur_proc = proc
 
@@ -365,11 +400,13 @@ class WorkflowScreenRecorder:
             rm_res = _rm_remote(self.device_serial, remote_path)
 
             stderr_tail = (_err or b"")[-800:].decode("utf-8", errors="replace").strip()
-            
+
             # Prune empty/tiny files
             pruned_local = False
             try:
-                local_size2 = pull_res.get("local_size") if isinstance(pull_res, dict) else None
+                local_size2 = (
+                    pull_res.get("local_size") if isinstance(pull_res, dict) else None
+                )
                 if isinstance(local_size2, int) and 0 <= local_size2 < 4096:
                     if local_path.exists():
                         local_path.unlink()
@@ -378,19 +415,25 @@ class WorkflowScreenRecorder:
                 pruned_local = False
             if isinstance(pull_res, dict):
                 pull_res["pruned_local"] = pruned_local
-                
-            self._segments.append({
-                "segment_index": seg,
-                "remote_path": remote_path,
-                "local_path": str(local_path),
-                "started_at": started_at,
-                "finished_at": finished_at,
-                "returncode": rc,
-                "stderr_tail": stderr_tail,
-                "profile": {"bit_rate": int(bit_rate), "size": size, "time_limit_s": int(self.segment_time_limit_s)},
-                "pulled": pull_res,
-                "removed_remote": rm_res,
-            })
+
+            self._segments.append(
+                {
+                    "segment_index": seg,
+                    "remote_path": remote_path,
+                    "local_path": str(local_path),
+                    "started_at": started_at,
+                    "finished_at": finished_at,
+                    "returncode": rc,
+                    "stderr_tail": stderr_tail,
+                    "profile": {
+                        "bit_rate": int(bit_rate),
+                        "size": size,
+                        "time_limit_s": int(self.segment_time_limit_s),
+                    },
+                    "pulled": pull_res,
+                    "removed_remote": rm_res,
+                }
+            )
 
             # Detect failures
             fail = False
@@ -398,14 +441,19 @@ class WorkflowScreenRecorder:
                 fail = (rc is None) or (int(rc) != 0)
             except Exception:
                 fail = True
-            local_size = pull_res.get("local_size") if isinstance(pull_res, dict) else None
+            local_size = (
+                pull_res.get("local_size") if isinstance(pull_res, dict) else None
+            )
             if isinstance(local_size, int) and local_size < 4096:
                 fail = True
 
             # Record success to device store
             if not fail:
                 try:
-                    from phone_pilot.android.device.store import record_device_screenrecord_success
+                    from phone_pilot.android.device.store import (
+                        record_device_screenrecord_success,
+                    )
+
                     if self.device_serial and self.device_info_out_dir:
                         record_device_screenrecord_success(
                             self.device_serial,

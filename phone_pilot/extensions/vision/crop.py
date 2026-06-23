@@ -44,7 +44,9 @@ def crop_image_file(
     x2p = max(0, min(w, x2 + pad))
     y2p = max(0, min(h, y2 + pad))
     if x2p <= x1p or y2p <= y1p:
-        raise ValueError(f"invalid_crop_bounds: {(x1p, y1p, x2p, y2p)} for image {w}x{h}")
+        raise ValueError(
+            f"invalid_crop_bounds: {(x1p, y1p, x2p, y2p)} for image {w}x{h}"
+        )
 
     crop = img[y1p:y2p, x1p:x2p]
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,7 +90,9 @@ def crop_image_bytes(
     x2p = max(0, min(w, x2 + pad))
     y2p = max(0, min(h, y2 + pad))
     if x2p <= x1p or y2p <= y1p:
-        raise ValueError(f"invalid_crop_bounds: {(x1p, y1p, x2p, y2p)} for image {w}x{h}")
+        raise ValueError(
+            f"invalid_crop_bounds: {(x1p, y1p, x2p, y2p)} for image {w}x{h}"
+        )
 
     crop = img[y1p:y2p, x1p:x2p]
 

@@ -72,6 +72,7 @@ BITMAP_CONFIGS = {
 @dataclass
 class StackFrame:
     """Stack frame information from hprof."""
+
     frame_id: int
     method_name: str = ""
     method_signature: str = ""
@@ -83,6 +84,7 @@ class StackFrame:
 @dataclass
 class BitmapInfo:
     """Bitmap object information."""
+
     obj_id: int
     width: int = 0
     height: int = 0
@@ -152,7 +154,7 @@ class BitmapAnalyzer:
     def _parse_string_record(self, data: bytes) -> None:
         string_id = self._read_id(data, 0)
         try:
-            string = data[self.id_size:].decode("utf-8", errors="replace")
+            string = data[self.id_size :].decode("utf-8", errors="replace")
         except Exception:
             string = ""
         self.string_table[string_id] = string
@@ -186,7 +188,7 @@ class BitmapAnalyzer:
         offset += self.id_size * 4  # class_loader, signers, protection, reserved
         offset += 4  # instance_size
 
-        cp_count = struct.unpack(">H", data[offset:offset + 2])[0]
+        cp_count = struct.unpack(">H", data[offset : offset + 2])[0]
         offset += 2
         for _ in range(cp_count):
             offset += 2
@@ -194,7 +196,7 @@ class BitmapAnalyzer:
             offset += 1
             offset += TYPE_SIZES.get(type_id, 0)
 
-        static_count = struct.unpack(">H", data[offset:offset + 2])[0]
+        static_count = struct.unpack(">H", data[offset : offset + 2])[0]
         offset += 2
         for _ in range(static_count):
             offset += self.id_size
@@ -202,7 +204,7 @@ class BitmapAnalyzer:
             offset += 1
             offset += TYPE_SIZES.get(type_id, 0)
 
-        field_count = struct.unpack(">H", data[offset:offset + 2])[0]
+        field_count = struct.unpack(">H", data[offset : offset + 2])[0]
         offset += 2
         offset += field_count * (self.id_size + 1)
         return offset
@@ -213,9 +215,9 @@ class BitmapAnalyzer:
         offset += 4  # stack_trace_serial
         class_id = self._read_id(data, offset)
         offset += self.id_size
-        data_len = struct.unpack(">I", data[offset:offset + 4])[0]
+        data_len = struct.unpack(">I", data[offset : offset + 4])[0]
         offset += 4
-        inst_data = data[offset:offset + data_len]
+        inst_data = data[offset : offset + data_len]
         offset += data_len
 
         if self.bitmap_class_id and class_id == self.bitmap_class_id:
@@ -270,9 +272,9 @@ class BitmapAnalyzer:
 
     def _read_id(self, data: bytes, offset: int) -> int:
         if self.id_size == 4:
-            return struct.unpack(">I", data[offset:offset + 4])[0]
+            return struct.unpack(">I", data[offset : offset + 4])[0]
         if self.id_size == 8:
-            return struct.unpack(">Q", data[offset:offset + 8])[0]
+            return struct.unpack(">Q", data[offset : offset + 8])[0]
         raise ValueError("Unsupported id_size")
 
     def _build_summary(self) -> dict:
@@ -300,8 +302,12 @@ def diff_bitmaps(before_path: str, after_path: str) -> dict:
         "ok": True,
         "before": before.get("summary"),
         "after": after.get("summary"),
-        "diff_native_bytes": (after.get("summary", {}).get("total_native_bytes", 0) -
-                              before.get("summary", {}).get("total_native_bytes", 0)),
-        "diff_native_mb": (after.get("summary", {}).get("total_native_mb", 0) -
-                           before.get("summary", {}).get("total_native_mb", 0)),
+        "diff_native_bytes": (
+            after.get("summary", {}).get("total_native_bytes", 0)
+            - before.get("summary", {}).get("total_native_bytes", 0)
+        ),
+        "diff_native_mb": (
+            after.get("summary", {}).get("total_native_mb", 0)
+            - before.get("summary", {}).get("total_native_mb", 0)
+        ),
     }

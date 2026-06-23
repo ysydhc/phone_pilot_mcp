@@ -52,10 +52,20 @@ def set_clipboard_text(device_serial: Optional[str], text: str) -> dict:
         delay_s=0.1,
         log_output=False,
     )
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
-def input_keyevent(device_serial: Optional[str], key: str, *, wait_s: float = 0.12, silent: bool = False) -> dict:
+def input_keyevent(
+    device_serial: Optional[str],
+    key: str,
+    *,
+    wait_s: float = 0.12,
+    silent: bool = False,
+) -> dict:
     """Send a keyevent (supports KEYCODE_* names or numeric codes)."""
     if not device_serial:
         return {"ok": False, "error": "device_serial is required"}
@@ -70,7 +80,12 @@ def input_keyevent(device_serial: Optional[str], key: str, *, wait_s: float = 0.
         silent=silent,
         timeout_s=15,
     )
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "key": k, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "key": k,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 def input_long_press(
@@ -96,7 +111,8 @@ def input_long_press(
         dur = 800
     dur = max(50, min(dur, 5000))
     proc = CommandRunner.run(
-        adb_prefix(device_serial) + ["shell", "input", "swipe", str(xi), str(yi), str(xi), str(yi), str(dur)],
+        adb_prefix(device_serial)
+        + ["shell", "input", "swipe", str(xi), str(yi), str(xi), str(yi), str(dur)],
         check=False,
         delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0,
         log_output=False,
@@ -112,7 +128,13 @@ def input_long_press(
     }
 
 
-def input_text(device_serial: Optional[str], text: str, *, enter: bool = False, wait_s: float = 0.15) -> dict:
+def input_text(
+    device_serial: Optional[str],
+    text: str,
+    *,
+    enter: bool = False,
+    wait_s: float = 0.15,
+) -> dict:
     """
     Input text into currently focused field.
 
@@ -128,14 +150,30 @@ def input_text(device_serial: Optional[str], text: str, *, enter: bool = False, 
     if _needs_unicode_fallback(t):
         cb = set_clipboard_text(device_serial, t)
         if not cb.get("ok"):
-            return {"ok": False, "mode": "clipboard", "error": "set_clipboard_failed", "detail": cb}
+            return {
+                "ok": False,
+                "mode": "clipboard",
+                "error": "set_clipboard_failed",
+                "detail": cb,
+            }
         paste = input_keyevent(device_serial, "279", wait_s=wait_s)  # KEYCODE_PASTE
         if not paste.get("ok"):
-            return {"ok": False, "mode": "clipboard", "error": "paste_failed", "detail": paste}
+            return {
+                "ok": False,
+                "mode": "clipboard",
+                "error": "paste_failed",
+                "detail": paste,
+            }
         ent = None
         if enter:
             ent = input_keyevent(device_serial, "KEYCODE_ENTER", wait_s=wait_s)
-        return {"ok": True, "mode": "clipboard", "text": t, "enter": bool(enter), "enter_result": ent}
+        return {
+            "ok": True,
+            "mode": "clipboard",
+            "text": t,
+            "enter": bool(enter),
+            "enter_result": ent,
+        }
 
     # ASCII: input text; encode spaces as %s
     safe = t.replace(" ", "%s")
@@ -146,11 +184,24 @@ def input_text(device_serial: Optional[str], text: str, *, enter: bool = False, 
         log_output=False,
     )
     if proc.returncode != 0:
-        return {"ok": False, "mode": "input_text", "returncode": proc.returncode, "stderr": (proc.stderr or "").strip()}
+        return {
+            "ok": False,
+            "mode": "input_text",
+            "returncode": proc.returncode,
+            "stderr": (proc.stderr or "").strip(),
+        }
     ent2 = None
     if enter:
         ent2 = input_keyevent(device_serial, "KEYCODE_ENTER", wait_s=wait_s)
-    return {"ok": True, "mode": "input_text", "text": t, "sent": safe, "enter": bool(enter), "enter_result": ent2}
+    return {
+        "ok": True,
+        "mode": "input_text",
+        "text": t,
+        "sent": safe,
+        "enter": bool(enter),
+        "enter_result": ent2,
+    }
+
 
 def list_installed_packages(
     device_serial: Optional[str],
@@ -172,7 +223,9 @@ def list_installed_packages(
     cmd = adb_prefix(device_serial) + ["shell", "pm", "list", "packages"]
     if not include_system:
         cmd.append("-3")
-    proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, silent=True)
+    proc = CommandRunner.run(
+        cmd, check=False, delay_s=0.0, log_output=False, silent=True
+    )
     out = proc.stdout or ""
     pkgs: set[str] = set()
     for raw in out.splitlines():
@@ -188,6 +241,7 @@ def list_installed_packages(
             pkgs.add(pkg)
     return sorted(pkgs)
 
+
 def pm_list_packages_with_apk_path(
     device_serial: Optional[str],
     *,
@@ -197,11 +251,18 @@ def pm_list_packages_with_apk_path(
     Run `pm list packages -f` and return parsed results with status.
     """
     if not device_serial:
-        return {"ok": False, "returncode": 2, "packages": [], "stderr": "device_serial is required"}
+        return {
+            "ok": False,
+            "returncode": 2,
+            "packages": [],
+            "stderr": "device_serial is required",
+        }
     cmd = adb_prefix(device_serial) + ["shell", "pm", "list", "packages", "-f"]
     if not include_system:
         cmd.append("-3")
-    proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, silent=True)
+    proc = CommandRunner.run(
+        cmd, check=False, delay_s=0.0, log_output=False, silent=True
+    )
     out = proc.stdout or ""
     pkgs: set[str] = set()
     for raw in out.splitlines():
@@ -216,7 +277,12 @@ def pm_list_packages_with_apk_path(
             pkgs.add(pkg)
     return sorted(pkgs)
     err = (proc.stderr or "").strip()
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "packages": sorted(pkgs), "stderr": err}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "packages": sorted(pkgs),
+        "stderr": err,
+    }
 
 
 def pm_list_packages(
@@ -236,11 +302,18 @@ def pm_list_packages(
       }
     """
     if not device_serial:
-        return {"ok": False, "returncode": 2, "packages": [], "stderr": "device_serial is required"}
+        return {
+            "ok": False,
+            "returncode": 2,
+            "packages": [],
+            "stderr": "device_serial is required",
+        }
     cmd = adb_prefix(device_serial) + ["shell", "pm", "list", "packages"]
     if not include_system:
         cmd.append("-3")
-    proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, silent=True)
+    proc = CommandRunner.run(
+        cmd, check=False, delay_s=0.0, log_output=False, silent=True
+    )
     out = proc.stdout or ""
     pkgs: set[str] = set()
     for raw in out.splitlines():
@@ -254,18 +327,27 @@ def pm_list_packages(
         if pkg:
             pkgs.add(pkg)
     err = (proc.stderr or "").strip()
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "packages": sorted(pkgs), "stderr": err}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "packages": sorted(pkgs),
+        "stderr": err,
+    }
 
 
 _RE_VERSION_NAME = re.compile(r"\bversionName=(?P<name>\S+)")
 _RE_VERSION_CODE = re.compile(r"\bversionCode=(?P<code>\d+)")
 _RE_APP_LABEL = re.compile(r"^\s*application-label(?:-[^:]+)?:\s*(?P<label>.*)\s*$")
-_RE_NON_LOCALIZED_LABEL = re.compile(r"\bnonLocalizedLabel=(?P<label>'[^']*'|\"[^\"]*\"|\S+)")
+_RE_NON_LOCALIZED_LABEL = re.compile(
+    r"\bnonLocalizedLabel=(?P<label>'[^']*'|\"[^\"]*\"|\S+)"
+)
 _RE_LABEL_EQ = re.compile(r"\blabel=(?P<label>'[^']*'|\"[^\"]*\"|\S+)")
 _RE_AAPT_VERSION_CODE = re.compile(r"versionCode='([^']*)'")
 _RE_AAPT_VERSION_NAME = re.compile(r"versionName='([^']*)'")
 _RE_AAPT_APP_ICON = re.compile(r"application-icon(?:-(?P<dpi>\d+))?:'(?P<path>[^']+)'")
-_RE_AAPT_APP_ICON_FALLBACK = re.compile(r"application:\s+label='[^']*'\s+icon='(?P<path>[^']+)'")
+_RE_AAPT_APP_ICON_FALLBACK = re.compile(
+    r"application:\s+label='[^']*'\s+icon='(?P<path>[^']+)'"
+)
 _DPI_ALIAS = {
     "ldpi": 120,
     "mdpi": 160,
@@ -275,12 +357,20 @@ _DPI_ALIAS = {
     "xxxhdpi": 640,
 }
 
-def get_installed_apps(device_serial: Optional[str], *, include_system: bool = True) -> dict:
+
+def get_installed_apps(
+    device_serial: Optional[str], *, include_system: bool = True
+) -> dict:
     """
     获取已安装应用列表（包名 + APK 路径）。
     """
     if not device_serial:
-        return {"ok": False, "returncode": 2, "apps": [], "stderr": "device_serial is required"}
+        return {
+            "ok": False,
+            "returncode": 2,
+            "apps": [],
+            "stderr": "device_serial is required",
+        }
     cmd = adb_prefix(device_serial) + ["shell", "pm", "list", "packages", "-f"]
     if not include_system:
         cmd.append("-3")
@@ -306,6 +396,7 @@ def get_installed_apps(device_serial: Optional[str], *, include_system: bool = T
         "apps": apps,
         "stderr": (proc.stderr or "").strip(),
     }
+
 
 def _aapt_dump_badging_info(aapt_bin: str, apk_path: pathlib.Path) -> dict:
     """Parse app label, version, and icons via `aapt dump badging`."""
@@ -373,7 +464,9 @@ def _aapt_dump_badging_info(aapt_bin: str, apk_path: pathlib.Path) -> dict:
     }
 
 
-def _aapt2_dump_xmltree_icon_ref(aapt2_bin: str, apk_path: pathlib.Path) -> Optional[str]:
+def _aapt2_dump_xmltree_icon_ref(
+    aapt2_bin: str, apk_path: pathlib.Path
+) -> Optional[str]:
     """
     Extract android:icon from AndroidManifest.xml using aapt2 xmltree.
     """
@@ -485,7 +578,9 @@ def _axml_decode_string_pool(data: bytes, offset: int) -> tuple[list[str], int]:
     return strings, end_offset
 
 
-def _axml_attr_ref_from_parts(strings: list[str], raw_idx: int, value_type: int, value_data: int) -> Optional[str]:
+def _axml_attr_ref_from_parts(
+    strings: list[str], raw_idx: int, value_type: int, value_data: int
+) -> Optional[str]:
     """Convert raw/value parts into a @resource reference string."""
     raw_val = strings[raw_idx] if raw_idx < len(strings) else ""
     if raw_val:
@@ -498,7 +593,9 @@ def _axml_attr_ref_from_parts(strings: list[str], raw_idx: int, value_type: int,
     return None
 
 
-def _axml_icon_ref_from_bytes(axml: bytes, *, prefer_round_icon: bool = False) -> Optional[str]:
+def _axml_icon_ref_from_bytes(
+    axml: bytes, *, prefer_round_icon: bool = False
+) -> Optional[str]:
     """Extract android:icon reference from binary AXML bytes."""
     if len(axml) < 8:
         return None
@@ -532,7 +629,9 @@ def _axml_icon_ref_from_bytes(axml: bytes, *, prefer_round_icon: bool = False) -
             attr_ext = pos + c_header
             if attr_ext + 20 <= len(axml):
                 elem_name_idx = _axml_read_u32(axml, attr_ext + 4)
-                elem_name = strings[elem_name_idx] if elem_name_idx < len(strings) else ""
+                elem_name = (
+                    strings[elem_name_idx] if elem_name_idx < len(strings) else ""
+                )
                 stack.append(elem_name)
                 attr_start = _axml_read_u16(axml, attr_ext + 8)
                 attr_size = _axml_read_u16(axml, attr_ext + 10)
@@ -550,7 +649,9 @@ def _axml_icon_ref_from_bytes(axml: bytes, *, prefer_round_icon: bool = False) -
                     name = strings[name_idx] if name_idx < len(strings) else ""
                     if not name:
                         continue
-                    ref = _axml_attr_ref_from_parts(strings, raw_idx, value_type, value_data)
+                    ref = _axml_attr_ref_from_parts(
+                        strings, raw_idx, value_type, value_data
+                    )
                     if ref:
                         attrs[name] = ref
                 if elem_name == "application":
@@ -579,7 +680,9 @@ def _axml_icon_ref_from_bytes(axml: bytes, *, prefer_round_icon: bool = False) -
                         ns = strings[ns_idx] if ns_idx < len(strings) else ""
                         if ns and ns != "http://schemas.android.com/apk/res/android":
                             continue
-                        ref = _axml_attr_ref_from_parts(strings, raw_idx, value_type, value_data)
+                        ref = _axml_attr_ref_from_parts(
+                            strings, raw_idx, value_type, value_data
+                        )
                         if not ref:
                             continue
                         if name == "roundIcon":
@@ -597,11 +700,21 @@ def _axml_icon_ref_from_bytes(axml: bytes, *, prefer_round_icon: bool = False) -
                     }
                 elif elem_name == "intent-filter" and current_activity:
                     in_intent_filter = True
-                elif elem_name in ("action", "category") and current_activity and in_intent_filter:
+                elif (
+                    elem_name in ("action", "category")
+                    and current_activity
+                    and in_intent_filter
+                ):
                     name_val = attrs.get("name")
-                    if elem_name == "action" and name_val == "android.intent.action.MAIN":
+                    if (
+                        elem_name == "action"
+                        and name_val == "android.intent.action.MAIN"
+                    ):
                         current_activity["has_main"] = True
-                    if elem_name == "category" and name_val == "android.intent.category.LAUNCHER":
+                    if (
+                        elem_name == "category"
+                        and name_val == "android.intent.category.LAUNCHER"
+                    ):
                         current_activity["has_launcher"] = True
         elif c_type == 0x0103 and strings:
             end_ext = pos + c_header
@@ -611,13 +724,19 @@ def _axml_icon_ref_from_bytes(axml: bytes, *, prefer_round_icon: bool = False) -
                 if stack:
                     stack.pop()
                 if current_activity and end_name in ("activity", "activity-alias"):
-                    if current_activity.get("has_main") and current_activity.get("has_launcher"):
+                    if current_activity.get("has_main") and current_activity.get(
+                        "has_launcher"
+                    ):
                         if current_activity.get("is_alias"):
                             alias_icon = alias_icon or current_activity.get("icon")
                             alias_round = alias_round or current_activity.get("round")
                         else:
-                            launcher_icon = launcher_icon or current_activity.get("icon")
-                            launcher_round = launcher_round or current_activity.get("round")
+                            launcher_icon = launcher_icon or current_activity.get(
+                                "icon"
+                            )
+                            launcher_round = launcher_round or current_activity.get(
+                                "round"
+                            )
                     current_activity = None
                 if end_name == "intent-filter" and in_intent_filter:
                     in_intent_filter = False
@@ -645,7 +764,9 @@ def _axml_icon_ref_from_bytes(axml: bytes, *, prefer_round_icon: bool = False) -
     return None
 
 
-def _axml_manifest_icon_ref(apk_path: pathlib.Path, *, prefer_round_icon: bool = False) -> tuple[Optional[str], Optional[str]]:
+def _axml_manifest_icon_ref(
+    apk_path: pathlib.Path, *, prefer_round_icon: bool = False
+) -> tuple[Optional[str], Optional[str]]:
     """Extract icon resource reference from APK manifest (binary or xml)."""
     try:
         with zipfile.ZipFile(apk_path, "r") as zf:
@@ -676,7 +797,9 @@ def _axml_manifest_icon_ref(apk_path: pathlib.Path, *, prefer_round_icon: bool =
                 if activity.tag not in ("activity", "activity-alias"):
                     continue
                 icon_attr = activity.get(f"{ns}icon") or activity.get("android:icon")
-                round_attr = activity.get(f"{ns}roundIcon") or activity.get("android:roundIcon")
+                round_attr = activity.get(f"{ns}roundIcon") or activity.get(
+                    "android:roundIcon"
+                )
                 has_main = False
                 has_launcher = False
                 for intent in activity.findall("intent-filter"):
@@ -684,7 +807,10 @@ def _axml_manifest_icon_ref(apk_path: pathlib.Path, *, prefer_round_icon: bool =
                         if action.get(f"{ns}name") == "android.intent.action.MAIN":
                             has_main = True
                     for category in intent.findall("category"):
-                        if category.get(f"{ns}name") == "android.intent.category.LAUNCHER":
+                        if (
+                            category.get(f"{ns}name")
+                            == "android.intent.category.LAUNCHER"
+                        ):
                             has_launcher = True
                 if has_main and has_launcher:
                     if activity.tag == "activity-alias":
@@ -769,13 +895,15 @@ def _run_apkanalyzer(args: list[str]) -> dict:
     return {"ok": True, "stdout": proc.stdout or ""}
 
 
-def _apkanalyzer_manifest_icon_ref(apk_path: pathlib.Path) -> tuple[Optional[str], Optional[str]]:
+def _apkanalyzer_manifest_icon_ref(
+    apk_path: pathlib.Path,
+) -> tuple[Optional[str], Optional[str]]:
     """Extract android:icon from manifest using apkanalyzer."""
     res = _run_apkanalyzer(["manifest", "print", str(apk_path)])
     if not res.get("ok"):
         return None, res.get("error") or "apkanalyzer_failed"
     out = res.get("stdout") or ""
-    m = re.search(r'android:icon\\s*=\\s*\"([^\"]+)\"', out)
+    m = re.search(r"android:icon\\s*=\\s*\"([^\"]+)\"", out)
     if m:
         return m.group(1), None
     m = re.search(r"android:icon\\s*=\\s*'([^']+)'", out)
@@ -784,7 +912,9 @@ def _apkanalyzer_manifest_icon_ref(apk_path: pathlib.Path) -> tuple[Optional[str
     return None, "apkanalyzer_icon_not_found"
 
 
-def _bundletool_manifest_icon_ref(apk_path: pathlib.Path) -> tuple[Optional[str], Optional[str]]:
+def _bundletool_manifest_icon_ref(
+    apk_path: pathlib.Path,
+) -> tuple[Optional[str], Optional[str]]:
     """Extract android:icon from manifest using bundletool."""
     cmd = _bundletool_cmd()
     if not cmd:
@@ -796,7 +926,7 @@ def _bundletool_manifest_icon_ref(apk_path: pathlib.Path) -> tuple[Optional[str]
             return None, "bundletool_apk_not_supported"
         return None, err
     out = res.get("stdout") or ""
-    m = re.search(r'android:icon\\s*=\\s*\"([^\"]+)\"', out)
+    m = re.search(r"android:icon\\s*=\\s*\"([^\"]+)\"", out)
     if m:
         return m.group(1), None
     m = re.search(r"android:icon\\s*=\\s*'([^']+)'", out)
@@ -842,12 +972,19 @@ def _ensure_bundletool_jar() -> Optional[pathlib.Path]:
     Auto-download bundletool jar if missing.
     """
     sdk_root = _find_sdk_root()
-    base_dir = (sdk_root / "bundletool") if sdk_root else (pathlib.Path(tempfile.gettempdir()) / "bundletool")
+    base_dir = (
+        (sdk_root / "bundletool")
+        if sdk_root
+        else (pathlib.Path(tempfile.gettempdir()) / "bundletool")
+    )
     base_dir.mkdir(parents=True, exist_ok=True)
     jar_path = base_dir / "bundletool-all.jar"
     if jar_path.exists():
         return jar_path
-    url = _latest_bundletool_url() or "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar"
+    url = (
+        _latest_bundletool_url()
+        or "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar"
+    )
     try:
         import urllib.request
 
@@ -867,7 +1004,9 @@ def _latest_bundletool_url() -> Optional[str]:
         import json as _json
         import urllib.request
 
-        with urllib.request.urlopen("https://api.github.com/repos/google/bundletool/releases/latest", timeout=15) as resp:
+        with urllib.request.urlopen(
+            "https://api.github.com/repos/google/bundletool/releases/latest", timeout=15
+        ) as resp:
             data = resp.read()
         if not data:
             return None
@@ -905,7 +1044,9 @@ def _aapt2_dump_resources(apk_path: pathlib.Path) -> str:
     return proc.stdout or ""
 
 
-def _aapt2_resolve_icon_paths(apk_paths: list[pathlib.Path], icon_ref: str) -> list[str]:
+def _aapt2_resolve_icon_paths(
+    apk_paths: list[pathlib.Path], icon_ref: str
+) -> list[str]:
     """
     Resolve icon resource reference to file paths using aapt2 dump resources.
     """
@@ -972,7 +1113,9 @@ def _axml_collect_drawable_refs(axml: bytes) -> list[str]:
             attr_ext = pos + c_header
             if attr_ext + 20 <= len(axml):
                 elem_name_idx = _axml_read_u32(axml, attr_ext + 4)
-                elem_name = strings[elem_name_idx] if elem_name_idx < len(strings) else ""
+                elem_name = (
+                    strings[elem_name_idx] if elem_name_idx < len(strings) else ""
+                )
                 stack.append(elem_name)
                 attr_start = _axml_read_u16(axml, attr_ext + 8)
                 attr_size = _axml_read_u16(axml, attr_ext + 10)
@@ -989,10 +1132,16 @@ def _axml_collect_drawable_refs(axml: bytes) -> list[str]:
                     name = strings[name_idx] if name_idx < len(strings) else ""
                     if name != "drawable":
                         continue
-                    ref = _axml_attr_ref_from_parts(strings, raw_idx, value_type, value_data)
+                    ref = _axml_attr_ref_from_parts(
+                        strings, raw_idx, value_type, value_data
+                    )
                     if not ref:
                         continue
-                    if stack and stack[-1] in ("foreground", "monochrome", "background"):
+                    if stack and stack[-1] in (
+                        "foreground",
+                        "monochrome",
+                        "background",
+                    ):
                         collected.append(ref)
         elif c_type == 0x0103 and strings:
             if stack:
@@ -1002,7 +1151,9 @@ def _axml_collect_drawable_refs(axml: bytes) -> list[str]:
     return collected
 
 
-def _resolve_icon_xml_paths(apk_paths: list[pathlib.Path], xml_rel_path: str) -> list[str]:
+def _resolve_icon_xml_paths(
+    apk_paths: list[pathlib.Path], xml_rel_path: str
+) -> list[str]:
     """Resolve drawable refs in XML icon to concrete file paths."""
     rel = (xml_rel_path or "").lstrip("/")
     if not rel:
@@ -1041,7 +1192,9 @@ def _resolve_icon_xml_paths(apk_paths: list[pathlib.Path], xml_rel_path: str) ->
     return paths
 
 
-def _expand_icon_paths(apk_paths: list[pathlib.Path], icon_paths: list[str], *, depth: int = 0) -> list[str]:
+def _expand_icon_paths(
+    apk_paths: list[pathlib.Path], icon_paths: list[str], *, depth: int = 0
+) -> list[str]:
     """Expand XML icon paths into raster paths (bounded recursion)."""
     if not icon_paths:
         return []
@@ -1052,7 +1205,9 @@ def _expand_icon_paths(apk_paths: list[pathlib.Path], icon_paths: list[str], *, 
         if path.lower().endswith(".xml"):
             resolved = _resolve_icon_xml_paths(apk_paths, path)
             if resolved:
-                expanded.extend(_expand_icon_paths(apk_paths, resolved, depth=depth + 1))
+                expanded.extend(
+                    _expand_icon_paths(apk_paths, resolved, depth=depth + 1)
+                )
             else:
                 expanded.append(path)
         else:
@@ -1072,13 +1227,17 @@ def _dpi_from_path(path: str) -> Optional[int]:
     return None
 
 
-def _pick_icon_candidate(info: dict, *, density_dpi: Optional[int]) -> tuple[Optional[str], Optional[int], Optional[str]]:
+def _pick_icon_candidate(
+    info: dict, *, density_dpi: Optional[int]
+) -> tuple[Optional[str], Optional[int], Optional[str]]:
     """Pick best icon path based on target density or default."""
     icons = info.get("icons") if isinstance(info, dict) else None
     icon_default = info.get("icon_default") if isinstance(info, dict) else None
     if isinstance(icons, dict) and icons:
         if density_dpi:
-            dpi, path = min(icons.items(), key=lambda it: abs(int(it[0]) - int(density_dpi)))
+            dpi, path = min(
+                icons.items(), key=lambda it: abs(int(it[0]) - int(density_dpi))
+            )
         else:
             dpi, path = max(icons.items(), key=lambda it: int(it[0]))
         return path, int(dpi), "aapt_badging"
@@ -1087,7 +1246,9 @@ def _pick_icon_candidate(info: dict, *, density_dpi: Optional[int]) -> tuple[Opt
     return None, None, None
 
 
-def _icon_output_path(cache_dir: pathlib.Path, pkg: str, icon_rel_path: str) -> pathlib.Path:
+def _icon_output_path(
+    cache_dir: pathlib.Path, pkg: str, icon_rel_path: str
+) -> pathlib.Path:
     """Compute output path for extracted icon under cache dir."""
     safe_pkg = re.sub(r"[^\w\.-]+", "_", pkg).strip("_") or "pkg"
     rel = pathlib.PurePosixPath(icon_rel_path)
@@ -1128,7 +1289,11 @@ def _extract_icon_from_apk(
                     zf.extract(fallback, out_path.parent)
                     extracted = out_path.parent / fallback
                     return {"ok": True, "icon_path": str(extracted), "fallback": True}
-                return {"ok": False, "error": "icon_xml_no_raster", "icon_rel_path": rel}
+                return {
+                    "ok": False,
+                    "error": "icon_xml_no_raster",
+                    "icon_rel_path": rel,
+                }
             return {"ok": False, "error": "icon_path_not_in_apk", "icon_rel_path": rel}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -1393,7 +1558,9 @@ def get_app_info(
     icon_source = None
     icon_error = None
     if isinstance(info, dict) and info.get("ok"):
-        rel_path, rel_dpi, rel_source = _pick_icon_candidate(info, density_dpi=density_dpi)
+        rel_path, rel_dpi, rel_source = _pick_icon_candidate(
+            info, density_dpi=density_dpi
+        )
         if rel_path:
             icon_dpi = rel_dpi
             icon_source = rel_source
@@ -1448,16 +1615,28 @@ def get_app_info(
                 if axml_err and not icon_ref:
                     icon_ref_errs.append(f"axml:{axml_err}")
             if icon_ref:
-                icon_paths = _aapt2_resolve_icon_paths(apk_paths, icon_ref) if icon_ref else []
+                icon_paths = (
+                    _aapt2_resolve_icon_paths(apk_paths, icon_ref) if icon_ref else []
+                )
                 icon_paths = _expand_icon_paths(apk_paths, icon_paths)
-                image_paths = [p for p in icon_paths if pathlib.PurePosixPath(p).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}]
+                image_paths = [
+                    p
+                    for p in icon_paths
+                    if pathlib.PurePosixPath(p).suffix.lower()
+                    in {".png", ".jpg", ".jpeg", ".webp"}
+                ]
                 if image_paths:
                     icon_paths = image_paths
                 if icon_paths:
                     best = None
                     best_dpi = None
                     if density_dpi:
-                        best = min(icon_paths, key=lambda p: abs((_dpi_from_path(p) or 0) - int(density_dpi)))
+                        best = min(
+                            icon_paths,
+                            key=lambda p: abs(
+                                (_dpi_from_path(p) or 0) - int(density_dpi)
+                            ),
+                        )
                         best_dpi = _dpi_from_path(best)
                     else:
                         best = icon_paths[0]
@@ -1492,7 +1671,9 @@ def get_app_info(
                     icon_source = "apk_scan"
                     icon_error = None
                 else:
-                    icon_error = icon_error or fallback.get("error") or "icon_fallback_failed"
+                    icon_error = (
+                        icon_error or fallback.get("error") or "icon_fallback_failed"
+                    )
     return {
         "AppName": app_label or pkg,
         "PackageName": pkg,
@@ -1588,11 +1769,19 @@ def get_app_label_via_pyaxmlparser(
     """
     pkg = (package_name or "").strip()
     if not device_serial or not pkg:
-        return {"ok": False, "error": "device_serial and package_name are required", "PackageName": pkg or None}
+        return {
+            "ok": False,
+            "error": "device_serial and package_name are required",
+            "PackageName": pkg or None,
+        }
 
     remote_apk = _adb_pm_path(device_serial, pkg)
     if not remote_apk:
-        return {"ok": False, "PackageName": pkg, "error": "failed to resolve apk path via pm path"}
+        return {
+            "ok": False,
+            "PackageName": pkg,
+            "error": "failed to resolve apk path via pm path",
+        }
 
     # Step 1/2: try dumpsys label first (no pulling, faster).
     # Prefer parsing package from remote_apk to match the user's requested approach,
@@ -1600,7 +1789,8 @@ def get_app_label_via_pyaxmlparser(
     pkg_for_dumpsys = _extract_package_from_apk_path(remote_apk) or pkg
     try:
         proc = subprocess.run(
-            adb_prefix(device_serial) + ["shell", "dumpsys", "package", pkg_for_dumpsys],
+            adb_prefix(device_serial)
+            + ["shell", "dumpsys", "package", pkg_for_dumpsys],
             check=False,
             text=True,
             capture_output=True,
@@ -1665,12 +1855,16 @@ def get_app_label_via_pyaxmlparser(
                 stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
-            return {"ok": False, "PackageName": pkg, "error": "aapt dump badging timeout", "remote_apk": remote_apk}
+            return {
+                "ok": False,
+                "PackageName": pkg,
+                "error": "aapt dump badging timeout",
+                "remote_apk": remote_apk,
+            }
         # print(f"stdout:{aapt_proc.stdout}")
         out = aapt_proc.stdout or ""
         why = 0
         if aapt_proc.returncode == 0:
-
             # Try Chinese label explicitly (common requirement).
             why = 2
             m = re.search(r"application-label-zh-CN:'([^']*)'", out)
@@ -1695,7 +1889,7 @@ def get_app_label_via_pyaxmlparser(
                     "remote_apk": remote_apk,
                     "method": "aapt",
                 }
-            
+
             # Last resort: return package name from aapt.
             pm = re.search(r"package:\\s+name='([^']*)'", out)
             why = 3
@@ -1708,7 +1902,7 @@ def get_app_label_via_pyaxmlparser(
                     "remote_apk": remote_apk,
                     "method": "aapt_pkg_fallback",
                 }
-        print(f"stdout:{aapt_proc.stdout}") 
+        print(f"stdout:{aapt_proc.stdout}")
         return {
             "ok": False,
             "PackageName": pkg,
@@ -1762,7 +1956,11 @@ def get_app_label_via_aapt(
     """
     pkg = (package_name or "").strip()
     if not device_serial or not pkg:
-        return {"ok": False, "error": "device_serial and package_name are required", "PackageName": pkg or None}
+        return {
+            "ok": False,
+            "error": "device_serial and package_name are required",
+            "PackageName": pkg or None,
+        }
 
     aapt_bin = aapt_path or shutil.which("aapt") or shutil.which("aapt2")
     if not aapt_bin:
@@ -1774,7 +1972,11 @@ def get_app_label_via_aapt(
 
     remote_apk = _adb_pm_path(device_serial, pkg)
     if not remote_apk:
-        return {"ok": False, "PackageName": pkg, "error": "failed to resolve apk path via pm path"}
+        return {
+            "ok": False,
+            "PackageName": pkg,
+            "error": "failed to resolve apk path via pm path",
+        }
 
     cache = pathlib.Path(cache_dir).expanduser().resolve()
     cache.mkdir(parents=True, exist_ok=True)
@@ -1787,10 +1989,21 @@ def get_app_label_via_aapt(
         log_output=False,
     )
     if proc.returncode != 0 or not local_apk.exists():
-        return {"ok": False, "PackageName": pkg, "error": "adb pull apk failed", "stderr": (proc.stderr or "").strip()}
+        return {
+            "ok": False,
+            "PackageName": pkg,
+            "error": "adb pull apk failed",
+            "stderr": (proc.stderr or "").strip(),
+        }
 
     label = _aapt_dump_label(aapt_bin, local_apk)
-    return {"ok": True, "PackageName": pkg, "AppName": label, "aapt": aapt_bin, "apk": str(local_apk)}
+    return {
+        "ok": True,
+        "PackageName": pkg,
+        "AppName": label,
+        "aapt": aapt_bin,
+        "apk": str(local_apk),
+    }
 
 
 _RE_DEBUGGABLE_TRUE = re.compile(r"\bdebuggable\s*=\s*true\b", re.IGNORECASE)
@@ -1806,7 +2019,11 @@ def is_app_debuggable(device_serial: Optional[str], package_name: str) -> dict:
     """
     pkg = (package_name or "").strip()
     if not device_serial or not pkg:
-        return {"ok": False, "error": "device_serial and package_name are required", "PackageName": pkg or None}
+        return {
+            "ok": False,
+            "error": "device_serial and package_name are required",
+            "PackageName": pkg or None,
+        }
 
     proc = CommandRunner.run(
         adb_prefix(device_serial) + ["shell", "dumpsys", "package", pkg],
@@ -1859,10 +2076,20 @@ def open_deeplink(
     if not u:
         return {"ok": False, "error": "uri is required"}
 
-    cmd = adb_prefix(device_serial) + ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", u]
+    cmd = adb_prefix(device_serial) + [
+        "shell",
+        "am",
+        "start",
+        "-a",
+        "android.intent.action.VIEW",
+        "-d",
+        u,
+    ]
     if package:
         cmd += ["-p", package]
-    proc = CommandRunner.run(cmd, check=False, delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0)
+    proc = CommandRunner.run(
+        cmd, check=False, delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0
+    )
     return {
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,
@@ -1906,7 +2133,11 @@ def force_stop_package(device_serial: Optional[str], package_name: str) -> dict:
     """
     pkg = (package_name or "").strip()
     if not device_serial:
-        return {"ok": False, "error": "device_serial is required", "PackageName": pkg or None}
+        return {
+            "ok": False,
+            "error": "device_serial is required",
+            "PackageName": pkg or None,
+        }
     if not pkg:
         return {"ok": False, "error": "package_name is required", "PackageName": None}
     proc = CommandRunner.run(
@@ -1950,8 +2181,16 @@ def clear_background_processes(
         return {"ok": False, "error": "device_serial is required"}
 
     mode2 = (mode or "").strip().lower()
-    if mode2 not in ("kill_all", "force_stop_3p", "force_stop_running_3p", "force_stop_all"):
-        return {"ok": False, "error": "invalid mode (use: kill_all|force_stop_3p|force_stop_running_3p|force_stop_all)"}
+    if mode2 not in (
+        "kill_all",
+        "force_stop_3p",
+        "force_stop_running_3p",
+        "force_stop_all",
+    ):
+        return {
+            "ok": False,
+            "error": "invalid mode (use: kill_all|force_stop_3p|force_stop_running_3p|force_stop_all)",
+        }
 
     excl = {p.strip() for p in (exclude_packages or []) if p and p.strip()}
 
@@ -1961,7 +2200,9 @@ def clear_background_processes(
 
     if mode2 == "kill_all":
         return {
-            "ok": bool(kill_all_res.get("ok") if isinstance(kill_all_res, dict) else True),
+            "ok": bool(
+                kill_all_res.get("ok") if isinstance(kill_all_res, dict) else True
+            ),
             "device_serial": device_serial,
             "mode": mode2,
             "kill_all": kill_all_res,
@@ -1977,12 +2218,24 @@ def clear_background_processes(
         # Best-effort: use `ps` to find currently running app processes, then force-stop only those.
         # This avoids needing the user to know exact package names and is usually much faster than
         # iterating over all installed 3p packages.
-        ps = CommandRunner.run(adb_prefix(device_serial) + ["shell", "ps", "-A", "-o", "NAME"], check=False, delay_s=0.0, log_output=False, silent=True)
-        out = (ps.stdout or "")
+        ps = CommandRunner.run(
+            adb_prefix(device_serial) + ["shell", "ps", "-A", "-o", "NAME"],
+            check=False,
+            delay_s=0.0,
+            log_output=False,
+            silent=True,
+        )
+        out = ps.stdout or ""
         if ps.returncode != 0 or not out.strip():
             # Fallback for older / different toybox ps variants.
-            ps2 = CommandRunner.run(adb_prefix(device_serial) + ["shell", "ps", "-A"], check=False, delay_s=0.0, log_output=False, silent=True)
-            out = (ps2.stdout or "")
+            ps2 = CommandRunner.run(
+                adb_prefix(device_serial) + ["shell", "ps", "-A"],
+                check=False,
+                delay_s=0.0,
+                log_output=False,
+                silent=True,
+            )
+            out = ps2.stdout or ""
             ps = ps2
         names = []
         for ln in out.splitlines():
@@ -1998,14 +2251,24 @@ def clear_background_processes(
         # - com.example.app
         # - com.example.app:push
         cand = []
-        pkg_re = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+(?:[:][A-Za-z0-9_]+)?$")
+        pkg_re = re.compile(
+            r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+(?:[:][A-Za-z0-9_]+)?$"
+        )
         for n in names:
             if not isinstance(n, str):
                 continue
             if not pkg_re.fullmatch(n):
                 continue
             # exclude common system prefixes
-            if n.startswith(("android.", "com.android.", "com.google.android.", "com.miui.", "com.xiaomi.")):
+            if n.startswith(
+                (
+                    "android.",
+                    "com.android.",
+                    "com.google.android.",
+                    "com.miui.",
+                    "com.xiaomi.",
+                )
+            ):
                 continue
             cand.append(n)
         # Dedup preserving order
@@ -2016,7 +2279,14 @@ def clear_background_processes(
                 continue
             seen.add(p)
             pkgs_running.append(p)
-        res = {"ok": True, "mode": "ps", "count": len(pkgs_running), "packages": pkgs_running, "ps_returncode": ps.returncode, "ps_stderr": (ps.stderr or "").strip()}
+        res = {
+            "ok": True,
+            "mode": "ps",
+            "count": len(pkgs_running),
+            "packages": pkgs_running,
+            "ps_returncode": ps.returncode,
+            "ps_stderr": (ps.stderr or "").strip(),
+        }
         pkgs = pkgs_running
     else:
         # third-party only by default
@@ -2043,14 +2313,23 @@ def clear_background_processes(
             errors.append({"PackageName": p, "result": r})
 
     ok = True
-    if kill_all_res is not None and isinstance(kill_all_res, dict) and kill_all_res.get("ok") is False:
+    if (
+        kill_all_res is not None
+        and isinstance(kill_all_res, dict)
+        and kill_all_res.get("ok") is False
+    ):
         ok = False
     if errors:
         ok = False
 
     # -- 摘要输出 (替代逐行打印每个 force-stop) --
     from phone_pilot.android.adb.runner import _log
-    scope = "三方应用" if mode2 in ("force_stop_3p", "force_stop_running_3p") else "全部应用"
+
+    scope = (
+        "三方应用"
+        if mode2 in ("force_stop_3p", "force_stop_running_3p")
+        else "全部应用"
+    )
     err_hint = f", {len(errors)} 个失败" if errors else ""
     _log(f"  清理后台 | 已停止 {len(stopped)} 个{scope}{err_hint}")
 
@@ -2072,7 +2351,9 @@ def clear_background_processes(
     }
 
 
-def input_tap(device_serial: Optional[str], x: int, y: int, *, wait_s: float = 0.15) -> dict:
+def input_tap(
+    device_serial: Optional[str], x: int, y: int, *, wait_s: float = 0.15
+) -> dict:
     """
     Click/tap a screen coordinate.
 
@@ -2123,14 +2404,22 @@ def input_swipe(
     try:
         a1, b1, a2, b2 = int(x1), int(y1), int(x2), int(y2)
     except Exception:
-        return {"ok": False, "error": "x1/y1/x2/y2 must be integers", "x1": x1, "y1": y1, "x2": x2, "y2": y2}
+        return {
+            "ok": False,
+            "error": "x1/y1/x2/y2 must be integers",
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+        }
     try:
         dur = int(duration_ms)
     except Exception:
         dur = 250
     dur = max(1, min(dur, 2000))
     proc = CommandRunner.run(
-        adb_prefix(device_serial) + ["shell", "input", "swipe", str(a1), str(b1), str(a2), str(b2), str(dur)],
+        adb_prefix(device_serial)
+        + ["shell", "input", "swipe", str(a1), str(b1), str(a2), str(b2), str(dur)],
         check=False,
         delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0,
         log_output=False,
@@ -2146,7 +2435,6 @@ def input_swipe(
         "duration_ms": dur,
         "stderr": (proc.stderr or "").strip(),
     }
-
 
 
 def _parse_pattern(path: str) -> list[int]:
@@ -2242,7 +2530,9 @@ def _pattern_grid_points_from_bounds(
     return centers
 
 
-def _find_lock_pattern_bounds_via_uiautomator(device_serial: Optional[str]) -> Optional[tuple[int, int, int, int]]:
+def _find_lock_pattern_bounds_via_uiautomator(
+    device_serial: Optional[str],
+) -> Optional[tuple[int, int, int, int]]:
     """
     Best-effort locate the lock pattern view bounds using UIAutomator dump.
 
@@ -2254,12 +2544,17 @@ def _find_lock_pattern_bounds_via_uiautomator(device_serial: Optional[str]) -> O
         return None
     try:
         # Lazy import to avoid circular deps.
-        from phone_pilot.android.ui.automator import dump_ui_xml, parse_uiautomator_nodes
+        from phone_pilot.android.ui.automator import (
+            dump_ui_xml,
+            parse_uiautomator_nodes,
+        )
     except Exception:
         return None
 
     try:
-        res = dump_ui_xml(device_serial, compressed=True, wake_and_unlock=False, force_home=False)
+        res = dump_ui_xml(
+            device_serial, compressed=True, wake_and_unlock=False, force_home=False
+        )
         if not (isinstance(res, dict) and res.get("ok") and res.get("xml")):
             return None
         nodes = parse_uiautomator_nodes(str(res.get("xml") or ""))
@@ -2289,7 +2584,9 @@ def _find_lock_pattern_bounds_via_uiautomator(device_serial: Optional[str]) -> O
     return best
 
 
-def _interpolate_points(a: tuple[int, int], b: tuple[int, int], steps: int) -> list[tuple[int, int]]:
+def _interpolate_points(
+    a: tuple[int, int], b: tuple[int, int], steps: int
+) -> list[tuple[int, int]]:
     """
     Create intermediate points from a->b (excluding a, including b) with `steps` segments.
     If steps<=1, returns [b].
@@ -2332,7 +2629,12 @@ def _unlock_pattern_via_monkey(
     if not seq:
         return {"ok": False, "error": "pattern is required", "pattern": pattern}
     if any((d < 1 or d > 9) for d in seq):
-        return {"ok": False, "error": "pattern digits must be 1..9", "pattern": pattern, "parsed": seq}
+        return {
+            "ok": False,
+            "error": "pattern digits must be 1..9",
+            "pattern": pattern,
+            "parsed": seq,
+        }
     # Typical patterns should not repeat nodes; allow but warn.
     warn_repeat = len(set(seq)) != len(seq)
 
@@ -2347,7 +2649,12 @@ def _unlock_pattern_via_monkey(
         if used_bounds:
             pts = _pattern_grid_points_from_bounds(used_bounds)
     if not pts:
-        pts = _pattern_grid_points(sw, sh, grid_size_ratio=grid_size_ratio, grid_center_y_ratio=grid_center_y_ratio)
+        pts = _pattern_grid_points(
+            sw,
+            sh,
+            grid_size_ratio=grid_size_ratio,
+            grid_center_y_ratio=grid_center_y_ratio,
+        )
 
     coords: list[tuple[int, int]] = [pts[d] for d in seq if d in pts]
     if len(coords) < 2:
@@ -2382,7 +2689,7 @@ def _unlock_pattern_via_monkey(
     # Distribute time across interpolated points so the overall pace matches step_wait_ms.
     # Total moves per original segment = seg_n; total moves overall = len(path)-1.
     per_move = max(12, int(round(step / max(1, seg_n))))
-    for (x, y) in path[1:]:
+    for x, y in path[1:]:
         body.append(f"UserWait({per_move})")
         event_time += per_move
         body.append(
@@ -2416,12 +2723,19 @@ def _unlock_pattern_via_monkey(
     remote = "/data/local/tmp/phone_pilot_unlock_pattern.mks"
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(prefix="phone_pilot_unlock_", suffix=".mks", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            prefix="phone_pilot_unlock_", suffix=".mks", delete=False
+        ) as f:
             tmp_path = pathlib.Path(f.name)
             f.write(script.encode("utf-8", errors="replace"))
         # push + run
-        push = CommandRunner.run(adb_prefix(device_serial) + ["push", str(tmp_path), remote], check=False)
-        run = CommandRunner.run(adb_prefix(device_serial) + ["shell", "monkey", "-f", remote, "1"], check=False)
+        push = CommandRunner.run(
+            adb_prefix(device_serial) + ["push", str(tmp_path), remote], check=False
+        )
+        run = CommandRunner.run(
+            adb_prefix(device_serial) + ["shell", "monkey", "-f", remote, "1"],
+            check=False,
+        )
         return {
             "ok": push.returncode == 0 and run.returncode == 0,
             "device_serial": device_serial,
@@ -2436,7 +2750,10 @@ def _unlock_pattern_via_monkey(
                 "per_move_wait_ms": per_move,
             },
             "screen": {"w": sw, "h": sh},
-            "grid": {"grid_size_ratio": grid_size_ratio, "grid_center_y_ratio": grid_center_y_ratio},
+            "grid": {
+                "grid_size_ratio": grid_size_ratio,
+                "grid_center_y_ratio": grid_center_y_ratio,
+            },
             "lock_pattern_bounds": list(used_bounds) if used_bounds else None,
             "coords": coords,
             "path_points": path,
@@ -2488,7 +2805,9 @@ def _looks_like_leakcanary_activity(component_or_activity: Optional[str]) -> boo
     return ("leakcanary" in s) or ("leaklauncheractivity" in s)
 
 
-def get_launcher_component_for_package(device_serial: Optional[str], package: str) -> Optional[str]:
+def get_launcher_component_for_package(
+    device_serial: Optional[str], package: str
+) -> Optional[str]:
     """
     Get the LAUNCHER activity component for a single package (fast path).
     Uses: cmd package resolve-activity --brief -a MAIN -c LAUNCHER <package>
@@ -2566,7 +2885,9 @@ def list_launcher_components(device_serial: Optional[str], package: str) -> list
     return sorted(set(comps))
 
 
-def pick_best_launcher_component(device_serial: Optional[str], package: str) -> Optional[str]:
+def pick_best_launcher_component(
+    device_serial: Optional[str], package: str
+) -> Optional[str]:
     """
     Choose the most likely "real app" launcher component for a package.
     Avoid LeakCanary's launcher activity if the app also has another launcher activity.
@@ -2599,15 +2920,33 @@ def restart_app(
         return
 
     if package and force_stop:
-        CommandRunner.run(adb_prefix(device_serial) + ["shell", "am", "force-stop", package], check=False, log_output=False, silent=True)
+        CommandRunner.run(
+            adb_prefix(device_serial) + ["shell", "am", "force-stop", package],
+            check=False,
+            log_output=False,
+            silent=True,
+        )
 
     if component:
-        CommandRunner.run(adb_prefix(device_serial) + ["shell", "am", "start", "-n", component], check=False, log_output=False)
+        CommandRunner.run(
+            adb_prefix(device_serial) + ["shell", "am", "start", "-n", component],
+            check=False,
+            log_output=False,
+        )
     elif deeplink:
         CommandRunner.run(
             adb_prefix(device_serial)
-            + ["shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", deeplink],
-            check=False, log_output=False,
+            + [
+                "shell",
+                "am",
+                "start",
+                "-a",
+                "android.intent.action.VIEW",
+                "-d",
+                deeplink,
+            ],
+            check=False,
+            log_output=False,
         )
     elif package:
         # Fast path: resolve-activity for this package only (no global query).
@@ -2617,14 +2956,26 @@ def restart_app(
         if best and "/" in best:
             CommandRunner.run(
                 adb_prefix(device_serial) + ["shell", "am", "start", "-n", best],
-                check=False, log_output=False, timeout_s=10,
+                check=False,
+                log_output=False,
+                timeout_s=10,
             )
         else:
             # Fallback: launch via a single monkey event (timeout so we don't block forever).
             CommandRunner.run(
                 adb_prefix(device_serial)
-                + ["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],
-                check=False, log_output=False, timeout_s=15,
+                + [
+                    "shell",
+                    "monkey",
+                    "-p",
+                    package,
+                    "-c",
+                    "android.intent.category.LAUNCHER",
+                    "1",
+                ],
+                check=False,
+                log_output=False,
+                timeout_s=15,
             )
 
     if wait_s and wait_s > 0:
@@ -2748,7 +3099,9 @@ def list_all_launcher_components(device_serial: Optional[str]) -> dict[str, list
     return {k: sorted(set(v)) for k, v in comps.items()}
 
 
-def build_launch_profiles_snapshot(device_serial: Optional[str]) -> list[dict[str, str]]:
+def build_launch_profiles_snapshot(
+    device_serial: Optional[str],
+) -> list[dict[str, str]]:
     """
     Build launch profiles from launcher components (no UI changes).
     """
@@ -2763,7 +3116,9 @@ def build_launch_profiles_snapshot(device_serial: Optional[str]) -> list[dict[st
         component = non_lc[0] if non_lc else comps[0]
         activity = component.split("/", 1)[1].strip() if "/" in component else None
         serial_part = f"-s {device_serial} " if device_serial else ""
-        adb_cmd = f"adb {serial_part}shell am start -n {component}" if component else None
+        adb_cmd = (
+            f"adb {serial_part}shell am start -n {component}" if component else None
+        )
         profiles.append(
             {
                 "package": pkg,
@@ -2837,7 +3192,9 @@ def _getprop(device_serial: Optional[str], key: str) -> Optional[str]:
     """Read a system property via `getprop`."""
     if not device_serial:
         return None
-    proc = CommandRunner.run(adb_prefix(device_serial) + ["shell", "getprop", key], check=False)
+    proc = CommandRunner.run(
+        adb_prefix(device_serial) + ["shell", "getprop", key], check=False
+    )
     val = (proc.stdout or "").strip()
     return val or None
 
@@ -2884,7 +3241,13 @@ def get_device_locales(device_serial: Optional[str]) -> dict:
     # 1) settings system_locales
     settings_raw = None
     try:
-        proc = CommandRunner.run(adb_prefix(device_serial) + ["shell", "settings", "get", "system", "system_locales"], check=False, delay_s=0.0, log_output=False)
+        proc = CommandRunner.run(
+            adb_prefix(device_serial)
+            + ["shell", "settings", "get", "system", "system_locales"],
+            check=False,
+            delay_s=0.0,
+            log_output=False,
+        )
         settings_raw = (proc.stdout or "").strip()
         # On some devices "null" is printed
         if settings_raw.lower() == "null":
@@ -2893,34 +3256,73 @@ def get_device_locales(device_serial: Optional[str]) -> dict:
         settings_raw = None
     locales = _parse_locales(settings_raw)
     if locales:
-        return {"ok": True, "device_serial": device_serial, "method": "settings_system_locales", "raw": settings_raw, "locales": locales, "primary": locales[0]}
+        return {
+            "ok": True,
+            "device_serial": device_serial,
+            "method": "settings_system_locales",
+            "raw": settings_raw,
+            "locales": locales,
+            "primary": locales[0],
+        }
 
     # 2) persist.sys.locale
     loc = _getprop(device_serial, "persist.sys.locale")
     locales2 = _parse_locales(loc)
     if locales2:
-        return {"ok": True, "device_serial": device_serial, "method": "getprop_persist.sys.locale", "raw": loc, "locales": locales2, "primary": locales2[0]}
+        return {
+            "ok": True,
+            "device_serial": device_serial,
+            "method": "getprop_persist.sys.locale",
+            "raw": loc,
+            "locales": locales2,
+            "primary": locales2[0],
+        }
 
     # 3) persist.sys.language + persist.sys.country
     lang = _getprop(device_serial, "persist.sys.language")
-    country = _getprop(device_serial, "persist.sys.country") or _getprop(device_serial, "persist.sys.region")
+    country = _getprop(device_serial, "persist.sys.country") or _getprop(
+        device_serial, "persist.sys.region"
+    )
     if lang:
         tag = f"{lang}-{country}" if country else lang
         locales3 = _parse_locales(tag)
-        return {"ok": True, "device_serial": device_serial, "method": "getprop_persist.sys.language_country", "raw": {"language": lang, "country": country}, "locales": locales3, "primary": locales3[0] if locales3 else None}
+        return {
+            "ok": True,
+            "device_serial": device_serial,
+            "method": "getprop_persist.sys.language_country",
+            "raw": {"language": lang, "country": country},
+            "locales": locales3,
+            "primary": locales3[0] if locales3 else None,
+        }
 
     # 4) ro.product.locale
     ro_loc = _getprop(device_serial, "ro.product.locale")
     locales4 = _parse_locales(ro_loc)
     if locales4:
-        return {"ok": True, "device_serial": device_serial, "method": "getprop_ro.product.locale", "raw": ro_loc, "locales": locales4, "primary": locales4[0]}
+        return {
+            "ok": True,
+            "device_serial": device_serial,
+            "method": "getprop_ro.product.locale",
+            "raw": ro_loc,
+            "locales": locales4,
+            "primary": locales4[0],
+        }
 
     ro_lang = _getprop(device_serial, "ro.product.locale.language")
-    ro_region = _getprop(device_serial, "ro.product.locale.region") or _getprop(device_serial, "ro.product.locale.country")
+    ro_region = _getprop(device_serial, "ro.product.locale.region") or _getprop(
+        device_serial, "ro.product.locale.country"
+    )
     if ro_lang:
         tag2 = f"{ro_lang}-{ro_region}" if ro_region else ro_lang
         locales5 = _parse_locales(tag2)
-        return {"ok": True, "device_serial": device_serial, "method": "getprop_ro.product.locale_language_region", "raw": {"language": ro_lang, "region": ro_region}, "locales": locales5, "primary": locales5[0] if locales5 else None}
+        return {
+            "ok": True,
+            "device_serial": device_serial,
+            "method": "getprop_ro.product.locale_language_region",
+            "raw": {"language": ro_lang, "region": ro_region},
+            "locales": locales5,
+            "primary": locales5[0] if locales5 else None,
+        }
 
     return {"ok": False, "device_serial": device_serial, "error": "locale_not_found"}
 
@@ -2936,11 +3338,16 @@ def get_app_locales(device_serial: Optional[str], package_name: str) -> dict:
     """
     pkg = (package_name or "").strip()
     if not device_serial or not pkg:
-        return {"ok": False, "error": "device_serial and package_name are required", "package": pkg or None}
+        return {
+            "ok": False,
+            "error": "device_serial and package_name are required",
+            "package": pkg or None,
+        }
     # Note: Some Android versions require --user 0; we'll try both.
     cmds = [
         adb_prefix(device_serial) + ["shell", "cmd", "locale", "get-app-locales", pkg],
-        adb_prefix(device_serial) + ["shell", "cmd", "locale", "get-app-locales", "--user", "0", pkg],
+        adb_prefix(device_serial)
+        + ["shell", "cmd", "locale", "get-app-locales", "--user", "0", pkg],
     ]
     last_err = None
     for cmd in cmds:
@@ -2978,7 +3385,14 @@ def get_app_locales(device_serial: Optional[str], package_name: str) -> dict:
             "primary": None,
             "is_set": False,
         }
-    return {"ok": False, "device_serial": device_serial, "package": pkg, "error": "app_locale_not_supported_or_failed", "detail": last_err}
+    return {
+        "ok": False,
+        "device_serial": device_serial,
+        "package": pkg,
+        "error": "app_locale_not_supported_or_failed",
+        "detail": last_err,
+    }
+
 
 def get_android_os_info(device_serial: Optional[str]) -> dict:
     """
@@ -3063,8 +3477,12 @@ def get_device_profile(device_serial: Optional[str]) -> dict:
     }
 
 
-_WM_SIZE_RE = re.compile(r"^(?:Physical|Override)\s+size:\s*(\d+)x(\d+)\s*$", re.MULTILINE)
-_WM_DENSITY_RE = re.compile(r"^(?:Physical|Override)\s+density:\s*(\d+)\s*$", re.MULTILINE)
+_WM_SIZE_RE = re.compile(
+    r"^(?:Physical|Override)\s+size:\s*(\d+)x(\d+)\s*$", re.MULTILINE
+)
+_WM_DENSITY_RE = re.compile(
+    r"^(?:Physical|Override)\s+density:\s*(\d+)\s*$", re.MULTILINE
+)
 _ABS_X_RE = re.compile(r"ABS_MT_POSITION_X\s*:.*\bmax\s+(\d+)\b")
 _ABS_Y_RE = re.compile(r"ABS_MT_POSITION_Y\s*:.*\bmax\s+(\d+)\b")
 
@@ -3092,7 +3510,9 @@ def get_screen_density(device_serial: Optional[str]) -> Optional[int]:
     """
     if not device_serial:
         return None
-    proc = CommandRunner.run(adb_prefix(device_serial) + ["shell", "wm", "density"], check=False)
+    proc = CommandRunner.run(
+        adb_prefix(device_serial) + ["shell", "wm", "density"], check=False
+    )
     text = proc.stdout or ""
     # Prefer Override density if present by scanning all matches and taking last.
     matches = _WM_DENSITY_RE.findall(text)
@@ -3104,7 +3524,9 @@ def get_screen_density(device_serial: Optional[str]) -> Optional[int]:
         return None
 
 
-def get_touch_abs_max(device_serial: Optional[str], keep_device: Optional[str]) -> Optional[tuple[int, int]]:
+def get_touch_abs_max(
+    device_serial: Optional[str], keep_device: Optional[str]
+) -> Optional[tuple[int, int]]:
     """
     Find ABS_MT_POSITION_X/Y max from `adb shell getevent -lp`.
 
@@ -3113,13 +3535,17 @@ def get_touch_abs_max(device_serial: Optional[str], keep_device: Optional[str]) 
     """
     if not device_serial:
         return None
-    proc = CommandRunner.run(adb_prefix(device_serial) + ["shell", "getevent", "-lp"], check=False)
+    proc = CommandRunner.run(
+        adb_prefix(device_serial) + ["shell", "getevent", "-lp"], check=False
+    )
     text = proc.stdout or ""
     if not text:
         return None
 
     # Split into blocks starting at "add device"
-    blocks = re.split(r"(?=^add device\s+\d+:\s+/dev/input/event\d+)", text, flags=re.MULTILINE)
+    blocks = re.split(
+        r"(?=^add device\s+\d+:\s+/dev/input/event\d+)", text, flags=re.MULTILINE
+    )
     candidates: list[tuple[int, int]] = []
     for b in blocks:
         if "ABS_MT_POSITION_X" not in b or "ABS_MT_POSITION_Y" not in b:
@@ -3187,10 +3613,18 @@ def get_clipboard_text(device_serial: Optional[str] = None) -> dict:
         dict: {"ok": True, "text": str} 或 {"ok": False, "error": str}
     """
     try:
-        cmd = adb_prefix(device_serial) + ["shell", "cmd", "clipboard", "get-primary-clip"]
+        cmd = adb_prefix(device_serial) + [
+            "shell",
+            "cmd",
+            "clipboard",
+            "get-primary-clip",
+        ]
         proc = CommandRunner.run(cmd, check=False, log_output=False)
         if proc.returncode != 0:
-            return {"ok": False, "error": f"clipboard command failed: {proc.stderr or proc.stdout}"}
+            return {
+                "ok": False,
+                "error": f"clipboard command failed: {proc.stderr or proc.stdout}",
+            }
         return {"ok": True, "text": (proc.stdout or "").strip()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -3207,10 +3641,19 @@ def get_notifications(device_serial: Optional[str] = None) -> dict:
         dict: {"ok": True, "notifications": [{"package": str, "title": str, "text": str}]}
     """
     try:
-        cmd = adb_prefix(device_serial) + ["shell", "dumpsys", "notification", "--noredact"]
+        cmd = adb_prefix(device_serial) + [
+            "shell",
+            "dumpsys",
+            "notification",
+            "--noredact",
+        ]
         proc = CommandRunner.run(cmd, check=False, log_output=False)
         if proc.returncode != 0:
-            return {"ok": False, "error": f"dumpsys notification failed: {proc.stderr or proc.stdout}", "notifications": []}
+            return {
+                "ok": False,
+                "error": f"dumpsys notification failed: {proc.stderr or proc.stdout}",
+                "notifications": [],
+            }
         out = proc.stdout or ""
         notifications: list[dict[str, str]] = []
         # 按 NotificationRecord 分段 / Split by NotificationRecord blocks
@@ -3227,13 +3670,17 @@ def get_notifications(device_serial: Optional[str] = None) -> dict:
                     pkg = pkg_m.group(1).strip()
                 # android.title=Value or android.title=String (Value)
                 if "android.title=" in line_stripped:
-                    m = re.search(r"android\.title=String\s*\(\s*([^)]*)\s*\)", line_stripped)
+                    m = re.search(
+                        r"android\.title=String\s*\(\s*([^)]*)\s*\)", line_stripped
+                    )
                     if m:
                         title = m.group(1).strip()
                     else:
                         title = line_stripped.split("android.title=", 1)[1].strip()
                 if "android.text=" in line_stripped:
-                    m = re.search(r"android\.text=String\s*\(\s*([^)]*)\s*\)", line_stripped)
+                    m = re.search(
+                        r"android\.text=String\s*\(\s*([^)]*)\s*\)", line_stripped
+                    )
                     if m:
                         text = m.group(1).strip()
                     else:
@@ -3261,13 +3708,19 @@ def set_wifi_enabled(device_serial: Optional[str] = None, enabled: bool = True) 
         cmd = adb_prefix(device_serial) + ["shell", "svc", "wifi", action]
         proc = CommandRunner.run(cmd, check=False, log_output=False)
         if proc.returncode != 0:
-            return {"ok": False, "error": f"svc wifi {action} failed: {proc.stderr or proc.stdout}", "wifi_on": enabled}
+            return {
+                "ok": False,
+                "error": f"svc wifi {action} failed: {proc.stderr or proc.stdout}",
+                "wifi_on": enabled,
+            }
         return {"ok": True, "wifi_on": enabled}
     except Exception as e:
         return {"ok": False, "error": str(e), "wifi_on": enabled}
 
 
-def set_airplane_mode(device_serial: Optional[str] = None, enabled: bool = True) -> dict:
+def set_airplane_mode(
+    device_serial: Optional[str] = None, enabled: bool = True
+) -> dict:
     """开关飞行模式。
     Toggle airplane mode.
 
@@ -3280,11 +3733,28 @@ def set_airplane_mode(device_serial: Optional[str] = None, enabled: bool = True)
     """
     try:
         val = "1" if enabled else "0"
-        cmd1 = adb_prefix(device_serial) + ["shell", "settings", "put", "global", "airplane_mode_on", val]
+        cmd1 = adb_prefix(device_serial) + [
+            "shell",
+            "settings",
+            "put",
+            "global",
+            "airplane_mode_on",
+            val,
+        ]
         proc1 = CommandRunner.run(cmd1, check=False, log_output=False)
         if proc1.returncode != 0:
-            return {"ok": False, "error": f"settings put failed: {proc1.stderr or proc1.stdout}", "airplane_on": enabled}
-        cmd2 = adb_prefix(device_serial) + ["shell", "am", "broadcast", "-a", "android.intent.action.AIRPLANE_MODE"]
+            return {
+                "ok": False,
+                "error": f"settings put failed: {proc1.stderr or proc1.stdout}",
+                "airplane_on": enabled,
+            }
+        cmd2 = adb_prefix(device_serial) + [
+            "shell",
+            "am",
+            "broadcast",
+            "-a",
+            "android.intent.action.AIRPLANE_MODE",
+        ]
         CommandRunner.run(cmd2, check=False, log_output=False)
         return {"ok": True, "airplane_on": enabled}
     except Exception as e:
@@ -3320,11 +3790,16 @@ def execute_shell(
         # 检查禁止前缀 / Check forbidden prefixes
         for forbidden in _SHELL_FORBIDDEN:
             if cmd_stripped.startswith(forbidden):
-                return {"ok": False, "error": f"command prefix '{forbidden}' is forbidden"}
+                return {
+                    "ok": False,
+                    "error": f"command prefix '{forbidden}' is forbidden",
+                }
         if cmd_stripped.startswith("rm -rf") or cmd_stripped.startswith("rm -fr"):
             return {"ok": False, "error": "rm -rf is forbidden"}
         full_cmd = adb_prefix(device_serial) + ["shell"] + parts
-        proc = CommandRunner.run(full_cmd, check=False, log_output=False, timeout_s=timeout_s)
+        proc = CommandRunner.run(
+            full_cmd, check=False, log_output=False, timeout_s=timeout_s
+        )
         return {
             "ok": True,
             "stdout": (proc.stdout or "").strip(),
@@ -3342,4 +3817,3 @@ def get_device_model_and_version(device_serial: Optional[str]) -> tuple[str, str
     model = _getprop(device_serial, "ro.product.model") or ""
     version = _getprop(device_serial, "ro.build.version.release") or ""
     return (model, version)
-

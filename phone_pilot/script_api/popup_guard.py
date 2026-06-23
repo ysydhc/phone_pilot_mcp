@@ -11,6 +11,7 @@ Three-layer local detection pipeline:
 2. UI tree structure analysis — class_name / resource_id / overlay detection
 3. Text rule matching — built-in DEFAULT_RULES for common popups
 """
+
 from __future__ import annotations
 
 import re
@@ -26,6 +27,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # PopupRule — 弹窗规则
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class PopupRule:
@@ -60,24 +62,53 @@ DEFAULT_RULES: list[PopupRule] = [
     # 系统权限弹窗 / System permission dialogs
     PopupRule(
         name="system_permission",
-        detect_texts=["允许", "位置权限", "存储权限", "相机权限", "通知权限",
-                      "Allow", "Permission", "While using", "Only this time"],
-        dismiss_texts=["允许", "始终允许", "仅在使用中允许", "Allow", "While using the app",
-                       "Only this time", "許可", "許可する"],
-        dismiss_resource_ids=["com.android.permissioncontroller:id/permission_allow_button",
-                              "com.android.packageinstaller:id/permission_allow_button",
-                              "android:id/button1"],
+        detect_texts=[
+            "允许",
+            "位置权限",
+            "存储权限",
+            "相机权限",
+            "通知权限",
+            "Allow",
+            "Permission",
+            "While using",
+            "Only this time",
+        ],
+        dismiss_texts=[
+            "允许",
+            "始终允许",
+            "仅在使用中允许",
+            "Allow",
+            "While using the app",
+            "Only this time",
+            "許可",
+            "許可する",
+        ],
+        dismiss_resource_ids=[
+            "com.android.permissioncontroller:id/permission_allow_button",
+            "com.android.packageinstaller:id/permission_allow_button",
+            "android:id/button1",
+        ],
         detect_class_names=["AlertDialog", "GrantPermissionsActivity"],
-        detect_resource_ids=["android:id/alertTitle",
-                             "com.android.permissioncontroller:id/permission_message"],
+        detect_resource_ids=[
+            "android:id/alertTitle",
+            "com.android.permissioncontroller:id/permission_message",
+        ],
         priority=100,
     ),
     # 通用确认弹窗 / Generic confirmation dialogs
     PopupRule(
         name="generic_confirm",
         detect_texts=["确定", "确认", "知道了", "OK", "Got it", "了解"],
-        dismiss_texts=["确定", "确认", "知道了", "OK", "Got it", "了解",
-                       "わかりました", "閉じる"],
+        dismiss_texts=[
+            "确定",
+            "确认",
+            "知道了",
+            "OK",
+            "Got it",
+            "了解",
+            "わかりました",
+            "閉じる",
+        ],
         dismiss_resource_ids=["android:id/button1"],
         detect_class_names=["AlertDialog"],
         detect_resource_ids=["android:id/alertTitle", "android:id/message"],
@@ -86,27 +117,65 @@ DEFAULT_RULES: list[PopupRule] = [
     # 关闭 / 取消按钮 / Close / Cancel buttons
     PopupRule(
         name="close_cancel",
-        detect_texts=["关闭", "取消", "Close", "Cancel", "Dismiss",
-                      "不再提示", "Skip", "跳过"],
-        dismiss_texts=["关闭", "取消", "Close", "Cancel", "Dismiss",
-                       "不再提示", "Skip", "跳过", "閉じる", "キャンセル"],
+        detect_texts=[
+            "关闭",
+            "取消",
+            "Close",
+            "Cancel",
+            "Dismiss",
+            "不再提示",
+            "Skip",
+            "跳过",
+        ],
+        dismiss_texts=[
+            "关闭",
+            "取消",
+            "Close",
+            "Cancel",
+            "Dismiss",
+            "不再提示",
+            "Skip",
+            "跳过",
+            "閉じる",
+            "キャンセル",
+        ],
         priority=60,
     ),
     # 系统更新 / System update dialogs
     PopupRule(
         name="system_update",
-        detect_texts=["系统更新", "System Update", "新版本", "升级",
-                      "アップデート", "更新"],
-        dismiss_texts=["稍后", "Later", "Not now", "以后再说", "取消",
-                       "あとで", "Cancel"],
+        detect_texts=[
+            "系统更新",
+            "System Update",
+            "新版本",
+            "升级",
+            "アップデート",
+            "更新",
+        ],
+        dismiss_texts=[
+            "稍后",
+            "Later",
+            "Not now",
+            "以后再说",
+            "取消",
+            "あとで",
+            "Cancel",
+        ],
         priority=70,
     ),
     # 日文常见弹窗 / Japanese common dialogs
     PopupRule(
         name="japanese_common",
         detect_texts=["許可", "閉じる", "確認", "同意"],
-        dismiss_texts=["許可", "許可する", "閉じる", "OK", "はい",
-                       "同意する", "同意して続行"],
+        dismiss_texts=[
+            "許可",
+            "許可する",
+            "閉じる",
+            "OK",
+            "はい",
+            "同意する",
+            "同意して続行",
+        ],
         priority=50,
     ),
 ]
@@ -118,8 +187,12 @@ DEFAULT_RULES: list[PopupRule] = [
 
 # class_name 子串匹配（任一命中则认为是弹窗节点）
 _DIALOG_CLASS_PATTERNS = [
-    "Dialog", "AlertDialog", "BottomSheet", "PopupWindow",
-    "BottomSheetDialog", "DialogFragment",
+    "Dialog",
+    "AlertDialog",
+    "BottomSheet",
+    "PopupWindow",
+    "BottomSheetDialog",
+    "DialogFragment",
 ]
 
 # resource_id 精确匹配（系统标准弹窗组件）
@@ -143,6 +216,7 @@ _DIALOG_WINDOW_PATTERNS = re.compile(
 # ---------------------------------------------------------------------------
 # PopupGuard — 弹窗守卫
 # ---------------------------------------------------------------------------
+
 
 class PopupGuard:
     """弹窗守卫 — Window 层级 + UI 树结构 两层本地检测。
@@ -195,7 +269,9 @@ class PopupGuard:
             # 先尝试结构化关闭（resource_id）
             result = self._dismiss_by_structure(nodes, structure_info)
             if result:
-                result["detect_method"] = "window_layer" if has_dialog_window else "ui_structure"
+                result["detect_method"] = (
+                    "window_layer" if has_dialog_window else "ui_structure"
+                )
                 return result
 
             # 再尝试文本规则关闭
@@ -238,6 +314,7 @@ class PopupGuard:
         """Android: dumpsys window windows → 检测 Dialog 类型 Window."""
         try:
             from phone_pilot.android.adb.runner import CommandRunner, adb_prefix
+
             serial = self._ctx.device_serial or ""
             cmd = adb_prefix(serial) + ["shell", "dumpsys", "window", "windows"]
             result = CommandRunner.run(cmd, check=False, log_output=False)
@@ -316,7 +393,11 @@ class PopupGuard:
         Dismiss popup using standard Android resource_ids.
         """
         # 查找 button1/button2/button3（Android AlertDialog 标准按钮）
-        for target_id in ["android:id/button1", "android:id/button2", "android:id/button3"]:
+        for target_id in [
+            "android:id/button1",
+            "android:id/button2",
+            "android:id/button3",
+        ]:
             for node in nodes:
                 res_id = getattr(node, "resource_id", "") or ""
                 if res_id == target_id and getattr(node, "clickable", False):
@@ -390,7 +471,8 @@ class PopupGuard:
                                 time.sleep(0.5)
                                 return {
                                     "popup_type": rule.name,
-                                    "dismiss_text": getattr(node, "text", "") or dismiss_rid,
+                                    "dismiss_text": getattr(node, "text", "")
+                                    or dismiss_rid,
                                     "dismiss_resource_id": dismiss_rid,
                                     "rule_name": rule.name,
                                 }
@@ -402,9 +484,9 @@ class PopupGuard:
                 for node in nodes:
                     node_text = getattr(node, "text", "") or ""
                     node_desc = getattr(node, "content_desc", "") or ""
-                    if (dismiss_text in node_text or dismiss_text in node_desc) and getattr(
-                        node, "clickable", False
-                    ):
+                    if (
+                        dismiss_text in node_text or dismiss_text in node_desc
+                    ) and getattr(node, "clickable", False):
                         center = node.center()
                         if center:
                             try:

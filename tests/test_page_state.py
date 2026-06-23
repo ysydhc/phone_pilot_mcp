@@ -1,6 +1,6 @@
 """phone_get_page_state 工具核心逻辑测试。"""
 
-from phone_pilot.mcp.server import _classify_element, _build_element_label
+from phone_pilot.mcp._page_state_tools import _classify_element, _build_element_label
 
 
 class TestClassifyElement:
@@ -30,7 +30,10 @@ class TestClassifyElement:
 
     def test_scroll(self):
         assert _classify_element("android.widget.ScrollView") == "scroll_container"
-        assert _classify_element("android.widget.HorizontalScrollView") == "scroll_container"
+        assert (
+            _classify_element("android.widget.HorizontalScrollView")
+            == "scroll_container"
+        )
 
     def test_pager(self):
         assert _classify_element("androidx.viewpager.widget.ViewPager") == "pager"

@@ -32,7 +32,9 @@ def hdc_executable() -> str:
     if _HDC_CACHED:
         return _HDC_CACHED
 
-    env_path = (os.environ.get("HDC_PATH") or os.environ.get("HARMONY_HDC_PATH") or "").strip()
+    env_path = (
+        os.environ.get("HDC_PATH") or os.environ.get("HARMONY_HDC_PATH") or ""
+    ).strip()
     if env_path:
         _HDC_CACHED = env_path
         return _HDC_CACHED
@@ -75,14 +77,22 @@ def push_file(device: Optional[str], local_path: str, remote_path: str) -> dict:
     """Push a local file to device using `hdc file send`."""
     cmd = hdc_prefix(device) + ["file", "send", local_path, remote_path]
     proc = HdcCommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False)
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 def pull_file(device: Optional[str], remote_path: str, local_path: str) -> dict:
     """Pull a remote file to local using `hdc file recv`."""
     cmd = hdc_prefix(device) + ["file", "recv", remote_path, local_path]
     proc = HdcCommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False)
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 __all__ = [

@@ -10,6 +10,7 @@ Verification env self-check: run before A-class device verification.
 - adb：PATH 或 ANDROID_ADB_PATH / adb: from PATH or ANDROID_ADB_PATH
 - 推荐命令 / Recommended: python scripts/check_verification_env.py
 """
+
 from __future__ import annotations
 
 import argparse
@@ -72,6 +73,7 @@ def _read_requires_python() -> tuple[int, int]:
         (major, minor) 最低版本元组 / minimum version tuple
     """
     import re as _re
+
     cwd = os.environ.get("PHONE_PILOT_PROJECT_ROOT") or os.getcwd()
     toml_path = os.path.join(cwd, "pyproject.toml")
     if os.path.isfile(toml_path):
@@ -125,8 +127,12 @@ def _resolve_adb() -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Verification env self-check for A-class device verification")
-    parser.add_argument("--cwd", type=str, help="Override working directory (project root)")
+    parser = argparse.ArgumentParser(
+        description="Verification env self-check for A-class device verification"
+    )
+    parser.add_argument(
+        "--cwd", type=str, help="Override working directory (project root)"
+    )
     args = parser.parse_args()
 
     # 工作目录：--cwd > PHONE_PILOT_PROJECT_ROOT > 当前目录
@@ -184,19 +190,27 @@ def main() -> None:
     opt_status, opt_msg = check_optional("cv2", "opencv")
     if opt_status == "WARN":
         warnings.append("opencv")
-    print(f"[CHECK] opencv (cv2) ................ {opt_status}" + (f" ({opt_msg})" if opt_msg else ""))
+    print(
+        f"[CHECK] opencv (cv2) ................ {opt_status}"
+        + (f" ({opt_msg})" if opt_msg else "")
+    )
 
     # 6. optional: tesseract
     opt_status2, opt_msg2 = check_optional("pytesseract", "tesseract")
     if opt_status2 == "WARN":
         warnings.append("tesseract")
-    print(f"[CHECK] tesseract ................... {opt_status2}" + (f" ({opt_msg2})" if opt_msg2 else ""))
+    print(
+        f"[CHECK] tesseract ................... {opt_status2}"
+        + (f" ({opt_msg2})" if opt_msg2 else "")
+    )
 
     # 汇总 / summary
     warn_count = len(warnings)
     print()
     w = "warning" if warn_count == 1 else "warnings"
-    print(f"Result: {required_pass}/{required_total} required checks passed, {warn_count} {w}.")
+    print(
+        f"Result: {required_pass}/{required_total} required checks passed, {warn_count} {w}."
+    )
 
     sys.exit(0 if required_pass == required_total else 1)
 

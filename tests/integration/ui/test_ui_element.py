@@ -209,7 +209,9 @@ def test_exists_wait_contains_info_screenshot(tmp_path) -> None:
         calls["count"] += 1
         if calls["count"] < 2:
             return None
-        return TextElement(x=1, y=2, width=3, height=4, text="hello", desc="greet", resource_id="id1")
+        return TextElement(
+            x=1, y=2, width=3, height=4, text="hello", desc="greet", resource_id="id1"
+        )
 
     def _screenshot(_name: str):
         import cv2
@@ -222,11 +224,19 @@ def test_exists_wait_contains_info_screenshot(tmp_path) -> None:
 
     elem_exists = TextElement(x=1, y=2, width=3, height=4, text="hello")
     elem_exists._locator = {"type": "text", "query": "hello"}
-    elem_exists._ops = {"locate": lambda _l: TextElement(x=1, y=2, width=3, height=4, text="hello"), "screenshot": _screenshot, "uia_info": lambda _e: {"class": "Text"}}
+    elem_exists._ops = {
+        "locate": lambda _l: TextElement(x=1, y=2, width=3, height=4, text="hello"),
+        "screenshot": _screenshot,
+        "uia_info": lambda _e: {"class": "Text"},
+    }
 
     elem_wait = TextElement(x=1, y=2, width=3, height=4, text="hello")
     elem_wait._locator = {"type": "text", "query": "hello"}
-    elem_wait._ops = {"locate": _locate, "screenshot": _screenshot, "uia_info": lambda _e: {"class": "Text"}}
+    elem_wait._ops = {
+        "locate": _locate,
+        "screenshot": _screenshot,
+        "uia_info": lambda _e: {"class": "Text"},
+    }
 
     assert elem_exists.exists() is True
     assert elem_wait.wait(timeout_s=1.0, interval_s=0.1) is not None

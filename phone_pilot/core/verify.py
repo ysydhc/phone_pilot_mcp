@@ -33,6 +33,7 @@ from phone_pilot.core.storage import iso_now, recordings_root, write_json
 # 文本匹配工具：统一 re: 前缀
 # ---------------------------------------------------------------------------
 
+
 def _text_matches(pattern: str, target: str) -> bool:
     """检查 target 是否匹配 pattern。
 
@@ -65,6 +66,7 @@ def _text_contains(pattern: str, target: str) -> bool:
 # 单条断言执行器
 # ---------------------------------------------------------------------------
 
+
 def _assert_element_exists(driver: Any, params: dict) -> dict:
     """UI 元素存在断言。"""
     text = params.get("text", "")
@@ -78,7 +80,10 @@ def _assert_element_exists(driver: Any, params: dict) -> dict:
             for t in all_texts:
                 if _text_matches(text, t):
                     return {"passed": True, "detail": {"found_text": t}}
-            return {"passed": False, "detail": {"query": text, "searched": len(all_texts)}}
+            return {
+                "passed": False,
+                "detail": {"query": text, "searched": len(all_texts)},
+            }
         else:
             elems = driver.ui.find_elements({"text": text})
             if elems:
@@ -111,7 +116,10 @@ def _assert_text_equals(driver: Any, params: dict) -> dict:
 
     elems = driver.ui.find_elements({"text": query})
     if not elems:
-        return {"passed": False, "detail": {"error": "element_not_found", "query": query}}
+        return {
+            "passed": False,
+            "detail": {"error": "element_not_found", "query": query},
+        }
 
     actual = elems[0].get("text", "")
     passed = _text_matches(expected, actual)
@@ -128,7 +136,10 @@ def _assert_text_contains(driver: Any, params: dict) -> dict:
 
     elems = driver.ui.find_elements({"text": query})
     if not elems:
-        return {"passed": False, "detail": {"error": "element_not_found", "query": query}}
+        return {
+            "passed": False,
+            "detail": {"error": "element_not_found", "query": query},
+        }
 
     actual = elems[0].get("text", "")
     passed = _text_contains(expected, actual)
@@ -155,7 +166,9 @@ def _assert_screen_contains_text(driver: Any, params: dict) -> dict:
     return {"passed": False, "detail": {"query": text, "searched": len(all_texts)}}
 
 
-def _assert_screenshot_match(driver: Any, params: dict, evidence_dir: pathlib.Path) -> dict:
+def _assert_screenshot_match(
+    driver: Any, params: dict, evidence_dir: pathlib.Path
+) -> dict:
     """截图与基准对比。"""
     baseline = params.get("baseline", "")
     threshold = float(params.get("threshold", 0.9))
@@ -239,7 +252,9 @@ def _assert_app_foreground(driver: Any, params: dict) -> dict:
     return {"passed": passed, "detail": {"expected": package, "actual": actual}}
 
 
-def _assert_logcat_contains(driver: Any, params: dict, evidence_dir: pathlib.Path) -> dict:
+def _assert_logcat_contains(
+    driver: Any, params: dict, evidence_dir: pathlib.Path
+) -> dict:
     """日志包含模式。"""
     pattern = params.get("pattern", "")
     lines = int(params.get("lines", 5000))
@@ -287,14 +302,18 @@ def _assert_logcat_contains(driver: Any, params: dict, evidence_dir: pathlib.Pat
     }
 
 
-def _assert_logcat_not_contains(driver: Any, params: dict, evidence_dir: pathlib.Path) -> dict:
+def _assert_logcat_not_contains(
+    driver: Any, params: dict, evidence_dir: pathlib.Path
+) -> dict:
     """日志不包含模式。"""
     result = _assert_logcat_contains(driver, params, evidence_dir)
     result["passed"] = not result["passed"]
     return result
 
 
-def _assert_memory_snapshot(driver: Any, params: dict, evidence_dir: pathlib.Path) -> dict:
+def _assert_memory_snapshot(
+    driver: Any, params: dict, evidence_dir: pathlib.Path
+) -> dict:
     """保存内存快照（作为后续对比的基线）。"""
     package = params.get("package", "")
     name = params.get("name", "memory_baseline")
@@ -304,7 +323,10 @@ def _assert_memory_snapshot(driver: Any, params: dict, evidence_dir: pathlib.Pat
 
     try:
         result = driver.dump_memory_profile(
-            package, out_dir=str(evidence_dir), name=name, timeout_s=30.0,
+            package,
+            out_dir=str(evidence_dir),
+            name=name,
+            timeout_s=30.0,
         )
         return {
             "passed": result.get("ok", False),
@@ -314,7 +336,9 @@ def _assert_memory_snapshot(driver: Any, params: dict, evidence_dir: pathlib.Pat
         return {"passed": False, "detail": {"error": str(e)}}
 
 
-def _assert_memory_no_growth(driver: Any, params: dict, evidence_dir: pathlib.Path) -> dict:
+def _assert_memory_no_growth(
+    driver: Any, params: dict, evidence_dir: pathlib.Path
+) -> dict:
     """内存增长不超过阈值（需要先有 memory_snapshot 基线）。"""
     package = params.get("package", "")
     baseline_name = params.get("baseline_name", "")
@@ -326,7 +350,10 @@ def _assert_memory_no_growth(driver: Any, params: dict, evidence_dir: pathlib.Pa
     # 获取当前内存 (通过 device driver 的 meminfo)
     try:
         result = driver.dump_memory_profile(
-            package, out_dir=str(evidence_dir), name="current_check", timeout_s=30.0,
+            package,
+            out_dir=str(evidence_dir),
+            name="current_check",
+            timeout_s=30.0,
         )
         current_mb = result.get("total_pss_mb", 0) or result.get("pss_mb", 0)
     except Exception as e:
@@ -343,6 +370,7 @@ def _assert_memory_no_growth(driver: Any, params: dict, evidence_dir: pathlib.Pa
             if candidate and candidate.exists():
                 try:
                     from phone_pilot.core.storage import read_json
+
                     data = read_json(candidate)
                     baseline_mb = data.get("total_pss_mb", 0) or data.get("pss_mb", 0)
                     break
@@ -400,6 +428,7 @@ _ASSERTION_HANDLERS: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 # 公开 API
 # ---------------------------------------------------------------------------
+
 
 def run_assertions(
     driver: Any,
@@ -508,6 +537,9 @@ def _dispatch_assertion(
     # 普通断言
     handler = _ASSERTION_HANDLERS.get(atype)
     if handler is None:
-        return {"passed": False, "detail": {"error": f"unknown assertion type: {atype}"}}
+        return {
+            "passed": False,
+            "detail": {"error": f"unknown assertion type: {atype}"},
+        }
 
     return handler(driver, params)

@@ -30,6 +30,7 @@ from typing import Any, Callable, Optional, Sequence, Union
 # 数据模型
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GraphNode:
     """图中的一个节点。"""
@@ -45,6 +46,7 @@ class GraphNode:
 # ---------------------------------------------------------------------------
 # UIGraph
 # ---------------------------------------------------------------------------
+
 
 class UIGraph:
     """有向无环图执行引擎。
@@ -154,7 +156,10 @@ class UIGraph:
                 if not isinstance(result, dict):
                     result = {"ok": bool(result)}
             except Exception as exc:
-                result = {"ok": False, "error": {"code": "exception", "message": str(exc)}}
+                result = {
+                    "ok": False,
+                    "error": {"code": "exception", "message": str(exc)},
+                }
             elapsed = (time.monotonic() - t0) * 1000
 
             node.result = result
@@ -267,6 +272,7 @@ class UIGraph:
 # ---------------------------------------------------------------------------
 # 工厂函数
 # ---------------------------------------------------------------------------
+
 
 def graph(ctx: Any = None) -> UIGraph:
     """创建一个新的 UIGraph 实例。

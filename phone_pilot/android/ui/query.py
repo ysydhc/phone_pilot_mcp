@@ -16,7 +16,12 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from phone_pilot.android.ui.automator import UINode, dump_ui_xml, parse_uiautomator_nodes, find_nodes
+from phone_pilot.android.ui.automator import (
+    UINode,
+    dump_ui_xml,
+    parse_uiautomator_nodes,
+    find_nodes,
+)
 from phone_pilot.extensions.vision.template import find_template_on_screen_with_fallback
 from phone_pilot.extensions.ocr.tesseract import ocr_screenshot_and_find
 from phone_pilot.extensions.lang.translate import translate_candidates
@@ -40,7 +45,7 @@ def _match_selector(node: UINode, selector: dict, case_sensitive: bool = False) 
     """
     Check if a UINode matches the given selector.
     检查 UINode 是否匹配给定的选择器。
-    
+
     Selector keys / 选择器键:
     - text: Match node text or hint / 匹配节点文本或提示
     - text_contains: Text contains (text or hint) / 文本包含（文本或提示）
@@ -59,12 +64,13 @@ def _match_selector(node: UINode, selector: dict, case_sensitive: bool = False) 
     - checkable: Match checkable attribute / 匹配 checkable 属性
     - checked: Match checked attribute / 匹配 checked 属性
     """
+
     def norm(s: Optional[str]) -> str:
         """Normalize strings for comparison based on case sensitivity."""
         if s is None:
             return ""
         return s if case_sensitive else s.lower()
-    
+
     def match_str(node_val: Optional[str], sel_val: str, exact: bool = True) -> bool:
         """Match string selector against node value."""
         nv = norm(node_val)
@@ -72,18 +78,24 @@ def _match_selector(node: UINode, selector: dict, case_sensitive: bool = False) 
         if not nv:
             return False
         return nv == sv if exact else sv in nv
-    
+
     def match_bool(node_val: Optional[bool], sel_val: bool) -> bool:
         """Match boolean selector against node value."""
         return node_val == sel_val
-    
+
     # Check each selector key
     for key, val in selector.items():
         if key == "text":
-            if not (match_str(node.text, val, exact=True) or match_str(node.hint, val, exact=True)):
+            if not (
+                match_str(node.text, val, exact=True)
+                or match_str(node.hint, val, exact=True)
+            ):
                 return False
         elif key == "text_contains":
-            if not (match_str(node.text, val, exact=False) or match_str(node.hint, val, exact=False)):
+            if not (
+                match_str(node.text, val, exact=False)
+                or match_str(node.hint, val, exact=False)
+            ):
                 return False
         elif key == "hint":
             if not match_str(node.hint, val, exact=True):
@@ -142,7 +154,7 @@ def _match_selector(node: UINode, selector: dict, case_sensitive: bool = False) 
         elif key == "password":
             if not match_bool(node.password, val):
                 return False
-    
+
     return True
 
 
@@ -166,7 +178,7 @@ def element_query_impl(
     """
     Query elements with rich selectors.
     使用丰富的选择器查询元素。
-    
+
     Args / 参数:
     - device_serial: Device serial / 设备序列号
     - selector: Selector dict / 选择器字典
@@ -182,38 +194,55 @@ def element_query_impl(
     - attributes: List of attributes to return (None = all) / 要返回的属性列表（None = 全部）
     - case_sensitive: Case sensitive matching / 大小写敏感匹配
     - limit: Max elements to return / 最大返回元素数
-    
+
     Returns / 返回:
     - ok: bool
     - count: int - Number of matched elements / 匹配元素数量
     - elements: list - List of element dicts / 元素字典列表
-    
+
     Example / 示例:
     ```python
     # Find login button
     element_query_impl(serial, {"text": "登录", "clickable": True})
-    
+
     # Find all EditText elements
     element_query_impl(serial, {"class_name": "android.widget.EditText"})
-    
+
     # Find by resource_id
     element_query_impl(serial, {"resource_id_contains": "btn_submit"})
     ```
     """
     if not device_serial:
-        return {"ok": False, "error": "device_serial_required", "count": 0, "elements": []}
-    
+        return {
+            "ok": False,
+            "error": "device_serial_required",
+            "count": 0,
+            "elements": [],
+        }
+
     if not isinstance(selector, dict) or not selector:
-        return {"ok": False, "error": "invalid_selector", "message": "selector must be a non-empty dict", "count": 0, "elements": []}
-    
+        return {
+            "ok": False,
+            "error": "invalid_selector",
+            "message": "selector must be a non-empty dict",
+            "count": 0,
+            "elements": [],
+        }
+
     # Dump UI hierarchy
     dump_result = dump_ui_xml(device_serial, compressed=True)
     if not dump_result.get("ok"):
-        return {"ok": False, "error": "ui_dump_failed", "detail": dump_result, "count": 0, "elements": []}
-    
+        return {
+            "ok": False,
+            "error": "ui_dump_failed",
+            "detail": dump_result,
+            "count": 0,
+            "elements": [],
+        }
+
     xml = dump_result.get("xml", "")
     nodes = parse_uiautomator_nodes(xml)
-    
+
     # Find matching nodes
     matched: list[dict] = []
     for node in nodes:
@@ -249,7 +278,7 @@ def element_query_impl(
                     break
             if matched:
                 break
-    
+
     return {
         "ok": True,
         "count": len(matched),
@@ -271,13 +300,13 @@ def element_exists_impl(
     """
     Check if element exists (without clicking).
     检查元素是否存在（不点击）。
-    
+
     Supports three search methods (in order):
     支持三种搜索方法（按顺序）：
     1. UIAutomator (query or selector)
     2. OCR fallback (if ocr_fallback=True and query provided)
     3. Image matching (if template_path provided)
-    
+
     Args / 参数:
     - device_serial: Device serial / 设备序列号
     - query: Text to search (text or content_desc) / 要搜索的文本
@@ -287,33 +316,43 @@ def element_exists_impl(
     - ocr_fallback: Enable OCR fallback / 启用 OCR 回退
     - ocr_lang: OCR language / OCR 语言
     - threshold: Image matching threshold / 图片匹配阈值
-    
+
     Returns / 返回:
     - ok: bool
     - exists: bool - Whether element exists / 元素是否存在
     - method: str - Method used to find ("uiautomator", "ocr", "image") / 使用的方法
     - match: dict or None - Match details if found / 匹配详情
-    
+
     Example / 示例:
     ```python
     # Check if "登录" button exists
     result = element_exists_impl(serial, query="登录")
     if result["exists"]:
         print("Login button found at:", result["match"])
-    
+
     # Check using image template
     result = element_exists_impl(serial, template_path="icon.png")
-    
+
     # Check using rich selector
     result = element_exists_impl(serial, selector={"resource_id_contains": "login_btn"})
     ```
     """
     if not device_serial:
-        return {"ok": False, "error": "device_serial_required", "exists": False, "match": None}
-    
+        return {
+            "ok": False,
+            "error": "device_serial_required",
+            "exists": False,
+            "match": None,
+        }
+
     if not query and not template_path and not selector:
-        return {"ok": False, "error": "query_or_template_or_selector_required", "exists": False, "match": None}
-    
+        return {
+            "ok": False,
+            "error": "query_or_template_or_selector_required",
+            "exists": False,
+            "match": None,
+        }
+
     # Method 1: Try UIAutomator with selector
     if selector and isinstance(selector, dict):
         result = element_query_impl(device_serial, selector, limit=1)
@@ -325,7 +364,7 @@ def element_exists_impl(
                 "match": result["elements"][0],
                 "device_serial": device_serial,
             }
-    
+
     # Method 2: Try UIAutomator with query
     if query:
         dump_result = dump_ui_xml(device_serial, compressed=True)
@@ -358,7 +397,7 @@ def element_exists_impl(
                         "translated_from": query,
                         "device_serial": device_serial,
                     }
-        
+
         # Method 3: Try OCR fallback
         if ocr_fallback:
             try:
@@ -372,7 +411,11 @@ def element_exists_impl(
                         limit=1,
                         lang=ocr_lang,
                     )
-                    if isinstance(ocr_result, dict) and ocr_result.get("ok") and ocr_result.get("count", 0) > 0:
+                    if (
+                        isinstance(ocr_result, dict)
+                        and ocr_result.get("ok")
+                        and ocr_result.get("count", 0) > 0
+                    ):
                         matches = ocr_result.get("matches", [])
                         if matches:
                             return {
@@ -384,7 +427,7 @@ def element_exists_impl(
                             }
             except Exception:
                 pass  # OCR failed, continue to image matching
-    
+
     # Method 4: Try image matching
     if template_path:
         try:
@@ -407,7 +450,7 @@ def element_exists_impl(
                     }
         except Exception:
             pass  # Image matching failed
-    
+
     # Not found by any method
     methods_tried = []
     if selector:
@@ -418,7 +461,7 @@ def element_exists_impl(
             methods_tried.append("ocr")
     if template_path:
         methods_tried.append("image")
-    
+
     return {
         "ok": True,
         "exists": False,

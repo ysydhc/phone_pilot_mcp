@@ -28,6 +28,7 @@ def _ensure_hdc_in_path():
     # Try to find hdc from our known paths
     try:
         from phone_pilot.harmony.hdc.utils import hdc_executable
+
         hdc_path = hdc_executable()
         if hdc_path and hdc_path != "hdc":
             hdc_dir = os.path.dirname(hdc_path)
@@ -49,6 +50,7 @@ def _ensure_hmdriver_class():
 
     try:
         from hmdriver2.driver import Driver as _Cls
+
         _HmDriver = _Cls
     except ImportError as exc:
         raise ImportError(

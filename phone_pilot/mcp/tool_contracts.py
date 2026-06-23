@@ -1,7 +1,7 @@
 """MCP 工具响应契约 / MCP Tool Response Contracts.
 
-定义 62 个 phone_* 工具成功/失败时返回 dict 的必含键。
-Defines required keys for success/failure responses of 62 phone_* tools.
+定义 64 个 phone_* 工具成功/失败时返回 dict 的必含键。
+Defines required keys for success/failure responses of 64 phone_* tools.
 
 校验对象为工具函数返回的 dict，非 MCP 协议层。
 Validation target is the tool-returned dict, not MCP wire format.
@@ -27,7 +27,9 @@ class ToolContract:
 
     tool_name: str
     category: str  # "A" | "B" | "C"
-    required_keys_when_ok: list[str]  # 成功时 ok=True 必含键 / Required keys when ok=True
+    required_keys_when_ok: list[
+        str
+    ]  # 成功时 ok=True 必含键 / Required keys when ok=True
     required_keys_when_error: list[str]  # 失败时 ok=False 必含键，至少 ["ok","error"]
     optional_keys: list[str] = field(default_factory=list)
 
@@ -87,7 +89,12 @@ _register(
         "B",
         required_keys_when_ok=["ok"],
         required_keys_when_error=["ok", "error"],
-        optional_keys=["device_serial", "platform", "screenshot_path", "screenshot_base64"],
+        optional_keys=[
+            "device_serial",
+            "platform",
+            "screenshot_path",
+            "screenshot_base64",
+        ],
     )
 )  # 成功时必有 screenshot_path 或 screenshot_base64 之一 / Either when ok
 
@@ -267,7 +274,14 @@ _register(
         "B",
         required_keys_when_ok=["ok"],
         required_keys_when_error=["ok", "error"],
-        optional_keys=["device_serial", "platform", "query", "boxes_count", "matches_count", "matches"],
+        optional_keys=[
+            "device_serial",
+            "platform",
+            "query",
+            "boxes_count",
+            "matches_count",
+            "matches",
+        ],
     )
 )
 
@@ -447,7 +461,13 @@ _register(
         "B",
         required_keys_when_ok=["ok"],
         required_keys_when_error=["ok", "error"],
-        optional_keys=["similarity", "text_added", "text_removed", "activity_changed", "diff_screenshot_path"],
+        optional_keys=[
+            "similarity",
+            "text_added",
+            "text_removed",
+            "activity_changed",
+            "diff_screenshot_path",
+        ],
     )
 )
 
@@ -655,9 +675,22 @@ _register(
     ToolContract(
         "phone_get_page_state",
         "C",  # 复杂：elements/scrollable_areas/all_texts/screenshot 等 / Complex: elements, screenshots
-        required_keys_when_ok=["ok", "activity", "screen", "elements", "element_count", "scrollable_areas", "all_texts"],
+        required_keys_when_ok=[
+            "ok",
+            "activity",
+            "screen",
+            "elements",
+            "element_count",
+            "scrollable_areas",
+            "all_texts",
+        ],
         required_keys_when_error=["ok", "error"],
-        optional_keys=["screenshot_base64", "screenshot_annotated_base64", "device_serial", "platform"],
+        optional_keys=[
+            "screenshot_base64",
+            "screenshot_annotated_base64",
+            "device_serial",
+            "platform",
+        ],
     )
 )
 
@@ -668,6 +701,26 @@ _register(
         required_keys_when_ok=["ok", "index", "center", "label", "type"],
         required_keys_when_error=["ok", "error"],
         optional_keys=["device_serial", "platform"],
+    )
+)
+
+_register(
+    ToolContract(
+        "phone_recording_status",
+        "A",
+        required_keys_when_ok=["ok", "status"],
+        required_keys_when_error=["ok", "error"],
+        optional_keys=["local_path", "device_serial"],
+    )
+)
+
+_register(
+    ToolContract(
+        "phone_tap_text",
+        "B",
+        required_keys_when_ok=["ok", "text", "center_x", "center_y", "matched_count"],
+        required_keys_when_error=["ok", "error"],
+        optional_keys=["match_mode", "index", "element", "device_serial", "platform"],
     )
 )
 

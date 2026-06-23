@@ -20,7 +20,14 @@ from typing import Optional
 
 import uuid
 
-from phone_pilot.android.device.utils import get_screen_size, get_current_focus, input_swipe, is_launcher_package, reset_to_home, restart_app
+from phone_pilot.android.device.utils import (
+    get_screen_size,
+    get_current_focus,
+    input_swipe,
+    is_launcher_package,
+    reset_to_home,
+    restart_app,
+)
 from phone_pilot.android.ui.clicker import Clicker
 from phone_pilot.core.storage import (
     append_index_record,
@@ -30,7 +37,14 @@ from phone_pilot.core.storage import (
     recordings_root,
     safe_name,
 )
-from phone_pilot.android.ui.automator import dump_ui_xml, find_nodes, parse_uiautomator_nodes, pick_scrollable_bounds, ui_signature, infer_scroll_directions
+from phone_pilot.android.ui.automator import (
+    dump_ui_xml,
+    find_nodes,
+    parse_uiautomator_nodes,
+    pick_scrollable_bounds,
+    ui_signature,
+    infer_scroll_directions,
+)
 
 
 def _build_component(pkg: Optional[str], act: Optional[str]) -> Optional[str]:
@@ -40,7 +54,9 @@ def _build_component(pkg: Optional[str], act: Optional[str]) -> Optional[str]:
     return f"{pkg}/{act}"
 
 
-def _build_adb_start_cmd(device_serial: Optional[str], component: Optional[str]) -> Optional[str]:
+def _build_adb_start_cmd(
+    device_serial: Optional[str], component: Optional[str]
+) -> Optional[str]:
     """Build adb start command."""
     if not component:
         return None
@@ -78,8 +94,11 @@ async def _find_text_and_tap_with_scroll(
     fallback) and is intended for home-screen icon launching where text labels
     are always available in the UI hierarchy.
     """
+
     # --- helpers ---
-    def _dump_and_find() -> tuple[list[dict], Optional[tuple[int, int, int, int]], Optional[str]]:
+    def _dump_and_find() -> tuple[
+        list[dict], Optional[tuple[int, int, int, int]], Optional[str]
+    ]:
         res = dump_ui_xml(device_serial, compressed=True)
         if not (isinstance(res, dict) and res.get("ok") and res.get("xml")):
             return [], None, None
@@ -87,7 +106,9 @@ async def _find_text_and_tap_with_scroll(
         nodes = parse_uiautomator_nodes(xml)
         sig = ui_signature(nodes)
         sb = pick_scrollable_bounds(nodes)
-        hits = find_nodes(nodes, query=query, field="auto", exact=False, case_sensitive=False, limit=5)
+        hits = find_nodes(
+            nodes, query=query, field="auto", exact=False, case_sensitive=False, limit=5
+        )
         matches = [h.to_dict() for h in hits]
         return matches, sb, sig
 
@@ -95,7 +116,11 @@ async def _find_text_and_tap_with_scroll(
 
     # --- scroll if element not found ---
     if not matches and sb and sig_prev:
-        dirs2 = [d for d in (directions or ["left", "right"]) if d in ("up", "down", "left", "right")]
+        dirs2 = [
+            d
+            for d in (directions or ["left", "right"])
+            if d in ("up", "down", "left", "right")
+        ]
         if not dirs2:
             dirs2 = ["left", "right"]
 
@@ -122,8 +147,14 @@ async def _find_text_and_tap_with_scroll(
             direction = dirs2[dir_idx]
             a1, b1, a2, b2 = _swipe_pts(direction)
             await asyncio.to_thread(
-                input_swipe, device_serial, a1, b1, a2, b2,
-                duration_ms=swipe_duration_ms, wait_s=swipe_wait_s,
+                input_swipe,
+                device_serial,
+                a1,
+                b1,
+                a2,
+                b2,
+                duration_ms=swipe_duration_ms,
+                wait_s=swipe_wait_s,
             )
             matches, sb_new, sig_new = await asyncio.to_thread(_dump_and_find)
             if sb_new:
@@ -241,6 +272,7 @@ async def launch_from_home_impl(
         )
     except Exception as e:
         import traceback
+
         return {
             "ok": False,
             "error": "launch_find_failed",
@@ -271,7 +303,13 @@ async def launch_from_home_impl(
 
     # Avoid LeakCanary launcher page
     if pkg and component and _looks_like_leakcanary_component(component):
-        await asyncio.to_thread(restart_app, device_serial, package=pkg, force_stop=True, wait_s=float(wait_s))
+        await asyncio.to_thread(
+            restart_app,
+            device_serial,
+            package=pkg,
+            force_stop=True,
+            wait_s=float(wait_s),
+        )
         focus = await asyncio.to_thread(get_current_focus, device_serial)
         pkg = (focus or {}).get("package") if isinstance(focus, dict) else None
         act = (focus or {}).get("activity") if isinstance(focus, dict) else None
@@ -282,28 +320,52 @@ async def launch_from_home_impl(
     if (not pkg) or (pkg and is_launcher_package(pkg)):
         try:
             from phone_pilot.android.device.store import get_device_profile_from_store
+
             prof = get_device_profile_from_store(device_serial, out_dir=str(out_root))
-            apps = (prof.get("profile") or {}).get("apps", {}).get("apps", []) if isinstance(prof, dict) else []
+            apps = (
+                (prof.get("profile") or {}).get("apps", {}).get("apps", [])
+                if isinstance(prof, dict)
+                else []
+            )
             q = (query or "").strip().lower()
             pkg2 = None
             for app in apps:
-                name = str(app.get("AppName") or app.get("app_name") or "").strip().lower()
+                name = (
+                    str(app.get("AppName") or app.get("app_name") or "").strip().lower()
+                )
                 if q and name and q in name:
-                    pkg2 = str(app.get("PackageName") or app.get("package_name") or "").strip()
+                    pkg2 = str(
+                        app.get("PackageName") or app.get("package_name") or ""
+                    ).strip()
                     if pkg2:
                         break
             if pkg2:
-                await asyncio.to_thread(restart_app, device_serial, package=pkg2, force_stop=True, wait_s=float(wait_s))
+                await asyncio.to_thread(
+                    restart_app,
+                    device_serial,
+                    package=pkg2,
+                    force_stop=True,
+                    wait_s=float(wait_s),
+                )
                 focus = await asyncio.to_thread(get_current_focus, device_serial)
                 pkg = (focus or {}).get("package") if isinstance(focus, dict) else None
                 act = (focus or {}).get("activity") if isinstance(focus, dict) else None
                 component = _build_component(pkg, act)
-                adb_cmd = _build_adb_start_cmd(device_serial, component) if component else None
+                adb_cmd = (
+                    _build_adb_start_cmd(device_serial, component)
+                    if component
+                    else None
+                )
         except Exception:
             pass
 
     if (not pkg) or (pkg and is_launcher_package(pkg)):
-        return {"ok": False, "error": "launch_failed", "detail": "focus_invalid_or_launcher", "tap": tap_res}
+        return {
+            "ok": False,
+            "error": "launch_failed",
+            "detail": "focus_invalid_or_launcher",
+            "tap": tap_res,
+        }
 
     rec = {
         "profile_id": uuid.uuid4().hex[:12],
@@ -321,11 +383,26 @@ async def launch_from_home_impl(
     saved = False
     if save_profile and component:
         if _looks_like_leakcanary_component(component):
-            return {"ok": True, "focus": focus, "component": component, "adb_cmd": adb_cmd, "saved": False, "record": rec, "note": "检测到 LeakCanary Launcher，已跳过保存 profile"}
+            return {
+                "ok": True,
+                "focus": focus,
+                "component": component,
+                "adb_cmd": adb_cmd,
+                "saved": False,
+                "record": rec,
+                "note": "检测到 LeakCanary Launcher，已跳过保存 profile",
+            }
         idx = _launch_profiles_index_path(out_root)
         legacy = out_root / "launch_profiles" / "index.jsonl"
         migrate_jsonl_to_json(idx, legacy)
         await asyncio.to_thread(append_index_record, idx, rec)
         saved = True
 
-    return {"ok": True, "focus": focus, "component": component, "adb_cmd": adb_cmd, "saved": saved, "record": rec}
+    return {
+        "ok": True,
+        "focus": focus,
+        "component": component,
+        "adb_cmd": adb_cmd,
+        "saved": saved,
+        "record": rec,
+    }

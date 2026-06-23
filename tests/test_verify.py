@@ -68,7 +68,9 @@ def _make_driver(*, texts=None, activity=None, log_content="", elements=None):
 
 class TestElementExists:
     def test_found_by_text(self):
-        driver = _make_driver(elements=[{"text": "关注", "center_x": 100, "center_y": 200}])
+        driver = _make_driver(
+            elements=[{"text": "关注", "center_x": 100, "center_y": 200}]
+        )
         result = run_assertions(driver, [{"type": "element_exists", "text": "关注"}])
         assert result["ok"] is True
         assert result["passed"] == 1
@@ -81,101 +83,113 @@ class TestElementExists:
 
     def test_regex_text(self):
         driver = _make_driver(texts=["123K", "フォロー"])
-        result = run_assertions(driver, [{"type": "element_exists", "text": r"re:^\d+K$"}])
+        result = run_assertions(
+            driver, [{"type": "element_exists", "text": r"re:^\d+K$"}]
+        )
         assert result["ok"] is True
 
     def test_element_not_exists(self):
         driver = _make_driver(elements=[])
-        result = run_assertions(driver, [{"type": "element_not_exists", "text": "消失了"}])
+        result = run_assertions(
+            driver, [{"type": "element_not_exists", "text": "消失了"}]
+        )
         assert result["ok"] is True
 
 
 class TestScreenContainsText:
     def test_found(self):
         driver = _make_driver(texts=["版本 2.0.1", "设置", "关于"])
-        result = run_assertions(driver, [{"type": "screen_contains_text", "text": "版本"}])
+        result = run_assertions(
+            driver, [{"type": "screen_contains_text", "text": "版本"}]
+        )
         assert result["ok"] is True
 
     def test_regex_found(self):
         driver = _make_driver(texts=["版本 2.0.1", "设置"])
-        result = run_assertions(driver, [
-            {"type": "screen_contains_text", "text": r"re:版本\s+\d+\.\d+"}
-        ])
+        result = run_assertions(
+            driver, [{"type": "screen_contains_text", "text": r"re:版本\s+\d+\.\d+"}]
+        )
         assert result["ok"] is True
 
     def test_not_found(self):
         driver = _make_driver(texts=["设置", "关于"])
-        result = run_assertions(driver, [{"type": "screen_contains_text", "text": "不存在"}])
+        result = run_assertions(
+            driver, [{"type": "screen_contains_text", "text": "不存在"}]
+        )
         assert result["ok"] is False
 
 
 class TestActivityEquals:
     def test_match_activity(self):
-        driver = _make_driver(activity={"package": "com.example", "activity": ".MainActivity"})
-        result = run_assertions(driver, [
-            {"type": "activity_equals", "activity": ".MainActivity"}
-        ])
+        driver = _make_driver(
+            activity={"package": "com.example", "activity": ".MainActivity"}
+        )
+        result = run_assertions(
+            driver, [{"type": "activity_equals", "activity": ".MainActivity"}]
+        )
         assert result["ok"] is True
 
     def test_match_package(self):
         driver = _make_driver(activity={"package": "com.example", "activity": ".Main"})
-        result = run_assertions(driver, [
-            {"type": "activity_equals", "activity": "com.example"}
-        ])
+        result = run_assertions(
+            driver, [{"type": "activity_equals", "activity": "com.example"}]
+        )
         assert result["ok"] is True
 
     def test_regex_match(self):
-        driver = _make_driver(activity={"package": "com.example.app", "activity": ".Main"})
-        result = run_assertions(driver, [
-            {"type": "activity_equals", "activity": r"re:com\.example\..*"}
-        ])
+        driver = _make_driver(
+            activity={"package": "com.example.app", "activity": ".Main"}
+        )
+        result = run_assertions(
+            driver, [{"type": "activity_equals", "activity": r"re:com\.example\..*"}]
+        )
         assert result["ok"] is True
 
 
 class TestLogcatAssertions:
     def test_logcat_contains(self):
         driver = _make_driver(log_content="INFO init_success\nWARN something\n")
-        result = run_assertions(driver, [
-            {"type": "logcat_contains", "pattern": "init_success"}
-        ])
+        result = run_assertions(
+            driver, [{"type": "logcat_contains", "pattern": "init_success"}]
+        )
         assert result["ok"] is True
         assert result["results"][0]["detail"]["count"] == 1
 
     def test_logcat_contains_regex(self):
         driver = _make_driver(log_content="INFO init took 150ms\nERROR timeout\n")
-        result = run_assertions(driver, [
-            {"type": "logcat_contains", "pattern": r"re:init\s+took\s+\d+ms"}
-        ])
+        result = run_assertions(
+            driver, [{"type": "logcat_contains", "pattern": r"re:init\s+took\s+\d+ms"}]
+        )
         assert result["ok"] is True
 
     def test_logcat_not_contains(self):
         driver = _make_driver(log_content="INFO all good\n")
-        result = run_assertions(driver, [
-            {"type": "logcat_not_contains", "pattern": "ERROR"}
-        ])
+        result = run_assertions(
+            driver, [{"type": "logcat_not_contains", "pattern": "ERROR"}]
+        )
         assert result["ok"] is True
 
     def test_logcat_not_contains_fail(self):
         driver = _make_driver(log_content="ERROR NullPointer\n")
-        result = run_assertions(driver, [
-            {"type": "logcat_not_contains", "pattern": "ERROR"}
-        ])
+        result = run_assertions(
+            driver, [{"type": "logcat_not_contains", "pattern": "ERROR"}]
+        )
         assert result["ok"] is False
 
 
 class TestElapsedUnder:
     def test_within_threshold(self):
         driver = _make_driver()
-        result = run_assertions(driver, [
-            {"type": "elapsed_under", "elapsed_ms": 500, "max_ms": 1000}
-        ])
+        result = run_assertions(
+            driver, [{"type": "elapsed_under", "elapsed_ms": 500, "max_ms": 1000}]
+        )
         assert result["ok"] is True
 
     def test_exceeds_threshold(self):
         driver = _make_driver()
-        result = run_assertions(driver, [
-            {"type": "elapsed_under", "elapsed_ms": 1500, "max_ms": 1000}
-        ])
+        result = run_assertions(
+            driver, [{"type": "elapsed_under", "elapsed_ms": 1500, "max_ms": 1000}]
+        )
         assert result["ok"] is False
 
 
@@ -185,11 +199,14 @@ class TestBatchAssertions:
             texts=["关注", "设置"],
             log_content="INFO init_ok\n",
         )
-        result = run_assertions(driver, [
-            {"type": "screen_contains_text", "text": "关注"},
-            {"type": "screen_contains_text", "text": "不存在的文字"},
-            {"type": "logcat_contains", "pattern": "init_ok"},
-        ])
+        result = run_assertions(
+            driver,
+            [
+                {"type": "screen_contains_text", "text": "关注"},
+                {"type": "screen_contains_text", "text": "不存在的文字"},
+                {"type": "logcat_contains", "pattern": "init_ok"},
+            ],
+        )
         assert result["passed"] == 2
         assert result["failed"] == 1
         assert result["total"] == 3

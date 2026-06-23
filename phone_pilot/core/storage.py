@@ -84,7 +84,9 @@ def index_jsonl_path(out_root: pathlib.Path) -> pathlib.Path:
 def write_json(path: pathlib.Path, obj: dict) -> None:
     """Write a dict to a JSON file with pretty printing."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def read_json(path: pathlib.Path) -> dict:
@@ -220,7 +222,9 @@ def load_recording_by_key(out_root: pathlib.Path, key: str) -> Optional[dict]:
     k = key.strip().lower()
     hits: list[dict[str, Any]] = []
     for it in latest.values():
-        hay = " ".join([str(it.get("name", "")), " ".join(it.get("tags") or [])]).lower()
+        hay = " ".join(
+            [str(it.get("name", "")), " ".join(it.get("tags") or [])]
+        ).lower()
         if k and k in hay:
             hits.append(it)
     hits.sort(key=lambda x: float(x.get("ts") or 0.0), reverse=True)
@@ -246,7 +250,11 @@ def infer_start_context(item: dict) -> dict:
     if not start_type:
         if item.get("reset_home") is True:
             start_type = "home"
-        elif item.get("restart_app") is True or item.get("app_package") or item.get("start_focused_package"):
+        elif (
+            item.get("restart_app") is True
+            or item.get("app_package")
+            or item.get("start_focused_package")
+        ):
             start_type = "app"
         else:
             start_type = "unknown"

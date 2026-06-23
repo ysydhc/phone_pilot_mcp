@@ -23,12 +23,44 @@ def _run(coro):
 # ---------------------------------------------------------------------------
 
 
+_RESOLVE_TARGETS = [
+    "phone_pilot.mcp._helpers._resolve_device_serial",
+    "phone_pilot.mcp._nav_tools._resolve_device_serial",
+    "phone_pilot.mcp._device_tools._resolve_device_serial",
+    "phone_pilot.mcp._recording_tools._resolve_device_serial",
+    "phone_pilot.mcp._logcat_tools._resolve_device_serial",
+    "phone_pilot.mcp._system_tools._resolve_device_serial",
+    "phone_pilot.mcp._page_state_tools._resolve_device_serial",
+    "phone_pilot.mcp._script_tools._resolve_device_serial",
+    "phone_pilot.mcp._verify_tools._resolve_device_serial",
+]
+
+_DRIVER_TARGETS = [
+    "phone_pilot.mcp._helpers.get_driver",
+    "phone_pilot.mcp._nav_tools.get_driver",
+    "phone_pilot.mcp._device_tools.get_driver",
+    "phone_pilot.mcp._recording_tools.get_driver",
+    "phone_pilot.mcp._logcat_tools.get_driver",
+    "phone_pilot.mcp._input_tools.get_driver",
+    "phone_pilot.mcp._ui_tools.get_driver",
+    "phone_pilot.mcp._app_tools.get_driver",
+    "phone_pilot.mcp._system_tools.get_driver",
+    "phone_pilot.mcp._page_state_tools.get_driver",
+    "phone_pilot.mcp._script_tools.get_driver",
+    "phone_pilot.mcp._verify_tools.get_driver",
+]
+
+
 @pytest.fixture
 def mock_resolve():
     """Mock _resolve_device_serial to return test device."""
-    with patch("phone_pilot.mcp.server._resolve_device_serial") as m:
+    patches = [patch(t) for t in _RESOLVE_TARGETS]
+    mocks = [p.start() for p in patches]
+    for m in mocks:
         m.return_value = ("test_serial", "android", None)
-        yield m
+    yield mocks[0]
+    for p in patches:
+        p.stop()
 
 
 @pytest.fixture
@@ -52,7 +84,11 @@ def mock_driver():
     driver.app.uninstall.return_value = {"ok": True}
 
     driver.pull_file.return_value = {"ok": True}
-    driver.push_file.return_value = {"ok": True, "local_path": "/local/path", "remote_path": "/sdcard/pushed.txt"}
+    driver.push_file.return_value = {
+        "ok": True,
+        "local_path": "/local/path",
+        "remote_path": "/sdcard/pushed.txt",
+    }
     driver.remove_remote_file.return_value = None
 
     driver.start_log_capture.return_value = {"ok": True, "pid": 1234}
@@ -77,8 +113,11 @@ def mock_driver():
 @pytest.fixture
 def mock_get_driver(mock_driver):
     """Patch get_driver to return mock driver."""
-    with patch("phone_pilot.mcp.server.get_driver", return_value=mock_driver) as m:
-        yield m
+    patches = [patch(t, return_value=mock_driver) for t in _DRIVER_TARGETS]
+    mocks = [p.start() for p in patches]
+    yield mocks[0]
+    for p in patches:
+        p.stop()
 
 
 # ---------------------------------------------------------------------------
@@ -98,13 +137,19 @@ class TestDeviceManagement:
         mock_proc.stdout = "List of devices attached\ntest_123\tdevice\n"
         # mock adb runner 和解析器所在的源模块
         # Mock the source modules where adb runner and parser are defined
-        with patch("phone_pilot.android.adb.runner.CommandRunner.run", return_value=mock_proc), \
-             patch("phone_pilot.android.adb.parsers.parse_adb_devices") as mock_parse, \
-             patch("phone_pilot.android.adb.utils.adb_executable", return_value="adb"):
+        with (
+            patch(
+                "phone_pilot.android.adb.runner.CommandRunner.run",
+                return_value=mock_proc,
+            ),
+            patch("phone_pilot.android.adb.parsers.parse_adb_devices") as mock_parse,
+            patch("phone_pilot.android.adb.utils.adb_executable", return_value="adb"),
+        ):
             mock_parse.return_value = [
                 {"serial": "test_123", "status": "device", "description": "Pixel 6"}
             ]
             from phone_pilot.mcp.server import phone_list_devices
+
             result = _run(phone_list_devices())
 
         assert result["ok"] is True
@@ -236,7 +281,9 @@ class TestP0Recording:
         assert result["ok"] is False
         assert result.get("error") == "not_recording"
 
-    def test_start_recording_with_serial_returns_starting(self, mock_resolve, mock_get_driver):
+    def test_start_recording_with_serial_returns_starting(
+        self, mock_resolve, mock_get_driver
+    ):
         """方案 B：传入 device_serial 时立即返回 status=starting."""
         from phone_pilot.mcp.server import phone_start_recording
 
@@ -249,7 +296,7 @@ class TestP0Recording:
         """phone_recording_status 必须传入 device_serial."""
         from phone_pilot.mcp.server import phone_recording_status
 
-        result = phone_recording_status("")
+        result = _run(phone_recording_status(""))
         assert result["ok"] is False
         assert result.get("status") == "not_recording"
         assert "device_serial" in result.get("error", "")
@@ -258,11 +305,13 @@ class TestP0Recording:
         """无录屏时 status 返回 not_recording."""
         from phone_pilot.mcp.server import phone_recording_status
 
-        result = phone_recording_status("unknown_serial")
+        result = _run(phone_recording_status("unknown_serial"))
         assert result["ok"] is True
         assert result.get("status") == "not_recording"
 
-    def test_stop_recording_still_starting_returns_error(self, mock_resolve, mock_get_driver):
+    def test_stop_recording_still_starting_returns_error(
+        self, mock_resolve, mock_get_driver
+    ):
         """方案 B：status 为 starting 时 stop 返回 recording_still_starting."""
         from phone_pilot.mcp import server as mcp_server
         from phone_pilot.mcp.server import phone_stop_recording
@@ -315,7 +364,10 @@ class TestP0Logcat:
         _run(phone_start_logcat())
         result = _run(phone_stop_logcat())
         assert result["ok"] is True
-        assert "test_serial" not in mcp_server._logcat_state or mcp_server._logcat_state.get("test_serial") is None
+        assert (
+            "test_serial" not in mcp_server._logcat_state
+            or mcp_server._logcat_state.get("test_serial") is None
+        )
         ok, missing = validate_response("phone_stop_logcat", result)
         assert ok is True, f"Contract validation failed, missing: {missing}"
 
@@ -362,7 +414,9 @@ class TestP0ScriptCtx:
         mock_elem.bounds.return_value = (100, 200, 300, 400)
         mock_elem.display_text = "Target"
 
-        with patch("phone_pilot.mcp.server.scroll_to_find", return_value=mock_elem):
+        with patch(
+            "phone_pilot.mcp._script_tools.scroll_to_find", return_value=mock_elem
+        ):
             from phone_pilot.mcp.server import phone_scroll_to_find
 
             result = _run(phone_scroll_to_find(text="Target"))
@@ -373,7 +427,7 @@ class TestP0ScriptCtx:
 
     def test_scroll_to_find_not_found(self, mock_resolve, mock_get_driver):
         """scroll_to_find 未找到返回 {"ok": False}."""
-        with patch("phone_pilot.mcp.server.scroll_to_find", return_value=None):
+        with patch("phone_pilot.mcp._script_tools.scroll_to_find", return_value=None):
             from phone_pilot.mcp.server import phone_scroll_to_find
 
             result = _run(phone_scroll_to_find(text="NotFound"))
@@ -405,7 +459,7 @@ class TestP0ScriptCtx:
         mock_guard = MagicMock()
         mock_guard.check_and_dismiss.return_value = {"button": "OK"}
 
-        with patch("phone_pilot.mcp.server.PopupGuard", return_value=mock_guard):
+        with patch("phone_pilot.mcp._script_tools.PopupGuard", return_value=mock_guard):
             from phone_pilot.mcp.server import phone_dismiss_popup
 
             result = _run(phone_dismiss_popup())
@@ -417,7 +471,7 @@ class TestP0ScriptCtx:
         mock_guard = MagicMock()
         mock_guard.check_and_dismiss.return_value = None
 
-        with patch("phone_pilot.mcp.server.PopupGuard", return_value=mock_guard):
+        with patch("phone_pilot.mcp._script_tools.PopupGuard", return_value=mock_guard):
             from phone_pilot.mcp.server import phone_dismiss_popup
 
             result = _run(phone_dismiss_popup())
@@ -440,7 +494,7 @@ class TestP1Tools:
         mock_elem.bounds.return_value = (50, 150, 250, 350)
         mock_elem.display_text = "Submit"
 
-        with patch("phone_pilot.mcp.server.find_text", return_value=mock_elem):
+        with patch("phone_pilot.mcp._script_tools.find_text", return_value=mock_elem):
             from phone_pilot.mcp.server import phone_smart_find
 
             result = _run(phone_smart_find(text="Submit"))
@@ -455,8 +509,10 @@ class TestP1Tools:
         mock_elem.bounds.return_value = (0, 100, 200, 300)
         mock_elem.display_text = "RetryBtn"
 
-        with patch("phone_pilot.mcp.server.find_text", side_effect=[None, mock_elem]):
-            with patch("phone_pilot.mcp.server.PopupGuard") as mock_guard_cls:
+        with patch(
+            "phone_pilot.mcp._script_tools.find_text", side_effect=[None, mock_elem]
+        ):
+            with patch("phone_pilot.mcp._script_tools.PopupGuard") as mock_guard_cls:
                 mock_guard = MagicMock()
                 mock_guard_cls.return_value = mock_guard
                 from phone_pilot.mcp.server import phone_smart_find
@@ -539,7 +595,7 @@ class TestP2Tools:
 
     def test_read_clipboard_ok(self, mock_resolve):
         """read_clipboard 返回 text."""
-        with patch("phone_pilot.mcp.server.get_clipboard_text") as m:
+        with patch("phone_pilot.mcp._system_tools.get_clipboard_text") as m:
             m.return_value = {"ok": True, "text": "clipboard content"}
             from phone_pilot.mcp.server import phone_read_clipboard
 
@@ -549,7 +605,7 @@ class TestP2Tools:
 
     def test_get_notifications_ok(self, mock_resolve):
         """get_notifications 返回 notifications 列表."""
-        with patch("phone_pilot.mcp.server.get_notifications") as m:
+        with patch("phone_pilot.mcp._system_tools.get_notifications") as m:
             m.return_value = {
                 "ok": True,
                 "notifications": [
@@ -565,7 +621,7 @@ class TestP2Tools:
 
     def test_toggle_wifi_ok(self, mock_resolve):
         """toggle_wifi 返回 wifi_on."""
-        with patch("phone_pilot.mcp.server.set_wifi_enabled") as m:
+        with patch("phone_pilot.mcp._system_tools.set_wifi_enabled") as m:
             m.return_value = {"ok": True, "wifi_on": True}
             from phone_pilot.mcp.server import phone_toggle_wifi
 
@@ -575,7 +631,7 @@ class TestP2Tools:
 
     def test_toggle_airplane_ok(self, mock_resolve):
         """toggle_airplane 返回 airplane_on."""
-        with patch("phone_pilot.mcp.server.set_airplane_mode") as m:
+        with patch("phone_pilot.mcp._system_tools.set_airplane_mode") as m:
             m.return_value = {"ok": True, "airplane_on": False}
             from phone_pilot.mcp.server import phone_toggle_airplane
 
@@ -585,7 +641,7 @@ class TestP2Tools:
 
     def test_execute_shell_ok(self, mock_resolve):
         """execute_shell 白名单命令正常返回."""
-        with patch("phone_pilot.mcp.server.execute_shell") as m:
+        with patch("phone_pilot.mcp._system_tools.execute_shell") as m:
             m.return_value = {
                 "ok": True,
                 "stdout": "output",
@@ -594,13 +650,15 @@ class TestP2Tools:
             }
             from phone_pilot.mcp.server import phone_execute_shell
 
-            result = _run(phone_execute_shell(command="getprop ro.build.version.release"))
+            result = _run(
+                phone_execute_shell(command="getprop ro.build.version.release")
+            )
         assert result["ok"] is True
         assert "stdout" in result
 
     def test_execute_shell_blocked(self, mock_resolve):
         """execute_shell 禁止命令返回错误."""
-        with patch("phone_pilot.mcp.server.execute_shell") as m:
+        with patch("phone_pilot.mcp._system_tools.execute_shell") as m:
             m.return_value = {"ok": False, "error": "command prefix 'su' is forbidden"}
             from phone_pilot.mcp.server import phone_execute_shell
 
@@ -610,7 +668,7 @@ class TestP2Tools:
 
     def test_get_device_info_ok(self, mock_resolve, mock_get_driver):
         """get_device_info 返回 screen/activity."""
-        with patch("phone_pilot.mcp.server.get_device_model_and_version") as m:
+        with patch("phone_pilot.mcp._system_tools.get_device_model_and_version") as m:
             m.return_value = ("Pixel 6", "14")
             from phone_pilot.mcp.server import phone_get_device_info
 
@@ -633,7 +691,7 @@ class TestMCPErrorHandling:
 
     def test_resolve_error_returns_ok_false(self):
         """设备未找到时返回 {"ok": False, "error": str}."""
-        with patch("phone_pilot.mcp.server._resolve_device_serial") as m:
+        with patch("phone_pilot.mcp._nav_tools._resolve_device_serial") as m:
             m.return_value = (
                 None,
                 None,
@@ -647,7 +705,9 @@ class TestMCPErrorHandling:
 
     def test_driver_exception_returns_ok_false(self, mock_resolve, mock_get_driver):
         """driver 抛出异常时返回 {"ok": False, "error": str}."""
-        mock_get_driver.return_value.go_home.side_effect = RuntimeError("device disconnected")
+        mock_get_driver.return_value.go_home.side_effect = RuntimeError(
+            "device disconnected"
+        )
         from phone_pilot.mcp.server import phone_go_home
 
         result = _run(phone_go_home())
@@ -725,8 +785,370 @@ class TestContractValidation:
         assert len(missing) > 0
 
     def test_all_contracts_count(self):
-        """契约表总数应为 62。Contract table should have 62 entries."""
+        """契约表总数应为 64。Contract table should have 64 entries."""
         from phone_pilot.mcp.tool_contracts import get_all_contracts
 
         contracts = get_all_contracts()
-        assert len(contracts) == 62, f"Expected 62 contracts, got {len(contracts)}"
+        assert len(contracts) == 64, f"Expected 64 contracts, got {len(contracts)}"
+
+
+# ---------------------------------------------------------------------------
+# Input validation / 输入验证
+# ---------------------------------------------------------------------------
+
+
+class TestInputValidation:
+    """输入验证测试 / Input validation tests."""
+
+    def test_tap_negative_coords(self):
+        """phone_tap 负坐标 → ok=False."""
+        from phone_pilot.mcp.server import phone_tap
+
+        result = _run(phone_tap(device_serial="test", x=-1, y=0))
+        assert result["ok"] is False
+        assert "invalid coordinates" in result["error"]
+
+    def test_long_press_negative_coords(self):
+        """phone_long_press 负坐标 → ok=False."""
+        from phone_pilot.mcp.server import phone_long_press
+
+        result = _run(phone_long_press(device_serial="test", x=0, y=-5))
+        assert result["ok"] is False
+        assert "invalid coordinates" in result["error"]
+
+    def test_swipe_negative_coords(self):
+        """phone_swipe 负坐标 → ok=False."""
+        from phone_pilot.mcp.server import phone_swipe
+
+        result = _run(phone_swipe(device_serial="test", x1=-1, y1=0, x2=100, y2=100))
+        assert result["ok"] is False
+        assert "invalid coordinates" in result["error"]
+
+    def test_deeplink_empty_uri(self):
+        """phone_open_deeplink 空 URI → ok=False."""
+        from phone_pilot.mcp.server import phone_open_deeplink
+
+        result = _run(phone_open_deeplink(uri=""))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+    def test_deeplink_whitespace_uri(self):
+        """phone_open_deeplink 空白 URI → ok=False."""
+        from phone_pilot.mcp.server import phone_open_deeplink
+
+        result = _run(phone_open_deeplink(uri="   "))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+    def test_tap_text_empty(self):
+        """phone_tap_text 空文本 → ok=False."""
+        from phone_pilot.mcp.server import phone_tap_text
+
+        result = _run(phone_tap_text(device_serial="test", text=""))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+    def test_input_text_empty(self):
+        """phone_input_text 空文本 → ok=False."""
+        from phone_pilot.mcp.server import phone_input_text
+
+        result = _run(phone_input_text(device_serial="test", text=""))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+    def test_find_image_threshold_out_of_range(self):
+        """phone_find_image threshold > 1.0 → ok=False."""
+        from phone_pilot.mcp.server import phone_find_image
+
+        result = _run(
+            phone_find_image(
+                device_serial="test", template_path="/tmp/a.png", threshold=2.0
+            )
+        )
+        assert result["ok"] is False
+        assert "threshold" in result["error"]
+
+    def test_compare_screenshot_threshold_out_of_range(self):
+        """phone_compare_screenshot threshold < 0 → ok=False."""
+        from phone_pilot.mcp.server import phone_compare_screenshot
+
+        result = _run(
+            phone_compare_screenshot(
+                device_serial="test", baseline_path="/tmp/a.png", threshold=-0.1
+            )
+        )
+        assert result["ok"] is False
+        assert "threshold" in result["error"]
+
+    def test_install_app_invalid_file_type(self):
+        """phone_install_app 非 APK 文件 → ok=False."""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".txt") as f:
+            from phone_pilot.mcp.server import phone_install_app
+
+            result = _run(phone_install_app(apk_path=f.name))
+            assert result["ok"] is False
+            assert "invalid file type" in result["error"]
+
+    def test_clear_data_empty_package(self):
+        """phone_clear_data 空包名 → ok=False."""
+        from phone_pilot.mcp.server import phone_clear_data
+
+        result = _run(phone_clear_data(package=""))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+    def test_uninstall_app_empty_package(self):
+        """phone_uninstall_app 空包名 → ok=False."""
+        from phone_pilot.mcp.server import phone_uninstall_app
+
+        result = _run(phone_uninstall_app(package=""))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+    def test_launch_app_empty_package(self):
+        """phone_launch_app 空包名 → ok=False."""
+        from phone_pilot.mcp.server import phone_launch_app
+
+        result = _run(phone_launch_app(device_serial="test", package=""))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+    def test_force_stop_empty_package(self):
+        """phone_force_stop 空包名 → ok=False."""
+        from phone_pilot.mcp.server import phone_force_stop
+
+        result = _run(phone_force_stop(device_serial="test", package=""))
+        assert result["ok"] is False
+        assert "required" in result["error"]
+
+
+# ===========================================================================
+# Layered Tool Loading Tests (分层工具加载测试)
+# ===========================================================================
+
+
+class TestLayeredToolLoading:
+    """测试分层工具注册与动态加载 / Test layered tool registration and dynamic loading."""
+
+    def _reset_registry(self):
+        """重置 registry 状态以确保测试隔离。"""
+        from phone_pilot.mcp._tool_registry import (
+            _hidden_tools,
+            _active_categories,
+            _lock,
+            setup_layered_tools,
+        )
+        from phone_pilot.mcp.server import mcp
+
+        # 先把所有隐藏的工具恢复
+        with _lock:
+            for name, tool in list(_hidden_tools.items()):
+                mcp._tool_manager._tools[name] = tool
+            _hidden_tools.clear()
+            _active_categories.clear()
+
+        # 重新执行分层
+        setup_layered_tools(mcp)
+
+    def setup_method(self):
+        self._reset_registry()
+
+    def teardown_method(self):
+        """测试结束后恢复全量工具（避免影响其他测试）。"""
+        from phone_pilot.mcp._tool_registry import _hidden_tools, _lock
+        from phone_pilot.mcp.server import mcp
+
+        with _lock:
+            for name, tool in list(_hidden_tools.items()):
+                mcp._tool_manager._tools[name] = tool
+            _hidden_tools.clear()
+
+    def test_core_tools_registered(self):
+        """核心工具始终在 MCP server 工具表中。"""
+        from phone_pilot.mcp._tool_registry import CORE_TOOLS
+        from phone_pilot.mcp.server import mcp
+
+        registered = set(mcp._tool_manager._tools.keys())
+        for name in CORE_TOOLS:
+            assert name in registered, f"核心工具 {name} 未注册"
+
+    def test_extended_tools_hidden(self):
+        """扩展工具默认不在 MCP server 工具表中。"""
+        from phone_pilot.mcp._tool_registry import EXTENDED_CATEGORIES
+        from phone_pilot.mcp.server import mcp
+
+        registered = set(mcp._tool_manager._tools.keys())
+        for cat, names in EXTENDED_CATEGORIES.items():
+            for name in names:
+                assert name not in registered, f"扩展工具 {name} 不应默认注册"
+
+    def test_default_tool_count(self):
+        """默认工具数量应等于核心工具数。"""
+        from phone_pilot.mcp._tool_registry import CORE_TOOLS
+        from phone_pilot.mcp.server import mcp
+
+        registered = set(mcp._tool_manager._tools.keys())
+        assert len(registered) == len(CORE_TOOLS)
+
+    def test_activate_category(self):
+        """activate_category 应将隐藏工具恢复到 MCP server。"""
+        from phone_pilot.mcp._tool_registry import (
+            activate_category,
+            EXTENDED_CATEGORIES,
+        )
+        from phone_pilot.mcp.server import mcp
+
+        before = len(mcp._tool_manager._tools)
+        activated = activate_category(mcp, "recording")
+        after = len(mcp._tool_manager._tools)
+
+        assert len(activated) == len(EXTENDED_CATEGORIES["recording"])
+        assert after == before + len(activated)
+        for name in activated:
+            assert name in mcp._tool_manager._tools
+
+    def test_activate_category_idempotent(self):
+        """重复激活同一类别不会出错。"""
+        from phone_pilot.mcp._tool_registry import activate_category
+        from phone_pilot.mcp.server import mcp
+
+        first = activate_category(mcp, "logcat")
+        count_after_first = len(mcp._tool_manager._tools)
+        second = activate_category(mcp, "logcat")
+        count_after_second = len(mcp._tool_manager._tools)
+
+        assert len(first) == 5
+        assert count_after_first == count_after_second
+        assert len(second) == 5  # 已存在也返回名称列表
+
+    def test_activate_unknown_category(self):
+        """未知类别返回空列表。"""
+        from phone_pilot.mcp._tool_registry import activate_category
+        from phone_pilot.mcp.server import mcp
+
+        result = activate_category(mcp, "nonexistent")
+        assert result == []
+
+    def test_activate_by_keyword(self):
+        """按关键词搜索并激活工具。"""
+        from phone_pilot.mcp._tool_registry import activate_by_keyword
+        from phone_pilot.mcp.server import mcp
+
+        activated = activate_by_keyword(mcp, "logcat")
+        # 至少包含 3 个 logcat 工具（可能还匹配到描述中含 logcat 的其他工具）
+        assert len(activated) >= 3
+        logcat_tools = [n for n in activated if "logcat" in n.lower()]
+        assert len(logcat_tools) >= 3
+
+    def test_category_summary(self):
+        """get_category_summary 返回正确的类别概要。"""
+        from phone_pilot.mcp._tool_registry import (
+            get_category_summary,
+            EXTENDED_CATEGORIES,
+        )
+
+        summary = get_category_summary()
+        assert len(summary) == len(EXTENDED_CATEGORIES)
+        for item in summary:
+            assert "category" in item
+            assert "tool_count" in item
+            assert "loaded" in item
+            assert item["tool_count"] > 0
+
+    def test_env_var_disables_layering(self):
+        """PHONE_PILOT_LOAD_ALL_TOOLS=1 时不隐藏工具。"""
+        import os
+        from phone_pilot.mcp._tool_registry import (
+            _hidden_tools,
+            _active_categories,
+            _lock,
+            setup_layered_tools,
+        )
+        from phone_pilot.mcp.server import mcp
+
+        # 先恢复所有工具
+        with _lock:
+            for name, tool in list(_hidden_tools.items()):
+                mcp._tool_manager._tools[name] = tool
+            _hidden_tools.clear()
+            _active_categories.clear()
+
+        total_before = len(mcp._tool_manager._tools)
+
+        # 设置环境变量后 setup 不应隐藏工具
+        old = os.environ.get("PHONE_PILOT_LOAD_ALL_TOOLS")
+        try:
+            os.environ["PHONE_PILOT_LOAD_ALL_TOOLS"] = "1"
+            setup_layered_tools(mcp)
+            assert len(mcp._tool_manager._tools) == total_before
+            assert len(_hidden_tools) == 0
+        finally:
+            if old is None:
+                os.environ.pop("PHONE_PILOT_LOAD_ALL_TOOLS", None)
+            else:
+                os.environ["PHONE_PILOT_LOAD_ALL_TOOLS"] = old
+
+    def test_discover_tools_no_args(self):
+        """phone_discover_tools() 无参数返回类别概览。"""
+        from phone_pilot.mcp.server import phone_discover_tools
+        from phone_pilot.mcp._tool_registry import EXTENDED_CATEGORIES
+
+        result = _run(phone_discover_tools())
+        assert result["ok"] is True
+        assert "categories" in result
+        assert len(result["categories"]) == len(EXTENDED_CATEGORIES)
+        assert result["total_hidden"] > 0
+
+    def test_discover_tools_activate_category(self):
+        """phone_discover_tools(category=X) 激活工具。"""
+        from phone_pilot.mcp.server import phone_discover_tools
+
+        result = _run(phone_discover_tools(category="input"))
+        assert result["ok"] is True
+        assert result["activated_count"] == 2
+        assert "phone_long_press" in result["activated_tools"]
+        assert "phone_keyevent" in result["activated_tools"]
+
+    def test_discover_tools_unknown_category(self):
+        """phone_discover_tools(category=unknown) 返回 ok=False。"""
+        from phone_pilot.mcp.server import phone_discover_tools
+
+        result = _run(phone_discover_tools(category="unknown"))
+        assert result["ok"] is False
+        assert "Unknown category" in result["error"]
+
+    def test_discover_tools_keyword(self):
+        """phone_discover_tools(keyword=X) 按关键词激活。"""
+        from phone_pilot.mcp.server import phone_discover_tools
+
+        result = _run(phone_discover_tools(keyword="memory"))
+        assert result["ok"] is True
+        assert result["activated_count"] >= 2
+
+    def test_all_tools_accounted_for(self):
+        """所有工具要么在核心层、要么在扩展层，不遗漏。"""
+        from phone_pilot.mcp._tool_registry import (
+            CORE_TOOLS,
+            EXTENDED_CATEGORIES,
+            _hidden_tools,
+            _lock,
+        )
+        from phone_pilot.mcp.server import mcp
+
+        all_extended = set()
+        for names in EXTENDED_CATEGORIES.values():
+            all_extended.update(names)
+
+        registered = set(mcp._tool_manager._tools.keys())
+        with _lock:
+            hidden = set(_hidden_tools.keys())
+
+        all_known = CORE_TOOLS | all_extended
+        actual = registered | hidden
+
+        # 实际工具集应是已知工具集的子集（允许实际少于定义，不允许未知工具遗漏）
+        for name in actual:
+            if name.startswith("phone_"):
+                assert name in all_known, f"工具 {name} 未在核心层或扩展层中定义"

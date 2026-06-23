@@ -26,6 +26,7 @@ Usage:
         check_perfetto_support, start_heap_profile, stop_and_analyze,
     )
 """
+
 from __future__ import annotations
 
 import os
@@ -88,6 +89,7 @@ def check_perfetto_support(device_serial: Optional[str] = None) -> dict:
     # Check Python perfetto library
     try:
         import perfetto  # noqa: F401
+
         result["has_python_lib"] = True
     except ImportError:
         result["requirements"].append("pip install perfetto (用于 trace 分析)")
@@ -156,9 +158,15 @@ def start_heap_profile(
     # Check support
     support = check_perfetto_support(device_serial)
     if not support.get("supported"):
-        return {"ok": False, "error": "Perfetto 不可用", "requirements": support.get("requirements", [])}
+        return {
+            "ok": False,
+            "error": "Perfetto 不可用",
+            "requirements": support.get("requirements", []),
+        }
 
-    duration_ms = int(duration_s * 1000) if duration_s > 0 else 600000  # default 10min if 0
+    duration_ms = (
+        int(duration_s * 1000) if duration_s > 0 else 600000
+    )  # default 10min if 0
 
     # Generate config
     config_text = _generate_perfetto_config(
@@ -185,16 +193,21 @@ def start_heap_profile(
 
         # Start perfetto (background)
         start_cmd = adb_prefix(device_serial) + [
-            "shell", "perfetto",
-            "-c", remote_cfg,
-            "-o", remote_trace,
+            "shell",
+            "perfetto",
+            "-c",
+            remote_cfg,
+            "-o",
+            remote_trace,
             "--background",
         ]
         proc = CommandRunner.run(start_cmd, check=False, timeout_s=10, log_output=False)
         if proc.returncode != 0:
             return {"ok": False, "error": f"perfetto start failed: {proc.stderr}"}
 
-        _log(f"[perfetto] heapprofd 采集已启动: {package_name} (间隔 {sampling_interval_bytes}B)")
+        _log(
+            f"[perfetto] heapprofd 采集已启动: {package_name} (间隔 {sampling_interval_bytes}B)"
+        )
         return {
             "ok": True,
             "trace_file": remote_trace,
@@ -265,7 +278,9 @@ def stop_and_analyze(
     if not local_path.is_file() or local_path.stat().st_size == 0:
         return {"ok": False, "error": "trace file is empty", "trace_file": local_trace}
 
-    _log(f"[perfetto] trace 已拉取: {local_trace} ({local_path.stat().st_size // 1024}KB)")
+    _log(
+        f"[perfetto] trace 已拉取: {local_trace} ({local_path.stat().st_size // 1024}KB)"
+    )
 
     # Analyze with trace_processor (if available)
     analysis = _analyze_with_trace_processor(local_trace, package_name)
@@ -287,7 +302,11 @@ def _analyze_with_trace_processor(trace_file: str, package_name: str) -> dict:
     """
     result: dict[str, Any] = {
         "ok": True,
-        "allocations": {"total_allocated_bytes": 0, "total_freed_bytes": 0, "net_bytes": 0},
+        "allocations": {
+            "total_allocated_bytes": 0,
+            "total_freed_bytes": 0,
+            "net_bytes": 0,
+        },
         "top_allocators": [],
         "timeline": [],
     }
@@ -316,7 +335,9 @@ def _analyze_with_trace_processor(trace_file: str, package_name: str) -> dict:
                 pdf = df.as_pandas_dataframe()
                 if not pdf.empty:
                     result["allocations"] = {
-                        "total_allocated_bytes": int(pdf.iloc[0].get("total_alloc", 0) or 0),
+                        "total_allocated_bytes": int(
+                            pdf.iloc[0].get("total_alloc", 0) or 0
+                        ),
                         "total_freed_bytes": int(pdf.iloc[0].get("total_free", 0) or 0),
                         "net_bytes": int(pdf.iloc[0].get("net", 0) or 0),
                     }
@@ -344,12 +365,18 @@ def _analyze_with_trace_processor(trace_file: str, package_name: str) -> dict:
                 for _, row in pdf.iterrows():
                     callsite = str(row.get("callsite", ""))
                     library = str(row.get("library", ""))
-                    label = f"{library}!{callsite}" if library and library != "None" else callsite
-                    result["top_allocators"].append({
-                        "callsite": label,
-                        "bytes": int(row.get("bytes", 0) or 0),
-                        "count": int(row.get("count", 0) or 0),
-                    })
+                    label = (
+                        f"{library}!{callsite}"
+                        if library and library != "None"
+                        else callsite
+                    )
+                    result["top_allocators"].append(
+                        {
+                            "callsite": label,
+                            "bytes": int(row.get("bytes", 0) or 0),
+                            "count": int(row.get("count", 0) or 0),
+                        }
+                    )
         except Exception:
             pass
 
@@ -369,15 +396,19 @@ def _analyze_with_trace_processor(trace_file: str, package_name: str) -> dict:
                     ts_start = pdf.iloc[0].get("ts", 0)
                     for _, row in pdf.iterrows():
                         ts_ns = row.get("ts", 0)
-                        result["timeline"].append({
-                            "ts_ms": round((ts_ns - ts_start) / 1_000_000, 1),
-                            "rss_mb": round(row.get("bytes", 0) / (1024 * 1024), 2),
-                        })
+                        result["timeline"].append(
+                            {
+                                "ts_ms": round((ts_ns - ts_start) / 1_000_000, 1),
+                                "rss_mb": round(row.get("bytes", 0) / (1024 * 1024), 2),
+                            }
+                        )
         except Exception:
             pass
 
         tp.close()
-        _log(f"[perfetto] 分析完成: {len(result['top_allocators'])} 个热点, {len(result['timeline'])} 个时间点")
+        _log(
+            f"[perfetto] 分析完成: {len(result['top_allocators'])} 个热点, {len(result['timeline'])} 个时间点"
+        )
 
     except Exception as e:
         result["error"] = f"trace_processor 分析异常: {e}"

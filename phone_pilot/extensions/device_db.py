@@ -10,7 +10,13 @@ import pathlib
 import sqlite3
 from typing import Any, Optional
 
-from phone_pilot.core.storage import iso_now, migrate_jsonl_to_json, now_ts, read_json, recordings_root
+from phone_pilot.core.storage import (
+    iso_now,
+    migrate_jsonl_to_json,
+    now_ts,
+    read_json,
+    recordings_root,
+)
 
 
 def db_path(out_dir: str) -> pathlib.Path:
@@ -110,7 +116,9 @@ def _init_db(conn: sqlite3.Connection) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_apps_device ON apps(device_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_apps_pkg ON apps(package_name)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_launch_profiles_device ON launch_profiles(device_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_launch_profiles_device ON launch_profiles(device_id)"
+    )
 
 
 def ensure_db(out_dir: str) -> sqlite3.Connection:
@@ -125,9 +133,17 @@ def ensure_db(out_dir: str) -> sqlite3.Connection:
 
 def _device_row_from_profile(profile: dict[str, Any]) -> dict[str, Any]:
     os_info = (profile.get("os") or {}) if isinstance(profile.get("os"), dict) else {}
-    screen = (profile.get("screen") or {}) if isinstance(profile.get("screen"), dict) else {}
-    touch = (profile.get("touch") or {}) if isinstance(profile.get("touch"), dict) else {}
-    launcher = (profile.get("launcher") or {}) if isinstance(profile.get("launcher"), dict) else {}
+    screen = (
+        (profile.get("screen") or {}) if isinstance(profile.get("screen"), dict) else {}
+    )
+    touch = (
+        (profile.get("touch") or {}) if isinstance(profile.get("touch"), dict) else {}
+    )
+    launcher = (
+        (profile.get("launcher") or {})
+        if isinstance(profile.get("launcher"), dict)
+        else {}
+    )
     return {
         "device_id": profile.get("device_id") or profile.get("device_serial"),
         "device_serial": profile.get("device_serial"),
@@ -240,7 +256,9 @@ def save_device_snapshot(
                     ],
                 )
 
-            conn.execute("DELETE FROM launch_profiles WHERE device_id = ?", (device_id,))
+            conn.execute(
+                "DELETE FROM launch_profiles WHERE device_id = ?", (device_id,)
+            )
             if launch_profiles:
                 conn.executemany(
                     """
@@ -257,7 +275,9 @@ def save_device_snapshot(
                             lp.get("component"),
                             lp.get("adb_cmd"),
                             lp.get("source"),
-                            lp.get("updated_at") or profile.get("updated_at") or iso_now(),
+                            lp.get("updated_at")
+                            or profile.get("updated_at")
+                            or iso_now(),
                             lp.get("ts") or profile.get("ts") or now_ts(),
                         )
                         for lp in launch_profiles
@@ -297,7 +317,9 @@ def load_device_snapshot(
     conn = ensure_db(out_dir)
     try:
         if device_id:
-            row = conn.execute("SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM devices WHERE device_id = ?", (device_id,)
+            ).fetchone()
         else:
             row = conn.execute(
                 "SELECT * FROM devices WHERE device_serial = ? ORDER BY ts DESC LIMIT 1",
@@ -375,7 +397,9 @@ def _migrate_from_json(out_dir: str, conn: sqlite3.Connection) -> None:
             continue
         did = prof.get("device_id") or prof.get("device_serial")
         apps = []
-        apps_obj = (prof.get("apps") or {}) if isinstance(prof.get("apps"), dict) else {}
+        apps_obj = (
+            (prof.get("apps") or {}) if isinstance(prof.get("apps"), dict) else {}
+        )
         apps = list(apps_obj.get("apps") or [])
         lps = launch_profiles_by_device.get(did, [])
         device_row = _device_row_from_profile(prof)
@@ -400,7 +424,9 @@ def _migrate_from_json(out_dir: str, conn: sqlite3.Connection) -> None:
                 """,
                 device_row,
             )
-            conn.execute("DELETE FROM apps WHERE device_id = ?", (device_row["device_id"],))
+            conn.execute(
+                "DELETE FROM apps WHERE device_id = ?", (device_row["device_id"],)
+            )
             if apps:
                 conn.executemany(
                     """
@@ -425,7 +451,10 @@ def _migrate_from_json(out_dir: str, conn: sqlite3.Connection) -> None:
                         for app in apps
                     ],
                 )
-            conn.execute("DELETE FROM launch_profiles WHERE device_id = ?", (device_row["device_id"],))
+            conn.execute(
+                "DELETE FROM launch_profiles WHERE device_id = ?",
+                (device_row["device_id"],),
+            )
             if lps:
                 conn.executemany(
                     """
@@ -448,4 +477,3 @@ def _migrate_from_json(out_dir: str, conn: sqlite3.Connection) -> None:
                         for lp in lps
                     ],
                 )
-

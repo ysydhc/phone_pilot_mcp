@@ -9,6 +9,7 @@ Separate from core/verify baselines, only for B-class acceptance.
 - phone_pilot/tests/ 下 B 类相关 pytest
 - 文档中「B 类流程说明」引用该模块
 """
+
 from __future__ import annotations
 
 # ========== Android 基准 / Android Baseline ==========

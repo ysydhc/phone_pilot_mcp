@@ -28,7 +28,13 @@ def _normalize_png_stream(data: bytes) -> bytes:
 def _try_screencap_cmd(cmd: list[str], *, timeout_s: float = 6.0) -> bytes:
     """Run a screencap command and validate the PNG signature."""
     png_sig = b"\x89PNG\r\n\x1a\n"
-    proc = subprocess.run(cmd, check=False, capture_output=True, timeout=timeout_s, stdin=subprocess.DEVNULL)
+    proc = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        timeout=timeout_s,
+        stdin=subprocess.DEVNULL,
+    )
     if proc.returncode != 0:
         err = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"screencap failed (rc={proc.returncode}): {err}")
@@ -45,8 +51,19 @@ def _fallback_screencap_file(device_serial: Optional[str]) -> bytes:
     local_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     local_tmp.close()
     try:
-        cmd_capture = hdc_prefix(device_serial) + ["shell", "screencap", "-p", remote_path]
-        subprocess.run(cmd_capture, check=False, capture_output=True, timeout=8.0, stdin=subprocess.DEVNULL)
+        cmd_capture = hdc_prefix(device_serial) + [
+            "shell",
+            "screencap",
+            "-p",
+            remote_path,
+        ]
+        subprocess.run(
+            cmd_capture,
+            check=False,
+            capture_output=True,
+            timeout=8.0,
+            stdin=subprocess.DEVNULL,
+        )
         pull_res = pull_file(device_serial, remote_path, local_tmp.name)
         if not pull_res.get("ok"):
             raise RuntimeError(f"screencap pull failed: {pull_res.get('stderr')}")
@@ -57,7 +74,13 @@ def _fallback_screencap_file(device_serial: Optional[str]) -> bytes:
         raise RuntimeError(f"screencap failed: invalid_png_stream(bytes={len(data)})")
     finally:
         try:
-            subprocess.run(hdc_prefix(device_serial) + ["shell", "rm", "-f", remote_path], check=False, capture_output=True, timeout=6.0, stdin=subprocess.DEVNULL)
+            subprocess.run(
+                hdc_prefix(device_serial) + ["shell", "rm", "-f", remote_path],
+                check=False,
+                capture_output=True,
+                timeout=6.0,
+                stdin=subprocess.DEVNULL,
+            )
         except Exception:
             pass
         try:

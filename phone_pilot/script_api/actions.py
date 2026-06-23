@@ -3,6 +3,7 @@
 脚本中用于操控设备的各类操作函数。
 Device manipulation functions used in scripts.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -27,6 +28,7 @@ from ._helpers import (
 # ---------------------------------------------------------------------------
 # App 控制
 # ---------------------------------------------------------------------------
+
 
 def clear_background(ctx: ScriptContext) -> dict:
     """清空后台应用 / Clear background apps.
@@ -110,6 +112,7 @@ def launch_from_home(ctx: ScriptContext, query: str, **kwargs) -> dict:
 # 截图
 # ---------------------------------------------------------------------------
 
+
 def screenshot(ctx: ScriptContext, name: str) -> dict:
     """手动截图并保存 / Take screenshot and save.
 
@@ -128,7 +131,10 @@ def screenshot(ctx: ScriptContext, name: str) -> dict:
     if session and session.run_dir:
         screenshots_dir = session.run_dir / "screenshots"
     else:
-        screenshots_dir = pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve() / "screenshots"
+        screenshots_dir = (
+            pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve()
+            / "screenshots"
+        )
     screenshots_dir.mkdir(parents=True, exist_ok=True)
     path = screenshots_dir / f"{name}.png"
     png_data = ctx.driver.screen.screenshot()
@@ -168,7 +174,10 @@ def screenshot_annotated(ctx: ScriptContext, name: str) -> dict:
     if session and session.run_dir:
         screenshots_dir = session.run_dir / "screenshots"
     else:
-        screenshots_dir = pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve() / "screenshots"
+        screenshots_dir = (
+            pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve()
+            / "screenshots"
+        )
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Screenshot
@@ -196,6 +205,7 @@ def screenshot_annotated(ctx: ScriptContext, name: str) -> dict:
 # ---------------------------------------------------------------------------
 # 滑动
 # ---------------------------------------------------------------------------
+
 
 def swipe(
     ctx: ScriptContext,
@@ -361,6 +371,7 @@ def swipe_right(
 # 输入
 # ---------------------------------------------------------------------------
 
+
 def type_text(ctx: ScriptContext, text: str, *, enter: bool = False) -> dict:
     """输入文本 / Type text.
 
@@ -410,11 +421,393 @@ def tap_xy(ctx: ScriptContext, x: int, y: int) -> dict:
     return _input_tap(ctx, int(x), int(y))
 
 
+def tap_when_ready(
+    ctx: ScriptContext,
+    *,
+    text: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    timeout_s: float = 10.0,
+    interval_s: float = 0.5,
+    require_clickable: bool = True,
+    require_enabled: bool = True,
+    wait_after_s: float = 0.0,
+) -> dict:
+    """轮询等待元素可点击后再点击（等待+点击一体）。
+    Poll until an element is ready (clickable/enabled), then tap it.
+
+    解决"固定 sleep 不够/太长"与"元素已出现但尚不可点导致误触"的时序问题：
+    等到的元素与点击坐标来自同一次查询，避免坐标漂移。超时则**不点击**，
+    返回 tapped=False（避免点到尚未就绪的位置而误触）。
+    Solves flaky fixed-sleep timing and mis-taps on not-yet-ready elements.
+    The matched element and tap coordinates come from the same query (no drift).
+    On timeout it does NOT tap, returning tapped=False.
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        text: 按文本定位（与 resource_id 二选一）/ Locate by text (or resource_id)
+        resource_id: 按资源 ID 定位（与 text 二选一）/ Locate by resource id
+        timeout_s: 最长等待秒数 / Max wait seconds
+        interval_s: 轮询间隔秒数 / Poll interval seconds
+        require_clickable: 必须可点击才点（默认 True）/ Require clickable (default True)
+        require_enabled: 必须 enabled 才点（默认 True）/ Require enabled (default True)
+        wait_after_s: 点击后等待秒数 / Wait seconds after tapping
+
+    Returns / 返回值:
+        dict: {
+            "ok": bool, "tapped": bool, "waited_s": float,
+            "element": {...}|None, "center": [x, y]|None,
+            "present_but_not_ready": bool,  # 元素出现过但状态未就绪 / appeared but never ready
+            "message": str,                 # 仅 tapped=False 时
+        }
+    """
+    if not text and not resource_id:
+        return {"ok": False, "tapped": False, "error": "text_or_resource_id_required"}
+
+    # Build a selector for the cross-platform UIDriver.find_elements.
+    selector: dict = {}
+    if text:
+        selector["text_contains"] = text
+    if resource_id:
+        selector["resource_id"] = resource_id
+    if require_clickable:
+        selector["clickable"] = True
+    if require_enabled:
+        selector["enabled"] = True
+
+    start = time.monotonic()
+    deadline = start + max(0.0, float(timeout_s))
+    seen_not_ready = False
+
+    while True:
+        try:
+            matches = ctx.driver.ui.find_elements(selector)
+        except Exception:
+            matches = []
+
+        if matches:
+            elem = matches[0]
+            cx = elem.get("center_x")
+            cy = elem.get("center_y")
+            if cx is not None and cy is not None:
+                _input_tap(ctx, int(cx), int(cy))
+                if wait_after_s > 0:
+                    time.sleep(wait_after_s)
+                return {
+                    "ok": True,
+                    "tapped": True,
+                    "waited_s": round(time.monotonic() - start, 3),
+                    "element": elem,
+                    "center": [int(cx), int(cy)],
+                    "present_but_not_ready": False,
+                }
+
+        # Probe whether the element exists at all (to distinguish
+        # "never appeared" from "appeared but not ready").
+        if (require_clickable or require_enabled) and not seen_not_ready:
+            probe: dict = {}
+            if text:
+                probe["text_contains"] = text
+            if resource_id:
+                probe["resource_id"] = resource_id
+            try:
+                if ctx.driver.ui.find_elements(probe):
+                    seen_not_ready = True
+            except Exception:
+                pass
+
+        if time.monotonic() >= deadline:
+            return {
+                "ok": True,
+                "tapped": False,
+                "waited_s": round(time.monotonic() - start, 3),
+                "element": None,
+                "center": None,
+                "present_but_not_ready": seen_not_ready,
+                "message": (
+                    "timeout_element_present_but_not_ready"
+                    if seen_not_ready
+                    else "timeout_element_not_found"
+                ),
+            }
+
+        time.sleep(max(0.1, float(interval_s)))
+
+
+def _current_focus(ctx: ScriptContext) -> dict:
+    """Best-effort {package, activity} of the foreground app (cross-platform)."""
+    try:
+        info = ctx.driver.ui.get_current_activity()
+        return {
+            "package": info.get("package") or "",
+            "activity": info.get("activity") or "",
+        }
+    except Exception:
+        return {"package": "", "activity": ""}
+
+
+def safe_tap(
+    ctx: ScriptContext,
+    x: int,
+    y: int,
+    *,
+    expect_activity: Optional[str] = None,
+    expect_package: Optional[str] = None,
+    on_mistap: str = "go_back",
+    max_recover: int = 1,
+    settle_s: float = 0.6,
+) -> dict:
+    """带误触保护的点击：点击后校验前台状态，跳出目标或跳错页时自动回退。
+    Tap with mis-tap protection: verify foreground state after tapping and
+    recover (go_back) if it left the app or landed on an unexpected page.
+
+    解决"误触广告素材跳出 app"问题。默认行为：
+      - 若点击后 package 与点击前不同（跳出了当前 app）→ 判定误触
+      - 若指定 expect_activity / expect_package 且点击后不匹配 → 判定误触
+    误触时执行 on_mistap（默认 go_back），并复验是否回到点击前的 package。
+    Solves the "mis-tap jumps out to another app" problem.
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        x, y: 点击坐标 / Tap coordinates
+        expect_activity: 期望点击后所在 Activity（子串匹配）/ Expected activity after tap
+        expect_package: 期望点击后所在 package；None 则默认要求停留在点击前的 app
+                        Expected package after tap; None means "stay in the pre-tap app"
+        on_mistap: 误触时的动作 "go_back" | "none" / Recovery action on mis-tap
+        max_recover: 最大回退尝试次数 / Max recovery attempts
+        settle_s: 点击后等待界面稳定的秒数 / Settle time after tap before checking
+
+    Returns / 返回值:
+        dict: {
+            "ok": bool, "tapped": True,
+            "mistap_detected": bool,
+            "recovered": bool,            # 误触后是否成功回到点击前 app
+            "before": {package, activity},
+            "after": {package, activity}, # 最终状态
+            "recover_action": str|None,
+        }
+    """
+    before = _current_focus(ctx)
+    _input_tap(ctx, int(x), int(y))
+    if settle_s > 0:
+        time.sleep(settle_s)
+    after = _current_focus(ctx)
+
+    def _is_mistap(state: dict) -> bool:
+        # Left the app: package changed from before (and we know the before pkg).
+        if (
+            before["package"]
+            and state["package"]
+            and state["package"] != before["package"]
+        ):
+            # If caller explicitly allows this package, it's not a mis-tap.
+            if expect_package and expect_package in state["package"]:
+                return False
+            return True
+        # Explicit expectations not met.
+        if expect_package and expect_package not in (state["package"] or ""):
+            return True
+        if (
+            expect_activity
+            and expect_activity.lower().lstrip(".")
+            not in (state["activity"] or "").lower()
+        ):
+            return True
+        return False
+
+    mistap = _is_mistap(after)
+    if not mistap:
+        return {
+            "ok": True,
+            "tapped": True,
+            "mistap_detected": False,
+            "recovered": False,
+            "before": before,
+            "after": after,
+            "recover_action": None,
+        }
+
+    _runner_log(
+        f"  [safe_tap] 检测到误触: {before['package']} → {after['package']}"
+        f" ({after['activity']})"
+    )
+
+    recovered = False
+    if on_mistap == "go_back":
+        for _ in range(max(1, int(max_recover))):
+            try:
+                ctx.driver.go_back()
+            except Exception:
+                pass
+            if settle_s > 0:
+                time.sleep(settle_s)
+            after = _current_focus(ctx)
+            # Recovered if we are back in the pre-tap app.
+            if not before["package"] or after["package"] == before["package"]:
+                recovered = True
+                break
+        _runner_log(
+            f"  [safe_tap] 回退{'成功' if recovered else '失败'}: 当前 {after['package']}"
+        )
+
+    return {
+        "ok": True,
+        "tapped": True,
+        "mistap_detected": True,
+        "recovered": recovered,
+        "before": before,
+        "after": after,
+        "recover_action": on_mistap if on_mistap != "none" else None,
+    }
+
+
+def _element_present(
+    ctx: ScriptContext,
+    *,
+    text: Optional[str] = None,
+    resource_id: Optional[str] = None,
+) -> bool:
+    """Whether an element matching text/resource_id currently exists (any state)."""
+    selector: dict = {}
+    if text:
+        selector["text_contains"] = text
+    if resource_id:
+        selector["resource_id"] = resource_id
+    if not selector:
+        return False
+    try:
+        return bool(ctx.driver.ui.find_elements(selector))
+    except Exception:
+        return False
+
+
+def safe_close(
+    ctx: ScriptContext,
+    *,
+    resource_id: Optional[str] = None,
+    text: Optional[str] = None,
+    fallback_coord: Optional[tuple[int, int]] = None,
+    max_attempts: int = 3,
+    timeout_s: float = 8.0,
+    settle_s: float = 0.8,
+) -> dict:
+    """关闭全屏元素的完整流程：等待关闭按钮 → 点击 → 验证消失 → 失败回退重试。
+    Full close flow: wait for the close button, tap it, verify it disappeared,
+    and retry (with go_back) on failure.
+
+    "关闭成功"的判定 / Success criterion:
+        点击后关闭按钮（resource_id/text）不再存在即视为已关闭。
+        The close button no longer exists after tapping.
+
+    定位优先级 / Locator precedence:
+        1. resource_id / text → tap_when_ready（等可点再点）
+        2. 均找不到时回退到 fallback_coord → safe_tap（带误触保护）
+        Falls back to a fixed coordinate (with mis-tap protection) when the
+        button cannot be located by id/text.
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        resource_id / text: 关闭按钮定位 / Close button locator
+        fallback_coord: (x, y) 兜底坐标 / Fallback coordinate
+        max_attempts: 最大尝试次数 / Max attempts
+        timeout_s: 每次等待按钮可点的超时 / Per-attempt wait timeout
+        settle_s: 点击后等待界面稳定的秒数 / Settle time after tapping
+
+    Returns / 返回值:
+        dict: {
+            "ok": bool, "closed": bool, "attempts": int,
+            "method": "element"|"fallback"|None,  # 最后一次点击的方式
+            "message": str,
+        }
+    """
+    if not resource_id and not text and not fallback_coord:
+        return {
+            "ok": False,
+            "closed": False,
+            "attempts": 0,
+            "error": "resource_id_or_text_or_fallback_required",
+        }
+
+    last_method: Optional[str] = None
+
+    for attempt in range(1, max(1, int(max_attempts)) + 1):
+        tapped = False
+
+        # 1) Prefer locating the button and tapping when ready.
+        if resource_id or text:
+            res = tap_when_ready(
+                ctx,
+                text=text,
+                resource_id=resource_id,
+                timeout_s=timeout_s,
+                require_clickable=True,
+                require_enabled=True,
+                wait_after_s=settle_s,
+            )
+            if res.get("tapped"):
+                tapped = True
+                last_method = "element"
+
+        # 2) Fallback to a known coordinate (with mis-tap protection).
+        if not tapped and fallback_coord:
+            x, y = fallback_coord
+            safe_tap(ctx, int(x), int(y), settle_s=settle_s)
+            tapped = True
+            last_method = "fallback"
+
+        if not tapped:
+            _runner_log(f"  [safe_close] 第 {attempt} 次：未找到关闭按钮")
+        else:
+            # 3) Verify the close button is gone.
+            still_there = _element_present(ctx, text=text, resource_id=resource_id)
+            # When only a fallback coord was used (no id/text), we cannot probe
+            # the button; treat a successful tap as best-effort closed.
+            if not (resource_id or text):
+                return {
+                    "ok": True,
+                    "closed": True,
+                    "attempts": attempt,
+                    "method": last_method,
+                    "message": "closed_via_fallback_unverified",
+                }
+            if not still_there:
+                return {
+                    "ok": True,
+                    "closed": True,
+                    "attempts": attempt,
+                    "method": last_method,
+                    "message": "close_button_gone",
+                }
+            _runner_log(
+                f"  [safe_close] 第 {attempt} 次：点击后关闭按钮仍在，尝试 go_back"
+            )
+
+        # 4) Recover before next attempt (dismiss a possible secondary dialog).
+        if attempt < max_attempts:
+            try:
+                ctx.driver.go_back()
+            except Exception:
+                pass
+            if settle_s > 0:
+                time.sleep(settle_s)
+
+    closed = not _element_present(ctx, text=text, resource_id=resource_id)
+    return {
+        "ok": True,
+        "closed": closed,
+        "attempts": max_attempts,
+        "method": last_method,
+        "message": "closed_after_retries" if closed else "failed_to_close",
+    }
+
+
 # ---------------------------------------------------------------------------
 # 设备 & 内存
 # ---------------------------------------------------------------------------
 
-def mem_snapshot(ctx: ScriptContext, name: str = "auto", *, package: Optional[str] = None) -> dict:
+
+def mem_snapshot(
+    ctx: ScriptContext, name: str = "auto", *, package: Optional[str] = None
+) -> dict:
     """一键采集 meminfo 快照并存储到 RunSession / Capture meminfo snapshot and store in RunSession.
 
     采集 dumpsys meminfo 并保存为 JSON。脚本环境下保存到 session/meminfo/，
@@ -437,6 +830,7 @@ def mem_snapshot(ctx: ScriptContext, name: str = "auto", *, package: Optional[st
         return {"ok": False, "error": "package_required"}
 
     from phone_pilot.memory_analyze.meminfo import capture_meminfo
+
     result = capture_meminfo(ctx.device_serial, pkg)
     if not result.get("ok"):
         _runner_log(f"  [meminfo] {name} 采集失败: {result.get('error', '未知')}")
@@ -447,10 +841,14 @@ def mem_snapshot(ctx: ScriptContext, name: str = "auto", *, package: Optional[st
     if session:
         save_dir = session.meminfo_dir
     else:
-        save_dir = pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve() / "meminfo"
+        save_dir = (
+            pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve()
+            / "meminfo"
+        )
     save_dir.mkdir(parents=True, exist_ok=True)
 
     import json
+
     path = save_dir / f"{name}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -463,7 +861,9 @@ def mem_snapshot(ctx: ScriptContext, name: str = "auto", *, package: Optional[st
     return result
 
 
-def mem_diff(ctx: ScriptContext, before_name: str = "before", after_name: str = "after") -> dict:
+def mem_diff(
+    ctx: ScriptContext, before_name: str = "before", after_name: str = "after"
+) -> dict:
     """对比两次 meminfo 快照并保存 diff 结果 / Compare two meminfo snapshots and save diff.
 
     读取 session/meminfo/ 下的 before 和 after JSON，计算增量并保存 diff.json。
@@ -482,7 +882,10 @@ def mem_diff(ctx: ScriptContext, before_name: str = "before", after_name: str = 
     if session:
         mem_dir = session.meminfo_dir
     else:
-        mem_dir = pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve() / "meminfo"
+        mem_dir = (
+            pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve()
+            / "meminfo"
+        )
 
     before_path = mem_dir / f"{before_name}.json"
     after_path = mem_dir / f"{after_name}.json"
@@ -499,11 +902,14 @@ def mem_diff(ctx: ScriptContext, before_name: str = "before", after_name: str = 
         return {"ok": False, "error": f"read snapshot error: {e}"}
 
     from phone_pilot.memory_analyze.meminfo import diff_meminfo, format_diff
+
     result = diff_meminfo(before, after)
 
     # Save diff
     diff_path = mem_dir / "diff.json"
-    diff_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    diff_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     _runner_log(format_diff(result))
     return result
@@ -539,11 +945,19 @@ def mem_check_leak(ctx: ScriptContext, *, package: Optional[str] = None) -> dict
     if session:
         hprof_dir = str(session.meminfo_dir)
     else:
-        hprof_dir = str(pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve() / "meminfo")
+        hprof_dir = str(
+            pathlib.Path(ctx.out_dir or "./.recordings").expanduser().resolve()
+            / "meminfo"
+        )
 
-    from phone_pilot.memory_analyze.meminfo import check_activity_leak, format_leak_report
+    from phone_pilot.memory_analyze.meminfo import (
+        check_activity_leak,
+        format_leak_report,
+    )
+
     result = check_activity_leak(
-        ctx.device_serial, pkg,
+        ctx.device_serial,
+        pkg,
         save_hprof=True,
         hprof_out_dir=hprof_dir,
     )
@@ -552,7 +966,9 @@ def mem_check_leak(ctx: ScriptContext, *, package: Optional[str] = None) -> dict
     mem_dir = pathlib.Path(hprof_dir)
     mem_dir.mkdir(parents=True, exist_ok=True)
     report_path = mem_dir / "leak_report.json"
-    report_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     _runner_log(format_leak_report(result))
 
@@ -560,6 +976,7 @@ def mem_check_leak(ctx: ScriptContext, *, package: Optional[str] = None) -> dict
     if result.get("leaked"):
         try:
             from phone_pilot.memory_analyze.shark_analyzer import analyze_with_shark
+
             hprof_path = result.get("hprof", "")
             if hprof_path:
                 shark_result = analyze_with_shark(
@@ -569,8 +986,13 @@ def mem_check_leak(ctx: ScriptContext, *, package: Optional[str] = None) -> dict
                 )
                 if shark_result.get("ok"):
                     shark_path = mem_dir / "shark_analysis.json"
-                    shark_path.write_text(json.dumps(shark_result, ensure_ascii=False, indent=2), encoding="utf-8")
-                    _runner_log(f"  [shark] 分析完成: {shark_result.get('leak_count', 0)} 个泄漏")
+                    shark_path.write_text(
+                        json.dumps(shark_result, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    _runner_log(
+                        f"  [shark] 分析完成: {shark_result.get('leak_count', 0)} 个泄漏"
+                    )
         except ImportError:
             pass  # shark_analyzer not available yet
         except Exception as e:
@@ -579,7 +1001,13 @@ def mem_check_leak(ctx: ScriptContext, *, package: Optional[str] = None) -> dict
     return result
 
 
-def dump_hprof_snapshot(ctx: ScriptContext, name: str, *, package: Optional[str] = None, timeout_s: float = 60.0) -> dict:
+def dump_hprof_snapshot(
+    ctx: ScriptContext,
+    name: str,
+    *,
+    package: Optional[str] = None,
+    timeout_s: float = 60.0,
+) -> dict:
     """Dump hprof 内存快照 / Dump hprof memory snapshot.
 
     对指定应用的 Java 堆执行 hprof dump，用于内存分析。
@@ -616,13 +1044,19 @@ def dump_hprof_snapshot(ctx: ScriptContext, name: str, *, package: Optional[str]
         hprof_subdir = "hprof"
 
     from phone_pilot.memory_analyze.dumper import dump_hprof
+
     result = dump_hprof(
-        ctx.device_serial, pkg,
-        out_dir=out_dir, hprof_subdir=hprof_subdir,
-        name=name, timeout_s=float(timeout_s),
+        ctx.device_serial,
+        pkg,
+        out_dir=out_dir,
+        hprof_subdir=hprof_subdir,
+        name=name,
+        timeout_s=float(timeout_s),
     )
     if result.get("ok"):
-        _runner_log(f"  [hprof] 已保存: {result.get('path')} ({result.get('size_bytes', 0) // 1024}KB)")
+        _runner_log(
+            f"  [hprof] 已保存: {result.get('path')} ({result.get('size_bytes', 0) // 1024}KB)"
+        )
     else:
         _runner_log(f"  [hprof] dump 失败: {result.get('error', '未知错误')}")
     return result
@@ -666,6 +1100,7 @@ def unlock_device(ctx: ScriptContext, *, pin: Optional[str] = None) -> dict:
 # ---------------------------------------------------------------------------
 # raw_uia / dump_ui — UIAutomator 逃生通道
 # ---------------------------------------------------------------------------
+
 
 def dump_ui(ctx: ScriptContext) -> str:
     """获取当前 UI 层级树原始字符串。
@@ -738,11 +1173,18 @@ def raw_uia(
             elem._ops = _build_element_ops(ctx)
             if hasattr(node, "text"):
                 from phone_pilot.core.ui.element import TextElement
+
                 elem = TextElement(
-                    x=elem.x, y=elem.y, width=elem.width, height=elem.height,
-                    desc=elem.desc, resource_id=elem.resource_id,
-                    clickable=elem.clickable, enabled=elem.enabled,
-                    kind=elem.kind, _ops=elem._ops,
+                    x=elem.x,
+                    y=elem.y,
+                    width=elem.width,
+                    height=elem.height,
+                    desc=elem.desc,
+                    resource_id=elem.resource_id,
+                    clickable=elem.clickable,
+                    enabled=elem.enabled,
+                    kind=elem.kind,
+                    _ops=elem._ops,
                     text=getattr(node, "text", None),
                 )
             return elem
@@ -757,7 +1199,9 @@ def _build_element_ops(ctx: ScriptContext) -> dict:
     except Exception:
         pass
     try:
-        ops["swipe"] = lambda x1, y1, x2, y2, **kw: ctx.driver.input.swipe(x1, y1, x2, y2, **kw)
+        ops["swipe"] = lambda x1, y1, x2, y2, **kw: ctx.driver.input.swipe(
+            x1, y1, x2, y2, **kw
+        )
     except Exception:
         pass
     try:

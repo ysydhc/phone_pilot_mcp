@@ -69,9 +69,7 @@ def cross_validate(
     return in_server_not_contract, in_contract_not_server
 
 
-def generate_markdown(
-    contracts: dict, generated_at: str, out_path: Path
-) -> None:
+def generate_markdown(contracts: dict, generated_at: str, out_path: Path) -> None:
     """生成 Markdown 表格文件。Generate Markdown table file."""
     lines = [
         "# MCP 工具清单（自动生成）/ MCP Tool List (auto-generated)",

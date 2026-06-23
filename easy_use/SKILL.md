@@ -28,36 +28,70 @@ Agent 通过 `phone_*` MCP 工具逐步操作手机，适合探索、调试、�
 
 ## MCP 工具速查
 
-### 推荐首选（LLM 友好）
+### 默认可用工具（核心层，15 个）
+
+以下工具默认加载，覆盖 90% 常规操作场景。**优先使用这些工具。**
 
 | 工具 | 说明 |
 |------|------|
-| `phone_get_page_state` | 一次获取完整页面状态（Activity、元素列表、可滚动区域、全部文本）；设置 `annotate_elements=True` 可获取带编号标注的截图 |
+| `phone_get_page_state` | **推荐首选**。一次获取完整页面状态（Activity、元素列表、可滚动区域、全部文本）；设置 `annotate_elements=True` 可获取带编号标注的截图 |
 | `phone_tap_element` | 通过元素编号点击（配合 `phone_get_page_state`），如 `phone_tap_element(index=3)` |
 | `phone_tap_text` | 通过文本查找并点击（find+tap 合一），支持 `exact`/`contains` 匹配 |
 | `phone_smart_find` | 智能查找：先 UIA、再 OCR、自动关弹窗重试 |
+| `phone_tap` | 坐标点击 |
+| `phone_swipe` | 滑动（起点→终点坐标） |
+| `phone_input_text` | 输入文本（`enter=True` 可附加回车） |
+| `phone_screenshot` | 截取屏幕截图 |
+| `phone_list_devices` | 列出已连接设备 |
+| `phone_launch_app` | 启动应用 |
+| `phone_force_stop` | 强制停止应用 |
+| `phone_go_back` | 返回上一页 |
+| `phone_go_home` | 回到桌面 |
+| `phone_run_script` | 执行 Python 自动化脚本（script_api 格式） |
+| `phone_discover_tools` | **按需加载扩展工具**（见下方说明） |
 
-### 设备与截图
+### 扩展工具（按需加载）
+
+当你需要录屏、日志、内存分析等高级功能时，调用 `phone_discover_tools` 加载对应类别：
+
+```
+# 1. 查看所有可用类别
+phone_discover_tools()
+
+# 2. 按类别加载（加载后即可正常使用）
+phone_discover_tools(category="recording")   # 录屏/截图对比/检查点
+phone_discover_tools(category="logcat")      # 日志捕获
+phone_discover_tools(category="app")         # 应用管理（安装/卸载/清数据/解锁/deeplink）
+phone_discover_tools(category="ui_find")     # UI 查找（find_element/OCR/滚动查找/等待）
+phone_discover_tools(category="device")      # 设备详情（屏幕尺寸/设备画像）
+phone_discover_tools(category="input")       # 高级输入（长按/按键事件）
+phone_discover_tools(category="advanced")    # 高级功能（验证/内存/文件/剪贴板/网络/Shell/资源）
+
+# 3. 按关键词搜索
+phone_discover_tools(keyword="memory")       # 搜索并加载匹配的工具
+```
+
+### 扩展工具完整列表
+
+以下工具需通过 `phone_discover_tools` 加载后使用：
+
+#### device — 设备信息
 
 | 工具 | 说明 |
 |------|------|
-| `phone_list_devices` | 列出已连接设备 |
-| `phone_screenshot` | 截取屏幕截图 |
 | `phone_get_screen_size` | 获取屏幕尺寸 |
 | `phone_get_device_info` | 获取设备信息（屏幕、Activity、型号、系统版本） |
+| `phone_build_device_profile` | 构建完整设备画像 |
+| `phone_export_device_info_md` | 导出设备信息为 Markdown |
 
-### 输入操作
+#### input — 高级输入
 
 | 工具 | 说明 |
 |------|------|
-| `phone_tap` | 坐标点击 |
-| `phone_tap_text` | 按文本查找并点击 |
-| `phone_swipe` | 滑动（起点→终点坐标） |
 | `phone_long_press` | 长按 |
-| `phone_input_text` | 输入文本（`enter=True` 可附加回车） |
 | `phone_keyevent` | 发送按键事件（KEYCODE_HOME / KEYCODE_BACK 等） |
 
-### UI 查找
+#### ui_find — UI 查找
 
 | 工具 | 说明 |
 |------|------|
@@ -67,34 +101,34 @@ Agent 通过 `phone_*` MCP 工具逐步操作手机，适合探索、调试、�
 | `phone_scroll_to_find` | 滚动查找（支持 up_down/left_right 方向） |
 | `phone_wait_for_element` | 等待元素出现（带超时） |
 | `phone_dismiss_popup` | 检测并关闭弹窗 |
+| `phone_get_current_activity` | 获取当前 Activity |
 
-### 应用管理
+#### app — 应用管理
 
 | 工具 | 说明 |
 |------|------|
-| `phone_launch_app` | 启动应用 |
-| `phone_force_stop` | 强制停止应用 |
 | `phone_clear_data` | 清除应用数据 |
 | `phone_clear_background` | 清理后台应用 |
-| `phone_go_home` | 回到桌面 |
-| `phone_go_back` | 返回上一页 |
 | `phone_unlock` | 解锁设备 |
 | `phone_open_deeplink` | 通过 deeplink/scheme 打开页面 |
 | `phone_launch_from_home` | 从桌面搜索并启动应用 |
 | `phone_install_app` / `phone_uninstall_app` | 安装/卸载应用 |
 | `phone_list_packages` | 列出已安装应用 |
 
-### 录屏
+#### recording — 录屏与检查点
 
-录屏采用异步模式（方案 B），流程：`start → poll status → 执行操作 → stop`
+录屏采用异步模式，流程：`start → poll status → 执行操作 → stop`
 
 | 工具 | 说明 |
 |------|------|
 | `phone_start_recording` | 开始录屏（立即返回 `status="starting"`） |
 | `phone_recording_status` | 轮询录屏状态（等待变为 `started`） |
 | `phone_stop_recording` | 停止录屏并拉取到本地 |
+| `phone_compare_screenshot` | 截图相似度对比 |
+| `phone_checkpoint_save` | 保存屏幕状态检查点 |
+| `phone_checkpoint_diff` | 对比检查点差异 |
 
-### 日志（Logcat）
+#### logcat — 日志捕获
 
 | 工具 | 说明 |
 |------|------|
@@ -102,45 +136,23 @@ Agent 通过 `phone_*` MCP 工具逐步操作手机，适合探索、调试、�
 | `phone_stop_logcat` | 停止 logcat 捕获 |
 | `phone_search_logcat` | 搜索 logcat 日志 |
 
-### 内存分析
-
-| 工具 | 说明 |
-|------|------|
-| `phone_memory_snapshot` | 采集应用内存快照 |
-| `phone_memory_check_leak` | 检测 Activity 内存泄漏 |
-
-### 验证与检查点
+#### advanced — 高级功能
 
 | 工具 | 说明 |
 |------|------|
 | `phone_verify` | 批量断言验证 |
-| `phone_checkpoint_save` | 保存屏幕状态检查点 |
-| `phone_checkpoint_diff` | 对比检查点差异 |
-| `phone_compare_screenshot` | 截图相似度对比 |
-
-### 资源缓存
-
-| 工具 | 说明 |
-|------|------|
-| `phone_res_add` | 注册图片资源 |
-| `phone_res_resolve` | 解析 `@res:key` 引用 |
-| `phone_res_list` / `phone_res_get` / `phone_res_update` / `phone_res_delete` | 资源 CRUD |
-
-### 文件与系统
-
-| 工具 | 说明 |
-|------|------|
+| `phone_memory_snapshot` | 采集应用内存快照 |
+| `phone_memory_check_leak` | 检测 Activity 内存泄漏 |
 | `phone_pull_file` / `phone_push_file` | 设备文件传输 |
 | `phone_read_clipboard` | 读取剪贴板 |
 | `phone_get_notifications` | 获取通知列表 |
 | `phone_toggle_wifi` / `phone_toggle_airplane` | 网络控制 |
 | `phone_execute_shell` | 执行 shell 命令（白名单限制） |
-
-### 脚本执行
-
-| 工具 | 说明 |
-|------|------|
-| `phone_run_script` | 执行 Python 自动化脚本（script_api 格式） |
+| `phone_res_add` / `phone_res_resolve` | 图片资源注册与解析 |
+| `phone_res_list` / `phone_res_get` / `phone_res_update` / `phone_res_delete` | 资源 CRUD |
+| `phone_recordings_list` / `phone_recordings_get` | 录屏文件管理 |
+| `phone_replay_recording` | 回放录屏 |
+| `phone_push_and_run_monkey` | Monkey 测试 |
 
 ---
 
@@ -391,7 +403,6 @@ chain 支持的方法：
 完整示例见同目录下的独立文件，Agent 需要参考时读取：
 
 - `easy_use/example_script.py` — 基础示例（清理启动、查找点击、滚动、录屏、日志、自愈）
-- `easy_use/example_sdk_verify.py` — SDK 集成验证示例（广告 SDK 开屏→加载→展示完整流程）
 
 ---
 

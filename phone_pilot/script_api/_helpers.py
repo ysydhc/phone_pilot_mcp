@@ -3,6 +3,7 @@
 底层工具函数，封装驱动调用和坐标计算。
 Low-level utilities wrapping driver calls and coordinate math.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -22,6 +23,7 @@ from .context import ScriptContext
 # Low-level helpers – all delegate to ctx.driver (no platform branches)
 # ---------------------------------------------------------------------------
 
+
 def _get_screen_size(ctx: ScriptContext) -> Optional[tuple[int, int]]:
     if ctx.screen_size:
         return ctx.screen_size
@@ -33,8 +35,12 @@ def _get_screen_size(ctx: ScriptContext) -> Optional[tuple[int, int]]:
         return None
 
 
-def _input_swipe(ctx: ScriptContext, x1: int, y1: int, x2: int, y2: int, *, duration_ms: int) -> dict:
-    return ctx.driver.input.swipe(int(x1), int(y1), int(x2), int(y2), duration_ms=duration_ms)
+def _input_swipe(
+    ctx: ScriptContext, x1: int, y1: int, x2: int, y2: int, *, duration_ms: int
+) -> dict:
+    return ctx.driver.input.swipe(
+        int(x1), int(y1), int(x2), int(y2), duration_ms=duration_ms
+    )
 
 
 def _input_tap(ctx: ScriptContext, x: int, y: int, *, wait_s: float = 0.15) -> dict:
@@ -227,6 +233,7 @@ def _expand_ocr_langs(ctx: ScriptContext, base_lang: Optional[str]) -> list[str]
 # ---------------------------------------------------------------------------
 # auto_log 内部辅助
 # ---------------------------------------------------------------------------
+
 
 def _auto_log_print(msg: str) -> None:
     """内部日志打印（带时间戳），同时写入 console.log。"""

@@ -3,6 +3,7 @@
 封装 UIAutomator / Airtest 查找与相对元素定位逻辑。
 Wraps UIAutomator / Airtest lookup and relative element positioning logic.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -58,6 +59,7 @@ def _uia_find_text_boxes(
             return []
         ctx._ui_cache = {"ts": time.time(), "nodes": nodes}
     out: list[dict] = []
+
     def _candidate_texts(node) -> list[str]:
         vals = [
             node.text,
@@ -156,7 +158,12 @@ def _airtest_find_image_boxes(
     tpl = air_imread(str(path))
     if screen is None or tpl is None:
         return []
-    matches = find_all_template(screen, tpl, threshold=float(threshold), rgb=not bool(grayscale)) or []
+    matches = (
+        find_all_template(
+            screen, tpl, threshold=float(threshold), rgb=not bool(grayscale)
+        )
+        or []
+    )
     th, tw = tpl.shape[:2]
     out: list[dict] = []
     for m in matches:
@@ -317,6 +324,7 @@ def _ui_ops(ctx: ScriptContext) -> dict:
     def _swipe(x1: int, y1: int, x2: int, y2: int) -> dict:
         import time as _time
         from ._helpers import _input_swipe
+
         res = _input_swipe(ctx, int(x1), int(y1), int(x2), int(y2), duration_ms=320)
         _time.sleep(0.15)
         return res
@@ -338,7 +346,13 @@ def _ui_ops(ctx: ScriptContext) -> dict:
         percent = min(1.0, max(0.1, abs(float(zoom_size))))
         try:
             air.pinch(in_or_out=in_or_out, center=(int(cx), int(cy)), percent=percent)
-            return {"ok": True, "center_x": int(cx), "center_y": int(cy), "percent": percent, "in_or_out": in_or_out}
+            return {
+                "ok": True,
+                "center_x": int(cx),
+                "center_y": int(cy),
+                "percent": percent,
+                "in_or_out": in_or_out,
+            }
         except Exception as exc:
             return {"ok": False, "error": "airtest_pinch_failed", "detail": str(exc)}
 
@@ -389,7 +403,11 @@ def _apply_uia_fields(elem: UIElement, uia: dict) -> None:
     if elem.selectable is None:
         elem.selectable = uia.get("checkable")
     if elem.selected is None:
-        elem.selected = uia.get("checked") if uia.get("checked") is not None else uia.get("selected")
+        elem.selected = (
+            uia.get("checked")
+            if uia.get("checked") is not None
+            else uia.get("selected")
+        )
     if isinstance(elem, TextElement):
         if elem.text is None:
             elem.text = uia.get("text")
@@ -420,9 +438,13 @@ def _ui_element_from_box(
     if isinstance(uia, dict):
         meta_dict.setdefault("uia", uia)
     if kind == "text":
-        elem: UIElement = TextElement.from_box(box, kind=kind, meta=meta_dict, text=text, hint=box.get("hint"))
+        elem: UIElement = TextElement.from_box(
+            box, kind=kind, meta=meta_dict, text=text, hint=box.get("hint")
+        )
     elif kind == "image":
-        elem = ImageElement.from_box(box, kind=kind, meta=meta_dict, src=image_src, match_src=match_src)
+        elem = ImageElement.from_box(
+            box, kind=kind, meta=meta_dict, src=image_src, match_src=match_src
+        )
     else:
         elem = UIElement.from_box(box, kind=kind, meta=meta_dict)
     _apply_uia_fields(elem, uia if isinstance(uia, dict) else {})
@@ -469,7 +491,9 @@ def _ui_relative_find(
         queries.insert(0, text)
     ocr_langs = _expand_ocr_langs(ctx, lang)
     if image:
-        candidates = _airtest_find_image_boxes(ctx, path=image, threshold=threshold, grayscale=grayscale)
+        candidates = _airtest_find_image_boxes(
+            ctx, path=image, threshold=threshold, grayscale=grayscale
+        )
         method = "airtest"
         kind = "image"
     else:

@@ -35,6 +35,7 @@ GETEVENT_RE = re.compile(
 @dataclasses.dataclass
 class SlotState:
     """State of a single touch slot."""
+
     tracking_id: Optional[int] = None
     x: Optional[int] = None
     y: Optional[int] = None
@@ -43,6 +44,7 @@ class SlotState:
 @dataclasses.dataclass
 class PointerAction:
     """A pointer (touch) action event."""
+
     timestamp: float
     slot: int
     action: str  # DOWN, MOVE, UP
@@ -53,6 +55,7 @@ class PointerAction:
 @dataclasses.dataclass
 class KeyAction:
     """A key press/release action event."""
+
     timestamp: float
     action: str  # DOWN, UP
     keycode: int  # Android KEYCODE_*
@@ -158,10 +161,19 @@ def parse_getevent(
         elif etype == "EV_ABS" and value_int is not None:
             # Infer which device is the touch device if not pinned.
             if chosen_touch_device is None and device:
-                if code in ("ABS_MT_TRACKING_ID", "ABS_MT_POSITION_X", "ABS_MT_POSITION_Y", "ABS_MT_SLOT"):
+                if code in (
+                    "ABS_MT_TRACKING_ID",
+                    "ABS_MT_POSITION_X",
+                    "ABS_MT_POSITION_Y",
+                    "ABS_MT_SLOT",
+                ):
                     chosen_touch_device = device
             # Ignore ABS events from other devices (e.g. sensors) once chosen.
-            if chosen_touch_device is not None and device and device != chosen_touch_device:
+            if (
+                chosen_touch_device is not None
+                and device
+                and device != chosen_touch_device
+            ):
                 continue
 
             if code == "ABS_MT_SLOT":
@@ -175,7 +187,11 @@ def parse_getevent(
                 slot.y = value_int
         elif etype == "EV_SYN" and code == "SYN_REPORT":
             # Only flush touch frame on the chosen touch device's SYN_REPORT.
-            if chosen_touch_device is not None and device and device != chosen_touch_device:
+            if (
+                chosen_touch_device is not None
+                and device
+                and device != chosen_touch_device
+            ):
                 continue
             curr = slots.get(keep_slot)
             prev = prev_slots.get(keep_slot)
@@ -187,7 +203,9 @@ def parse_getevent(
             prev_slots = {k: dataclasses.replace(v) for k, v in slots.items()}
 
 
-def detect_action(prev: Optional[SlotState], curr: Optional[SlotState]) -> Optional[str]:
+def detect_action(
+    prev: Optional[SlotState], curr: Optional[SlotState]
+) -> Optional[str]:
     """Determine DOWN/MOVE/UP transitions for a slot."""
     if curr and curr.tracking_id is not None:
         if prev is None or prev.tracking_id is None:
@@ -196,7 +214,11 @@ def detect_action(prev: Optional[SlotState], curr: Optional[SlotState]) -> Optio
             return "DOWN"
         if curr.x != prev.x or curr.y != prev.y:
             return "MOVE"
-    if prev and prev.tracking_id is not None and (curr is None or curr.tracking_id is None):
+    if (
+        prev
+        and prev.tracking_id is not None
+        and (curr is None or curr.tracking_id is None)
+    ):
         return "UP"
     return None
 
@@ -369,7 +391,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Filter to only PointerActions for scaling
     pointer_actions = [a for a in actions if isinstance(a, PointerAction)]
     scaled_actions = scale_actions(
-        pointer_actions, scale_x=float(args.scale_x), scale_y=float(args.scale_y), clamp=clamp
+        pointer_actions,
+        scale_x=float(args.scale_x),
+        scale_y=float(args.scale_y),
+        clamp=clamp,
     )
 
     script_lines = to_monkey_script(scaled_actions)

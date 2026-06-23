@@ -4,6 +4,7 @@ find_text, find_image, find_text_list, find_image_list —
 脚本中最常用的元素查找函数。
 The most commonly used element-finding functions in scripts.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -34,12 +35,16 @@ from ._locate import (
 # 自愈辅助 / Self-healing helpers
 # ---------------------------------------------------------------------------
 
-def _try_self_heal(ctx: ScriptContext, action: str, query: str, error: str, retry_count: int) -> Optional[dict]:
+
+def _try_self_heal(
+    ctx: ScriptContext, action: str, query: str, error: str, retry_count: int
+) -> Optional[dict]:
     """尝试自愈并返回 HealAction 信息（或 None）。
     Try self-healing and return HealAction info (or None).
     """
     try:
         from .self_healer import get_self_healer
+
         healer = get_self_healer(ctx)
         if healer:
             heal = healer.try_heal(action, query, error, retry_count=retry_count)
@@ -61,6 +66,7 @@ def _report_heal_outcome(ctx: ScriptContext, heal_info: dict, success: bool) -> 
     """反馈自愈结果 / Report self-healing outcome."""
     try:
         from .self_healer import get_self_healer
+
         healer = get_self_healer(ctx)
         if healer and "_heal_action" in heal_info:
             healer.report_outcome(heal_info["_heal_action"], success)
@@ -110,10 +116,16 @@ def find_image(
         - 截图/步骤会写入 RunSession（若 ctx.session 存在）
     """
     # 解析 @res: 资源引用 → 实际文件路径
-    from phone_pilot.core.resource import is_res_ref, resolve_or_cache_path, res_get, resource_cache_dir
+    from phone_pilot.core.resource import (
+        is_res_ref,
+        resolve_or_cache_path,
+        res_get,
+        resource_cache_dir,
+    )
+
     resolved_path = path
     if is_res_ref(path):
-        key = path[len("@res:"):].strip()
+        key = path[len("@res:") :].strip()
         try:
             resolved_path = resolve_or_cache_path(path, out_dir=ctx.out_dir)
         except Exception:
@@ -156,7 +168,9 @@ def find_image(
             except Exception:
                 pass
         if not pos:
-            texts = _ocr_texts_from_image(str(resolved_path), lang=ocr_lang, psm=int(ocr_psm))
+            texts = _ocr_texts_from_image(
+                str(resolved_path), lang=ocr_lang, psm=int(ocr_psm)
+            )
             roi = _roi_from_box(ctx, region) if region else None
             if roi:
                 boxes = _ocr_find_text_boxes_roi(
@@ -202,7 +216,9 @@ def find_image(
             )
         roi = _roi_from_box(ctx, region) if region else None
         if roi:
-            if not (roi[0] <= int(pos[0]) <= roi[2] and roi[1] <= int(pos[1]) <= roi[3]):
+            if not (
+                roi[0] <= int(pos[0]) <= roi[2] and roi[1] <= int(pos[1]) <= roi[3]
+            ):
                 return None
         match_box = {"center_x": int(pos[0]), "center_y": int(pos[1])}
         size = _template_size(str(resolved_path))
@@ -249,7 +265,9 @@ def find_image(
             return hit
         if i < attempts - 1:
             # 自愈检测：在重试前尝试自动修复（弹窗关闭/参数调整等）
-            heal_info = _try_self_heal(ctx, "find_image", str(path), "element_not_found", i)
+            heal_info = _try_self_heal(
+                ctx, "find_image", str(path), "element_not_found", i
+            )
             if heal_info:
                 if heal_info["fix_type"] == "popup_dismiss":
                     # 弹窗已关闭，立即重试
@@ -263,7 +281,6 @@ def find_image(
     # Record the failed attempt
     ctx._observe("find_image", f"'{path}' 未找到 (重试 {attempts} 次)", status="fail")
     return None
-
 
 
 def find_text(
@@ -450,7 +467,9 @@ def find_text(
             return hit
         if i < attempts - 1:
             # 自愈检测：在重试前尝试自动修复（弹窗关闭/参数调整等）
-            heal_info = _try_self_heal(ctx, "find_text", raw_text, "element_not_found", i)
+            heal_info = _try_self_heal(
+                ctx, "find_text", raw_text, "element_not_found", i
+            )
             if heal_info:
                 if heal_info["fix_type"] == "popup_dismiss":
                     # 弹窗已关闭，立即重试
@@ -467,9 +486,12 @@ def find_text(
                     if new_regex and not raw_text.startswith("re:"):
                         # 用建议的正则重试
                         adjusted = find_text(
-                            ctx, f"re:{new_regex}",
-                            exact=exact, use_ocr=use_ocr,
-                            retry_attempts=1, retry_interval_ms=500,
+                            ctx,
+                            f"re:{new_regex}",
+                            exact=exact,
+                            use_ocr=use_ocr,
+                            retry_attempts=1,
+                            retry_interval_ms=500,
                         )
                         if adjusted:
                             _report_heal_outcome(ctx, heal_info, True)
@@ -487,7 +509,9 @@ def find_text(
             time.sleep(max(0, int(retry_interval_ms)) / 1000.0)
     # Record the failed attempt (skip if called internally, e.g. from scroll_to_find)
     if not _silent_fail:
-        ctx._observe("find_text", f"'{raw_text}' 未找到 (重试 {attempts} 次)", status="fail")
+        ctx._observe(
+            "find_text", f"'{raw_text}' 未找到 (重试 {attempts} 次)", status="fail"
+        )
     return None
 
 
@@ -550,7 +574,11 @@ def find_text_list(
                     query=raw_text,
                     method="uia",
                     text=b.get("text") or raw_text,
-                    locator={"type": "text", "query": raw_text, "use_ocr": bool(use_ocr)},
+                    locator={
+                        "type": "text",
+                        "query": raw_text,
+                        "use_ocr": bool(use_ocr),
+                    },
                 )
             )
         return elems
@@ -560,7 +588,9 @@ def find_text_list(
         ocr_langs = _expand_ocr_langs(ctx, ocr_lang)
         for lang in ocr_langs:
             if regex:
-                boxes = _ocr_find_text_boxes_regex(ctx, pattern=regex, lang=lang, psm=int(ocr_psm), roi=roi)
+                boxes = _ocr_find_text_boxes_regex(
+                    ctx, pattern=regex, lang=lang, psm=int(ocr_psm), roi=roi
+                )
             elif roi:
                 boxes = _ocr_find_text_boxes_roi(
                     ctx,
@@ -590,7 +620,11 @@ def find_text_list(
                             query=raw_text,
                             method=f"ocr:{lang}",
                             text=b.get("text") or raw_text,
-                            locator={"type": "text", "query": raw_text, "use_ocr": bool(use_ocr)},
+                            locator={
+                                "type": "text",
+                                "query": raw_text,
+                                "use_ocr": bool(use_ocr),
+                            },
                         )
                     )
                 break
@@ -645,7 +679,9 @@ def find_image_list(
         return roi[0] <= cx <= roi[2] and roi[1] <= cy <= roi[3]
 
     def _air_list() -> list[UIElement]:
-        boxes = _airtest_find_image_boxes(ctx, path=path, threshold=threshold, grayscale=True)
+        boxes = _airtest_find_image_boxes(
+            ctx, path=path, threshold=threshold, grayscale=True
+        )
         elems = []
         for b in boxes:
             if not _in_roi(b):

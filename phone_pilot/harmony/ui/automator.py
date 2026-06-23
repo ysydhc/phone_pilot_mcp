@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Data structures (aligned with Android UINode)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HarmonyUINode:
     """Represents a node in the HarmonyOS UI hierarchy."""
@@ -91,6 +92,7 @@ class HarmonyUINode:
 # ---------------------------------------------------------------------------
 # Core functions
 # ---------------------------------------------------------------------------
+
 
 def dump_hierarchy_dict(device_serial: str) -> dict:
     """Dump UI hierarchy as a Python dict (native hmdriver2 format)."""
@@ -219,7 +221,9 @@ def find_nodes(
     return results
 
 
-def pick_scrollable_bounds(nodes: Sequence[HarmonyUINode]) -> Optional[tuple[int, int, int, int]]:
+def pick_scrollable_bounds(
+    nodes: Sequence[HarmonyUINode],
+) -> Optional[tuple[int, int, int, int]]:
     """Pick the best scrollable container bounds."""
     scrollables = [n for n in nodes if n.scrollable]
     if not scrollables:

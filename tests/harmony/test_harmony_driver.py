@@ -52,6 +52,7 @@ class MockHmDriver:
 
     def screenshot(self, path, method="snapshot_display"):
         import pathlib
+
         # Create a fake PNG file
         pathlib.Path(path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
         return path
@@ -69,7 +70,12 @@ class MockHmDriver:
                         "text": "Button1",
                         "type": "Button",
                         "clickable": True,
-                        "bounds": {"left": 100, "top": 200, "right": 300, "bottom": 260},
+                        "bounds": {
+                            "left": 100,
+                            "top": 200,
+                            "right": 300,
+                            "bottom": 260,
+                        },
                         "boundsCenter": {"x": 200, "y": 230},
                     },
                     "children": [],
@@ -79,7 +85,12 @@ class MockHmDriver:
                         "text": "抖音",
                         "type": "Text",
                         "description": "Douyin",
-                        "bounds": {"left": 400, "top": 500, "right": 600, "bottom": 560},
+                        "bounds": {
+                            "left": 400,
+                            "top": 500,
+                            "right": 600,
+                            "bottom": 560,
+                        },
                         "boundsCenter": {"x": 500, "y": 530},
                     },
                     "children": [],
@@ -133,14 +144,18 @@ class MockHmDriver:
         """Simulate hmdriver2's element selector."""
         return MagicMock(
             exists=MagicMock(return_value=True),
-            find_component=MagicMock(return_value=MagicMock(
-                to_dict=MagicMock(return_value={
-                    "text": kwargs.get("text", ""),
-                    "type": "Button",
-                    "boundsCenter": {"x": 200, "y": 300},
-                }),
-                text=kwargs.get("text", ""),
-            )),
+            find_component=MagicMock(
+                return_value=MagicMock(
+                    to_dict=MagicMock(
+                        return_value={
+                            "text": kwargs.get("text", ""),
+                            "type": "Button",
+                            "boundsCenter": {"x": 200, "y": 300},
+                        }
+                    ),
+                    text=kwargs.get("text", ""),
+                )
+            ),
             count=MagicMock(return_value=1),
             click=MagicMock(),
         )
@@ -249,19 +264,23 @@ class TestResolveKeycode(unittest.TestCase):
 
     def test_direct_name(self):
         from hmdriver2.proto import KeyCode
+
         kc = _resolve_keycode("HOME", KeyCode)
         self.assertEqual(kc, KeyCode.HOME)
 
     def test_android_prefix(self):
         from hmdriver2.proto import KeyCode
+
         kc = _resolve_keycode("KEYCODE_BACK", KeyCode)
         self.assertEqual(kc, KeyCode.BACK)
 
     def test_integer_value(self):
         # Use a real enum that will fail name lookup, forcing integer fallback
         import enum
+
         class FakeEnum(enum.Enum):
             BACK = 2
+
         kc = _resolve_keycode("99", FakeEnum)
         self.assertEqual(kc, 99)
 

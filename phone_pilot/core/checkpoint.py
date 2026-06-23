@@ -176,10 +176,9 @@ def diff_checkpoint(
     text_removed = sorted(old_set - cur_set)
 
     # Activity 是否变化
-    activity_changed = (
-        old_activity.get("package") != cur_activity.get("package")
-        or old_activity.get("activity") != cur_activity.get("activity")
-    )
+    activity_changed = old_activity.get("package") != cur_activity.get(
+        "package"
+    ) or old_activity.get("activity") != cur_activity.get("activity")
 
     # 截图相似度
     similarity: float = 0.0
@@ -217,12 +216,8 @@ def _compare_screenshots(
         import cv2
         import numpy as np
 
-        old_arr = cv2.imdecode(
-            np.frombuffer(old_png, dtype=np.uint8), cv2.IMREAD_COLOR
-        )
-        cur_arr = cv2.imdecode(
-            np.frombuffer(cur_png, dtype=np.uint8), cv2.IMREAD_COLOR
-        )
+        old_arr = cv2.imdecode(np.frombuffer(old_png, dtype=np.uint8), cv2.IMREAD_COLOR)
+        cur_arr = cv2.imdecode(np.frombuffer(cur_png, dtype=np.uint8), cv2.IMREAD_COLOR)
 
         if old_arr is None or cur_arr is None:
             return 0.0, ""

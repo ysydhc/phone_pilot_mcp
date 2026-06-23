@@ -66,7 +66,12 @@ class UIElement:
     _locator: Optional[dict] = field(default=None, repr=False, compare=False)
 
     def bounds(self) -> Optional[tuple[int, int, int, int]]:
-        if self.x is None or self.y is None or self.width is None or self.height is None:
+        if (
+            self.x is None
+            or self.y is None
+            or self.width is None
+            or self.height is None
+        ):
             return None
         x1 = int(self.x)
         y1 = int(self.y)
@@ -289,7 +294,9 @@ class UIElement:
         if other.meta:
             self.meta.update(other.meta)
 
-    def _point_from_pct(self, pc_x: Optional[float], pc_y: Optional[float]) -> Optional[tuple[int, int]]:
+    def _point_from_pct(
+        self, pc_x: Optional[float], pc_y: Optional[float]
+    ) -> Optional[tuple[int, int]]:
         bounds = self.bounds()
         if not bounds:
             return None
@@ -339,7 +346,9 @@ class UIElement:
         results: list[dict] = []
         for i in range(count):
             res = tap_xy(int(x), int(y))
-            results.append(res if isinstance(res, dict) else {"ok": False, "error": "tap_failed"})
+            results.append(
+                res if isinstance(res, dict) else {"ok": False, "error": "tap_failed"}
+            )
             if interval and i < (count - 1):
                 time.sleep(max(0, int(interval)) / 1000.0)
         ok = all(bool(r.get("ok")) for r in results)
@@ -356,7 +365,13 @@ class UIElement:
                 pass
         return {"ok": ok, "x": x, "y": y, "times": count, "results": results}
 
-    def scroll(self, pc_x: Optional[float] = None, pc_y: Optional[float] = None, *, max_attempts: int = 2) -> dict:
+    def scroll(
+        self,
+        pc_x: Optional[float] = None,
+        pc_y: Optional[float] = None,
+        *,
+        max_attempts: int = 2,
+    ) -> dict:
         swipe = self._op("swipe")
         get_screen = self._op("get_screen_size")
         if not swipe or not get_screen:
@@ -418,12 +433,25 @@ class UIElement:
                     res.setdefault("method", "airtest")
                     return res
             except Exception as exc:
-                return {"ok": False, "error": "airtest_pinch_failed", "detail": str(exc)}
+                return {
+                    "ok": False,
+                    "error": "airtest_pinch_failed",
+                    "detail": str(exc),
+                }
         swipe = self._op("swipe")
         if not swipe:
             return {"ok": False, "error": "zoom_unavailable"}
         _, _, x2, y2 = bounds
-        delta = int(min(abs(x2 - cx), abs(y2 - cy), max(self.width or 0, 1), max(self.height or 0, 1)) * abs(zoom_size) / 2)
+        delta = int(
+            min(
+                abs(x2 - cx),
+                abs(y2 - cy),
+                max(self.width or 0, 1),
+                max(self.height or 0, 1),
+            )
+            * abs(zoom_size)
+            / 2
+        )
         delta = max(10, delta)
         if zoom_size > 0:
             r1 = swipe(int(cx), int(cy), int(cx - delta), int(cy))
@@ -431,7 +459,11 @@ class UIElement:
         else:
             r1 = swipe(int(cx - delta), int(cy), int(cx), int(cy))
             r2 = swipe(int(cx + delta), int(cy), int(cx), int(cy))
-        ok = bool(r1.get("ok")) and bool(r2.get("ok")) if isinstance(r1, dict) and isinstance(r2, dict) else False
+        ok = (
+            bool(r1.get("ok")) and bool(r2.get("ok"))
+            if isinstance(r1, dict) and isinstance(r2, dict)
+            else False
+        )
         return {"ok": ok, "method": "adb", "results": [r1, r2]}
 
     def refresh(self) -> Optional["UIElement"]:
@@ -447,7 +479,9 @@ class UIElement:
     def exists(self) -> bool:
         return self.refresh() is not None
 
-    def wait(self, timeout_s: float = 5.0, interval_s: float = 0.4) -> Optional["UIElement"]:
+    def wait(
+        self, timeout_s: float = 5.0, interval_s: float = 0.4
+    ) -> Optional["UIElement"]:
         end_at = time.time() + max(0.1, float(timeout_s))
         while time.time() <= end_at:
             hit = self.refresh()
@@ -456,7 +490,9 @@ class UIElement:
             time.sleep(max(0.05, float(interval_s)))
         return None
 
-    def wait_visible(self, timeout_s: float = 5.0, interval_s: float = 0.4) -> Optional["UIElement"]:
+    def wait_visible(
+        self, timeout_s: float = 5.0, interval_s: float = 0.4
+    ) -> Optional["UIElement"]:
         end_at = time.time() + max(0.1, float(timeout_s))
         while time.time() <= end_at:
             hit = self.refresh()
@@ -467,7 +503,12 @@ class UIElement:
 
     def _candidate_texts(self) -> list[str]:
         vals = []
-        for v in (getattr(self, "text", None), getattr(self, "hint", None), self.desc, self.resource_id):
+        for v in (
+            getattr(self, "text", None),
+            getattr(self, "hint", None),
+            self.desc,
+            self.resource_id,
+        ):
             if isinstance(v, str) and v.strip():
                 vals.append(v.strip())
         return vals
@@ -482,7 +523,9 @@ class UIElement:
                 return True
         return False
 
-    def match_text(self, text: str, *, exact: bool = True, case_sensitive: bool = False) -> bool:
+    def match_text(
+        self, text: str, *, exact: bool = True, case_sensitive: bool = False
+    ) -> bool:
         query = str(text or "")
         if not case_sensitive:
             query = query.lower()
@@ -494,7 +537,9 @@ class UIElement:
                 return True
         return False
 
-    def screenshot_crop(self, *, name: Optional[str] = None, out_dir: Optional[str] = None) -> dict:
+    def screenshot_crop(
+        self, *, name: Optional[str] = None, out_dir: Optional[str] = None
+    ) -> dict:
         snap = self._op("screenshot")
         if not snap:
             return {"ok": False, "error": "screenshot_unavailable"}

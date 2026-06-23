@@ -16,7 +16,11 @@ from phone_pilot.core.protocols import (
     AppDriver,
     DeviceDriver,
 )
-from phone_pilot.core.driver_factory import create_driver, detect_device, create_driver_auto
+from phone_pilot.core.driver_factory import (
+    create_driver,
+    detect_device,
+    create_driver_auto,
+)
 from phone_pilot.core.ui_node import UINode, collect_ui_texts
 from phone_pilot.core.skills import DeviceSkills
 from phone_pilot.core.storage import (

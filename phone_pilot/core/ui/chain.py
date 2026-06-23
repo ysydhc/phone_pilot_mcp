@@ -108,12 +108,26 @@ class UIChain:
             return self._fail("no_match", "image_not_found", detail={"path": path})
         return self._set_last(elem)
 
-    def tap(self, *, pc_x: Optional[float] = None, pc_y: Optional[float] = None, times: int = 1, interval: int = 0, _record_step: bool = True) -> "UIChain":
+    def tap(
+        self,
+        *,
+        pc_x: Optional[float] = None,
+        pc_y: Optional[float] = None,
+        times: int = 1,
+        interval: int = 0,
+        _record_step: bool = True,
+    ) -> "UIChain":
         if not self.ok:
             return self
         if _record_step:
             self._record(
-                lambda ch: ch.tap(pc_x=pc_x, pc_y=pc_y, times=times, interval=interval, _record_step=False)
+                lambda ch: ch.tap(
+                    pc_x=pc_x,
+                    pc_y=pc_y,
+                    times=times,
+                    interval=interval,
+                    _record_step=False,
+                )
             )
         if not isinstance(self.last, UIElement):
             return self._fail("tap_failed", "no_active_element")
@@ -135,11 +149,15 @@ class UIChain:
     def down(self, text: Optional[str] = None, **kwargs: Any) -> "UIChain":
         return self._relative("down", text, **kwargs)
 
-    def _relative(self, direction: str, text: Optional[str], **kwargs: Any) -> "UIChain":
+    def _relative(
+        self, direction: str, text: Optional[str], **kwargs: Any
+    ) -> "UIChain":
         if not self.ok:
             return self
         if kwargs.pop("_record_step", True):
-            self._record(lambda ch: ch._relative(direction, text, _record_step=False, **kwargs))
+            self._record(
+                lambda ch: ch._relative(direction, text, _record_step=False, **kwargs)
+            )
         if not isinstance(self.last, UIElement):
             return self._fail("no_anchor", "no_active_element")
         retry_interval_ms = int(kwargs.pop("retry_interval_ms", 1000))
@@ -150,7 +168,11 @@ class UIChain:
                 return self._set_last(target)
             if attempt < retry_attempts - 1:
                 time.sleep(max(0.0, retry_interval_ms / 1000.0))
-        return self._fail("no_match", "relative_not_found", detail={"direction": direction, "text": text})
+        return self._fail(
+            "no_match",
+            "relative_not_found",
+            detail={"direction": direction, "text": text},
+        )
 
     def wait(self, seconds: float, _record_step: bool = True) -> "UIChain":
         if not self.ok:
@@ -177,7 +199,9 @@ class UIChain:
             self._record(lambda ch: ch.get(name, _record_step=False))
         value = self.vars.get(str(name))
         if not value:
-            return self._fail("not_found", "saved_element_not_found", detail={"name": name})
+            return self._fail(
+                "not_found", "saved_element_not_found", detail={"name": name}
+            )
         self.last = value
         return self
 
@@ -243,13 +267,21 @@ class UIChain:
     # ---- 验证断言方法（文本参数支持 re: 正则）----
 
     def assert_text_exists(
-        self, text: str, *, use_ocr: bool = True, _record_step: bool = True,
+        self,
+        text: str,
+        *,
+        use_ocr: bool = True,
+        _record_step: bool = True,
     ) -> "UIChain":
         """断言屏幕上存在指定文本（支持 ``re:`` 正则前缀）。"""
         if not self.ok:
             return self
         if _record_step:
-            self._record(lambda ch: ch.assert_text_exists(text, use_ocr=use_ocr, _record_step=False))
+            self._record(
+                lambda ch: ch.assert_text_exists(
+                    text, use_ocr=use_ocr, _record_step=False
+                )
+            )
         from phone_pilot.core.verify import _text_matches
         from phone_pilot import script_api as api
 
@@ -270,13 +302,21 @@ class UIChain:
             return self._fail("assert_failed", "text_not_found", detail={"query": text})
 
     def assert_text_not_exists(
-        self, text: str, *, use_ocr: bool = True, _record_step: bool = True,
+        self,
+        text: str,
+        *,
+        use_ocr: bool = True,
+        _record_step: bool = True,
     ) -> "UIChain":
         """断言屏幕上不存在指定文本（支持 ``re:`` 正则前缀）。"""
         if not self.ok:
             return self
         if _record_step:
-            self._record(lambda ch: ch.assert_text_not_exists(text, use_ocr=use_ocr, _record_step=False))
+            self._record(
+                lambda ch: ch.assert_text_not_exists(
+                    text, use_ocr=use_ocr, _record_step=False
+                )
+            )
         from phone_pilot.core.verify import _text_matches
         from phone_pilot import script_api as api
 
@@ -287,22 +327,36 @@ class UIChain:
                 all_texts = []
             for t in all_texts:
                 if _text_matches(text, t):
-                    return self._fail("assert_failed", "text_should_not_exist", detail={"query": text, "found": t})
+                    return self._fail(
+                        "assert_failed",
+                        "text_should_not_exist",
+                        detail={"query": text, "found": t},
+                    )
             return self
         else:
             elem = api.find_text(self.ctx, text, use_ocr=use_ocr, retry_attempts=1)
             if elem:
-                return self._fail("assert_failed", "text_should_not_exist", detail={"query": text})
+                return self._fail(
+                    "assert_failed", "text_should_not_exist", detail={"query": text}
+                )
             return self
 
     def assert_image_exists(
-        self, path: str, *, threshold: float = 0.8, _record_step: bool = True,
+        self,
+        path: str,
+        *,
+        threshold: float = 0.8,
+        _record_step: bool = True,
     ) -> "UIChain":
         """断言屏幕上存在指定图片。"""
         if not self.ok:
             return self
         if _record_step:
-            self._record(lambda ch: ch.assert_image_exists(path, threshold=threshold, _record_step=False))
+            self._record(
+                lambda ch: ch.assert_image_exists(
+                    path, threshold=threshold, _record_step=False
+                )
+            )
         from phone_pilot import script_api as api
 
         elem = api.find_image(self.ctx, path, threshold=threshold, retry_attempts=1)
@@ -311,65 +365,112 @@ class UIChain:
         return self._fail("assert_failed", "image_not_found", detail={"path": path})
 
     def assert_image_not_exists(
-        self, path: str, *, threshold: float = 0.8, _record_step: bool = True,
+        self,
+        path: str,
+        *,
+        threshold: float = 0.8,
+        _record_step: bool = True,
     ) -> "UIChain":
         """断言屏幕上不存在指定图片。"""
         if not self.ok:
             return self
         if _record_step:
-            self._record(lambda ch: ch.assert_image_not_exists(path, threshold=threshold, _record_step=False))
+            self._record(
+                lambda ch: ch.assert_image_not_exists(
+                    path, threshold=threshold, _record_step=False
+                )
+            )
         from phone_pilot import script_api as api
 
         elem = api.find_image(self.ctx, path, threshold=threshold, retry_attempts=1)
         if elem:
-            return self._fail("assert_failed", "image_should_not_exist", detail={"path": path})
+            return self._fail(
+                "assert_failed", "image_should_not_exist", detail={"path": path}
+            )
         return self
 
     def assert_logcat_contains(
-        self, pattern: str, *, lines: int = 5000, _record_step: bool = True,
+        self,
+        pattern: str,
+        *,
+        lines: int = 5000,
+        _record_step: bool = True,
     ) -> "UIChain":
         """断言日志中包含模式（支持 ``re:`` 正则前缀）。"""
         if not self.ok:
             return self
         if _record_step:
-            self._record(lambda ch: ch.assert_logcat_contains(pattern, lines=lines, _record_step=False))
+            self._record(
+                lambda ch: ch.assert_logcat_contains(
+                    pattern, lines=lines, _record_step=False
+                )
+            )
         from phone_pilot import script_api as api
 
-        result = api.logcat_find(self.ctx, pattern, lines=lines, regex=pattern.startswith("re:"))
+        result = api.logcat_find(
+            self.ctx, pattern, lines=lines, regex=pattern.startswith("re:")
+        )
         if result.get("count", 0) > 0:
             return self
-        return self._fail("assert_failed", "logcat_pattern_not_found", detail={"pattern": pattern})
+        return self._fail(
+            "assert_failed", "logcat_pattern_not_found", detail={"pattern": pattern}
+        )
 
     def assert_logcat_not_contains(
-        self, pattern: str, *, lines: int = 5000, _record_step: bool = True,
+        self,
+        pattern: str,
+        *,
+        lines: int = 5000,
+        _record_step: bool = True,
     ) -> "UIChain":
         """断言日志中不包含模式（支持 ``re:`` 正则前缀）。"""
         if not self.ok:
             return self
         if _record_step:
-            self._record(lambda ch: ch.assert_logcat_not_contains(pattern, lines=lines, _record_step=False))
+            self._record(
+                lambda ch: ch.assert_logcat_not_contains(
+                    pattern, lines=lines, _record_step=False
+                )
+            )
         from phone_pilot import script_api as api
 
-        result = api.logcat_find(self.ctx, pattern, lines=lines, regex=pattern.startswith("re:"))
+        result = api.logcat_find(
+            self.ctx, pattern, lines=lines, regex=pattern.startswith("re:")
+        )
         if result.get("count", 0) == 0:
             return self
-        return self._fail("assert_failed", "logcat_pattern_found", detail={"pattern": pattern, "count": result.get("count", 0)})
+        return self._fail(
+            "assert_failed",
+            "logcat_pattern_found",
+            detail={"pattern": pattern, "count": result.get("count", 0)},
+        )
 
     def assert_memory_no_growth(
-        self, package: str, *, threshold_mb: float = 50, _record_step: bool = True,
+        self,
+        package: str,
+        *,
+        threshold_mb: float = 50,
+        _record_step: bool = True,
     ) -> "UIChain":
         """断言内存增长不超过阈值。"""
         if not self.ok:
             return self
         if _record_step:
-            self._record(lambda ch: ch.assert_memory_no_growth(package, threshold_mb=threshold_mb, _record_step=False))
+            self._record(
+                lambda ch: ch.assert_memory_no_growth(
+                    package, threshold_mb=threshold_mb, _record_step=False
+                )
+            )
         try:
-            result = self.ctx.driver.dump_memory_profile(package, name="chain_mem_check")
+            result = self.ctx.driver.dump_memory_profile(
+                package, name="chain_mem_check"
+            )
             pss = result.get("total_pss_mb", 0) or result.get("pss_mb", 0)
             if pss <= threshold_mb:
                 return self
             return self._fail(
-                "assert_failed", "memory_exceeds_threshold",
+                "assert_failed",
+                "memory_exceeds_threshold",
                 detail={"pss_mb": pss, "threshold_mb": threshold_mb},
             )
         except Exception as exc:
@@ -385,7 +486,9 @@ class UIChain:
 
         result = save_checkpoint(self.ctx.driver, name)
         if not result.get("ok"):
-            return self._fail("checkpoint_failed", "save_checkpoint_failed", detail=result)
+            return self._fail(
+                "checkpoint_failed", "save_checkpoint_failed", detail=result
+            )
         self.vars[f"checkpoint:{name}"] = result
         return self
 
@@ -399,7 +502,9 @@ class UIChain:
 
         result = api.screenshot(self.ctx, name)
         if not result.get("ok"):
-            return self._fail("screenshot_failed", "save_screenshot_failed", detail=result)
+            return self._fail(
+                "screenshot_failed", "save_screenshot_failed", detail=result
+            )
         self.vars[f"screenshot:{name}"] = result
         return self
 
@@ -415,9 +520,16 @@ class UIChain:
                 vars_out[key] = value.to_dict()
             else:
                 vars_out[key] = value
-        return {"ok": bool(self.ok), "error": self.error, "vars": vars_out, "last": last}
+        return {
+            "ok": bool(self.ok),
+            "error": self.error,
+            "vars": vars_out,
+            "last": last,
+        }
 
-    def unlock_device(self, *, pin: Optional[str] = None, _record_step: bool = True) -> "UIChain":
+    def unlock_device(
+        self, *, pin: Optional[str] = None, _record_step: bool = True
+    ) -> "UIChain":
         if not self.ok:
             return self
         if _record_step:
@@ -439,7 +551,9 @@ class UIChain:
 
         res = api.clear_background(self.ctx)
         if not (isinstance(res, dict) and res.get("ok", True)):
-            return self._fail("clear_background_failed", "clear_background_failed", detail=res)
+            return self._fail(
+                "clear_background_failed", "clear_background_failed", detail=res
+            )
         self.last = res
         return self
 
@@ -456,7 +570,9 @@ class UIChain:
         self.last = res
         return self
 
-    def repeat(self, step_or_times=None, *, max: int = 3, block: Any = None) -> "UIChain":
+    def repeat(
+        self, step_or_times=None, *, max: int = 3, block: Any = None
+    ) -> "UIChain":
         if not self.ok:
             return self
         if isinstance(step_or_times, int):
@@ -545,11 +661,14 @@ def find_image(path: str, **kwargs: Any) -> ChainStep:
 def swipe_up(**kwargs: Any) -> ChainStep:
     return ChainStep(lambda ch: ch.swipe_up(**kwargs))
 
+
 def swipe_down(**kwargs: Any) -> ChainStep:
     return ChainStep(lambda ch: ch.swipe_down(**kwargs))
+
 
 def swipe_left(**kwargs: Any) -> ChainStep:
     return ChainStep(lambda ch: ch.swipe_left(**kwargs))
 
+
 def swipe_right(**kwargs: Any) -> ChainStep:
-    return ChainStep(lambda ch: ch.swipe_right(**kwargs))   
+    return ChainStep(lambda ch: ch.swipe_right(**kwargs))

@@ -9,6 +9,7 @@ Usage:
     phone-pilot-web                        # CLI (after pip install)
     phone-pilot-web --port 9090            # custom port
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,6 +31,7 @@ from urllib.parse import parse_qs, unquote
 # Paths
 # ---------------------------------------------------------------------------
 
+
 def _recordings_root() -> pathlib.Path:
     """Resolve .recordings root (same logic as core.storage)."""
     env = os.getenv("PHONE_PILOT_CACHE_DIR")
@@ -50,6 +52,7 @@ def _res_cache_dir() -> pathlib.Path:
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
+
 
 def _read_json(path: pathlib.Path) -> Optional[dict]:
     if not path.is_file():
@@ -144,6 +147,7 @@ def _get_jinja_env():
     global _jinja_env
     if _jinja_env is None:
         from jinja2 import Environment, PackageLoader
+
         _jinja_env = Environment(
             loader=PackageLoader("phone_pilot.core", "templates"),
             autoescape=True,
@@ -160,6 +164,7 @@ def _render_dashboard() -> str:
 # ---------------------------------------------------------------------------
 # HTTP Handler
 # ---------------------------------------------------------------------------
+
 
 class _Handler(BaseHTTPRequestHandler):
     """Simple request handler with basic routing."""
@@ -258,6 +263,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "key required"})
         try:
             from phone_pilot.core.resource import res_delete
+
             result = res_delete(key)
             self._send_json(result)
         except Exception as e:
@@ -272,6 +278,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "run not found"})
         try:
             from phone_pilot.core.html_report import generate_html_report
+
             p = generate_html_report(run_dir)
             self._send_json({"ok": True, "path": str(p)})
         except Exception as e:
@@ -292,7 +299,9 @@ class _Handler(BaseHTTPRequestHandler):
             data = json.loads(idx_path.read_text(encoding="utf-8"))
             runs = data.get("runs", [])
             data["runs"] = [r for r in runs if r.get("run_dir") != run_name]
-            idx_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            idx_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
         except Exception:
             pass
 
@@ -340,6 +349,7 @@ class _Handler(BaseHTTPRequestHandler):
 # Server entry
 # ---------------------------------------------------------------------------
 
+
 def main(port: int = 8686, no_browser: bool = False):
     """Start the local web dashboard server."""
     server = HTTPServer(("127.0.0.1", port), _Handler)
@@ -364,8 +374,12 @@ def _cli():
         prog="phone-pilot-web",
         description="phone_pilot local web dashboard",
     )
-    parser.add_argument("--port", type=int, default=8686, help="Server port (default: 8686)")
-    parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    parser.add_argument(
+        "--port", type=int, default=8686, help="Server port (default: 8686)"
+    )
+    parser.add_argument(
+        "--no-browser", action="store_true", help="Don't auto-open browser"
+    )
     args = parser.parse_args()
     main(port=args.port, no_browser=args.no_browser)
 

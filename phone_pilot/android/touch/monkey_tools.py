@@ -74,7 +74,9 @@ async def android_push_and_run_monkey(
     item: Optional[dict] = None
     if restore_start_from:
         out_root = recordings_root(out_dir)
-        item = await asyncio.to_thread(load_recording_by_key, out_root, restore_start_from)
+        item = await asyncio.to_thread(
+            load_recording_by_key, out_root, restore_start_from
+        )
         if item:
             expected_device = item.get("device_serial")
     else:
@@ -89,7 +91,12 @@ async def android_push_and_run_monkey(
     if device_serial is None and expected_device:
         device_serial = expected_device
 
-    if expected_device and device_serial and expected_device != device_serial and not force_device_mismatch:
+    if (
+        expected_device
+        and device_serial
+        and expected_device != device_serial
+        and not force_device_mismatch
+    ):
         return {
             "ok": False,
             "needs_confirm": True,
@@ -105,7 +112,9 @@ async def android_push_and_run_monkey(
     if restore_start_from:
         out_root = recordings_root(out_dir)
         if item is None:
-            item = await asyncio.to_thread(load_recording_by_key, out_root, restore_start_from)
+            item = await asyncio.to_thread(
+                load_recording_by_key, out_root, restore_start_from
+            )
         if item:
             ctx = infer_start_context(item)
             if ctx["type"] == "app" and ctx["package"]:
@@ -125,12 +134,17 @@ async def android_push_and_run_monkey(
                     "deeplink": ctx["deeplink"],
                 }
             else:
-                await asyncio.to_thread(reset_to_home, device_serial, presses=home_presses)
+                await asyncio.to_thread(
+                    reset_to_home, device_serial, presses=home_presses
+                )
                 restored = {"type": "home"}
             if pre_inject_wait_s and pre_inject_wait_s > 0:
                 await asyncio.to_thread(time.sleep, float(pre_inject_wait_s))
         else:
-            restored = {"type": "unknown", "error": f"no recording found for key: {restore_start_from}"}
+            restored = {
+                "type": "unknown",
+                "error": f"no recording found for key: {restore_start_from}",
+            }
     elif reset_home:
         await asyncio.to_thread(reset_to_home, device_serial, presses=home_presses)
         if pre_inject_wait_s and pre_inject_wait_s > 0:
@@ -144,7 +158,9 @@ async def android_push_and_run_monkey(
         if item:
             src_w = item.get("screen_w")
             src_h = item.get("screen_h")
-        if (src_w is None or src_h is None) and local.parent.joinpath("meta.json").exists():
+        if (src_w is None or src_h is None) and local.parent.joinpath(
+            "meta.json"
+        ).exists():
             try:
                 meta2 = read_json(local.parent / "meta.json")
                 src_w = meta2.get("screen_w")
@@ -161,7 +177,9 @@ async def android_push_and_run_monkey(
             and src_h > 0
             and (target_screen[0] != src_w or target_screen[1] != src_h)
         ):
-            scaled_path = local.with_name(f"{local.stem}.scaled_{target_screen[0]}x{target_screen[1]}{local.suffix}")
+            scaled_path = local.with_name(
+                f"{local.stem}.scaled_{target_screen[0]}x{target_screen[1]}{local.suffix}"
+            )
             scaled_by_screen = await asyncio.to_thread(
                 scale_mks_for_screen,
                 local,
@@ -175,7 +193,13 @@ async def android_push_and_run_monkey(
             local = scaled_path
     await asyncio.to_thread(push_script, device_serial, local, remote_script)
     await asyncio.to_thread(
-        MonkeyRunner.run_monkey, device_serial, package, remote_script, throttle_ms, seed, count
+        MonkeyRunner.run_monkey,
+        device_serial,
+        package,
+        remote_script,
+        throttle_ms,
+        seed,
+        count,
     )
     return {
         "ok": True,
@@ -195,4 +219,3 @@ async def android_push_and_run_monkey(
         "seed": seed,
         "count": count,
     }
-

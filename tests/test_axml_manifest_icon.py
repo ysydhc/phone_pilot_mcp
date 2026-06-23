@@ -24,23 +24,27 @@ def _build_string_pool(strings: list[str]) -> bytes:
     header_size = 28
     strings_start = header_size + (string_count * 4)
     total_size = strings_start + len(string_data)
-    header = struct.pack(
-        "<HHI", 0x0001, header_size, total_size
-    ) + struct.pack(
-        "<IIII", string_count, 0, flags, strings_start
-    ) + struct.pack("<I", 0)
+    header = (
+        struct.pack("<HHI", 0x0001, header_size, total_size)
+        + struct.pack("<IIII", string_count, 0, flags, strings_start)
+        + struct.pack("<I", 0)
+    )
     offsets = b"".join(struct.pack("<I", off) for off in string_offsets)
     return header + offsets + string_data
 
 
-def _build_start_element(name_idx: int, attributes: list[tuple[int, int, int, int, int]]) -> bytes:
+def _build_start_element(
+    name_idx: int, attributes: list[tuple[int, int, int, int, int]]
+) -> bytes:
     # attributes: (ns_idx, name_idx, raw_value_idx, value_type, value_data)
     header_size = 16
     attr_ext_size = 20
     attribute_start = attr_ext_size
     attribute_size = 20
     attribute_count = len(attributes)
-    node_header = struct.pack("<HHI", 0x0102, header_size, 0) + struct.pack("<II", 1, 0xFFFFFFFF)
+    node_header = struct.pack("<HHI", 0x0102, header_size, 0) + struct.pack(
+        "<II", 1, 0xFFFFFFFF
+    )
     attr_ext = struct.pack(
         "<IIHHHHHH",
         0xFFFFFFFF,
@@ -65,7 +69,9 @@ def _build_start_element(name_idx: int, attributes: list[tuple[int, int, int, in
             value_data,
         )
     size = header_size + len(attr_ext) + len(attr_bytes)
-    node_header = struct.pack("<HHI", 0x0102, header_size, size) + struct.pack("<II", 1, 0xFFFFFFFF)
+    node_header = struct.pack("<HHI", 0x0102, header_size, size) + struct.pack(
+        "<II", 1, 0xFFFFFFFF
+    )
     return node_header + attr_ext + attr_bytes
 
 
@@ -81,7 +87,13 @@ def _build_manifest_axml(icon_value: str, attr_name: str = "icon") -> bytes:
     start_application = _build_start_element(
         name_idx=strings.index("application"),
         attributes=[
-            (strings.index("http://schemas.android.com/apk/res/android"), strings.index(attr_name), icon_value_idx, 0x03, icon_value_idx),
+            (
+                strings.index("http://schemas.android.com/apk/res/android"),
+                strings.index(attr_name),
+                icon_value_idx,
+                0x03,
+                icon_value_idx,
+            ),
         ],
     )
     total_size = 8 + len(string_pool) + len(start_application)
@@ -101,7 +113,9 @@ def test_axml_manifest_icon_ref_parses_binary_manifest(tmp_path):
 
 def test_axml_manifest_round_icon_ref_fallback(tmp_path):
     apk_path = tmp_path / "app_round.apk"
-    manifest_bytes = _build_manifest_axml("@mipmap/ic_launcher_round", attr_name="roundIcon")
+    manifest_bytes = _build_manifest_axml(
+        "@mipmap/ic_launcher_round", attr_name="roundIcon"
+    )
     with zipfile.ZipFile(apk_path, "w") as zf:
         zf.writestr("AndroidManifest.xml", manifest_bytes)
     icon_ref, err = utils._axml_manifest_icon_ref(apk_path, prefer_round_icon=True)

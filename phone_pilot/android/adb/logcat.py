@@ -28,6 +28,22 @@ def clear_logcat(device_serial: Optional[str] = None) -> dict:
     }
 
 
+def device_logcat_time(device_serial: Optional[str] = None) -> Optional[str]:
+    """Return the device's current time as a logcat threadtime timestamp.
+
+    Format matches ``logcat -v threadtime`` ("MM-DD HH:MM:SS.mmm"), so the
+    result can be passed straight to ``read_logcat(since=...)`` / ``logcat -T``.
+    Uses the device clock (same timezone as logcat), so no timezone conversion
+    is needed. Returns None on failure.
+    """
+    # The device-side shell re-splits the command on spaces, so the format
+    # string must be quoted to survive as a single argument to `date`.
+    cmd = adb_prefix(device_serial) + ["shell", "date", "'+%m-%d %H:%M:%S.000'"]
+    proc = CommandRunner.run(cmd, check=False, log_output=False)
+    out = (proc.stdout or "").strip()
+    return out or None
+
+
 def _pidof(device_serial: Optional[str], package_name: Optional[str]) -> Optional[int]:
     """Return the first pid for a package, or None if not found."""
     if not package_name:
@@ -44,7 +60,9 @@ def _pidof(device_serial: Optional[str], package_name: Optional[str]) -> Optiona
         return None
 
 
-def _build_filter_spec(tag_filter: Optional[str], filter_spec: Optional[str]) -> Optional[str]:
+def _build_filter_spec(
+    tag_filter: Optional[str], filter_spec: Optional[str]
+) -> Optional[str]:
     """Build a logcat filter spec from tag or raw spec input."""
     if filter_spec and filter_spec.strip():
         return filter_spec.strip()
@@ -67,17 +85,21 @@ def read_logcat(
     filter_spec: Optional[str] = None,
     tag_filter: Optional[str] = None,
     package_name: Optional[str] = None,
+    since: Optional[str] = None,
 ) -> Tuple[str, dict]:
     """
     Read logcat content from the device.
 
     Args:
         device_serial: Device serial number
-        lines: Number of lines to retrieve
+        lines: Number of lines to retrieve (ignored when ``since`` is given)
         fmt: Logcat format (threadtime, brief, etc.)
         filter_spec: Full filter specification
         tag_filter: Tag-based filter
         package_name: Filter by package PID
+        since: Only return logs at/after this device timestamp (maps to
+            ``logcat -T``, e.g. "01-15 14:30:00.000"). Takes precedence over
+            ``lines``.
 
     Returns:
         Tuple of (content, metadata dict)
@@ -90,8 +112,15 @@ def read_logcat(
     fmt2 = (fmt or "threadtime").strip() or "threadtime"
     fs = _build_filter_spec(tag_filter, filter_spec)
 
+    # -T <time> (since) and -t <count> are mutually exclusive selectors; when a
+    # start time is given it takes precedence so we get the full window after it.
+    def _window_args() -> list[str]:
+        if since:
+            return ["-T", since]
+        return ["-t", str(n)]
+
     pid = _pidof(device_serial, package_name)
-    cmd = adb_prefix(device_serial) + ["logcat", "-d", "-v", fmt2, "-t", str(n)]
+    cmd = adb_prefix(device_serial) + ["logcat", "-d", "-v", fmt2] + _window_args()
     used_pid = False
     if pid is not None:
         cmd += ["--pid", str(pid)]
@@ -102,7 +131,7 @@ def read_logcat(
     proc = CommandRunner.run(cmd, check=False, log_output=False)
     # If --pid is unsupported, retry without pid.
     if proc.returncode != 0 and used_pid:
-        cmd = adb_prefix(device_serial) + ["logcat", "-d", "-v", fmt2, "-t", str(n)]
+        cmd = adb_prefix(device_serial) + ["logcat", "-d", "-v", fmt2] + _window_args()
         if fs:
             cmd.append(fs)
         proc = CommandRunner.run(cmd, check=False, log_output=False)
@@ -115,6 +144,7 @@ def read_logcat(
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,
         "lines": n,
+        "since": since,
         "format": fmt2,
         "filter_spec": fs,
         "package_name": package_name,

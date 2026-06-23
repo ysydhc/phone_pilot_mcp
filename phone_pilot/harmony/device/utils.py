@@ -15,7 +15,9 @@ from phone_pilot.harmony.hdc.runner import HdcCommandRunner
 from phone_pilot.harmony.hdc.utils import hdc_prefix
 
 
-_WM_SIZE_RE = re.compile(r"^(?:Physical|Override)\s+size:\s*(\d+)x(\d+)\s*$", re.MULTILINE)
+_WM_SIZE_RE = re.compile(
+    r"^(?:Physical|Override)\s+size:\s*(\d+)x(\d+)\s*$", re.MULTILINE
+)
 _RES_XY_RE = re.compile(r"(\d{3,5})\s*[xX]\s*(\d{3,5})")
 _WIDTH_RE = re.compile(r"\bwidth\b\s*[:=]\s*(\d{3,5})", re.IGNORECASE)
 _HEIGHT_RE = re.compile(r"\bheight\b\s*[:=]\s*(\d{3,5})", re.IGNORECASE)
@@ -24,7 +26,9 @@ _PHYS_RES_RE = re.compile(r"physical resolution=(\d{3,5})x(\d{3,5})", re.IGNOREC
 _FOCUS_RE = re.compile(r"\b(mCurrentFocus|mFocusedApp)=\S+\s+(\S+)/(\S+)\}")
 
 
-def input_tap(device_serial: Optional[str], x: int, y: int, *, wait_s: float = 0.15) -> dict:
+def input_tap(
+    device_serial: Optional[str], x: int, y: int, *, wait_s: float = 0.15
+) -> dict:
     """Tap at screen coordinates using HDC."""
     if not device_serial:
         return {"ok": False, "error": "device_serial is required"}
@@ -38,7 +42,13 @@ def input_tap(device_serial: Optional[str], x: int, y: int, *, wait_s: float = 0
         delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0,
         log_output=False,
     )
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "x": xi, "y": yi, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "x": xi,
+        "y": yi,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 def input_swipe(
@@ -57,13 +67,21 @@ def input_swipe(
     try:
         xi1, yi1, xi2, yi2 = int(x1), int(y1), int(x2), int(y2)
     except Exception:
-        return {"ok": False, "error": "x/y must be integers", "x1": x1, "y1": y1, "x2": x2, "y2": y2}
+        return {
+            "ok": False,
+            "error": "x/y must be integers",
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+        }
     try:
         dur = int(duration_ms)
     except Exception:
         dur = 300
     proc = HdcCommandRunner.run(
-        hdc_prefix(device_serial) + ["shell", "input", "swipe", str(xi1), str(yi1), str(xi2), str(yi2), str(dur)],
+        hdc_prefix(device_serial)
+        + ["shell", "input", "swipe", str(xi1), str(yi1), str(xi2), str(yi2), str(dur)],
         check=False,
         delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0,
         log_output=False,
@@ -129,10 +147,17 @@ def input_text(device_serial: Optional[str], text: str, *, enter: bool = False) 
             delay_s=0.1,
             log_output=False,
         )
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "text": t, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "text": t,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
-def input_keyevent(device_serial: Optional[str], keycode: str, *, wait_s: float = 0.12) -> dict:
+def input_keyevent(
+    device_serial: Optional[str], keycode: str, *, wait_s: float = 0.12
+) -> dict:
     """Send a key event via HDC input keyevent."""
     if not device_serial:
         return {"ok": False, "error": "device_serial is required"}
@@ -145,7 +170,12 @@ def input_keyevent(device_serial: Optional[str], keycode: str, *, wait_s: float 
         delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0,
         log_output=False,
     )
-    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "keycode": k, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "keycode": k,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 def get_screen_size(device_serial: Optional[str]) -> Optional[tuple[int, int]]:
@@ -166,7 +196,8 @@ def get_screen_size(device_serial: Optional[str]) -> Optional[tuple[int, int]]:
 
     # 2) Try RenderService screen info (preferred on HarmonyOS)
     proc_rs = HdcCommandRunner.run(
-        hdc_prefix(device_serial) + ["shell", "hidumper", "-s", "RenderService", "-a", "screen"],
+        hdc_prefix(device_serial)
+        + ["shell", "hidumper", "-s", "RenderService", "-a", "screen"],
         check=False,
         timeout_s=8.0,
         log_output=False,
@@ -201,7 +232,9 @@ def get_screen_size(device_serial: Optional[str]) -> Optional[tuple[int, int]]:
     return None
 
 
-def list_installed_packages(device_serial: Optional[str], *, include_system: bool = False) -> list[str]:
+def list_installed_packages(
+    device_serial: Optional[str], *, include_system: bool = False
+) -> list[str]:
     """
     Best-effort list installed package/bundle names.
 
@@ -224,10 +257,18 @@ def list_installed_packages(device_serial: Optional[str], *, include_system: boo
     if include_system:
         return sorted(set(pkgs))
     # Heuristic: filter out system bundles by prefix if possible.
-    return sorted({p for p in pkgs if not p.startswith("com.huawei.") and not p.startswith("ohos.")})
+    return sorted(
+        {
+            p
+            for p in pkgs
+            if not p.startswith("com.huawei.") and not p.startswith("ohos.")
+        }
+    )
 
 
-def launch_app(device_serial: Optional[str], package: str, activity: Optional[str] = None) -> dict:
+def launch_app(
+    device_serial: Optional[str], package: str, activity: Optional[str] = None
+) -> dict:
     """Launch an app/ability using `aa start`."""
     if not device_serial:
         return {"ok": False, "error": "device_serial is required"}
@@ -238,7 +279,12 @@ def launch_app(device_serial: Optional[str], package: str, activity: Optional[st
     if activity:
         cmd += ["-a", activity]
     proc = HdcCommandRunner.run(cmd, check=False, delay_s=0.2, log_output=False)
-    return {"ok": proc.returncode == 0, "package": pkg, "activity": activity, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "package": pkg,
+        "activity": activity,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 def force_stop_package(device_serial: Optional[str], package: str) -> dict:
@@ -253,7 +299,11 @@ def force_stop_package(device_serial: Optional[str], package: str) -> dict:
     if proc.returncode != 0:
         cmd = hdc_prefix(device_serial) + ["shell", "aa", "stop", pkg]
         proc = HdcCommandRunner.run(cmd, check=False, delay_s=0.1, log_output=False)
-    return {"ok": proc.returncode == 0, "package": pkg, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "package": pkg,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 def clear_app_data(device_serial: Optional[str], package: str) -> dict:
@@ -265,7 +315,11 @@ def clear_app_data(device_serial: Optional[str], package: str) -> dict:
         return {"ok": False, "error": "package is required"}
     cmd = hdc_prefix(device_serial) + ["shell", "bm", "clear", "-n", pkg]
     proc = HdcCommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False)
-    return {"ok": proc.returncode == 0, "package": pkg, "stderr": (proc.stderr or "").strip()}
+    return {
+        "ok": proc.returncode == 0,
+        "package": pkg,
+        "stderr": (proc.stderr or "").strip(),
+    }
 
 
 def get_current_focus(device_serial: Optional[str]) -> dict:
@@ -329,6 +383,7 @@ def clear_background_processes(device_serial: Optional[str]) -> dict:
 
     try:
         from phone_pilot.harmony.hmdriver_bridge import get_hmdriver
+
         hm = get_hmdriver(device_serial)
     except Exception as exc:
         return {"ok": False, "error": f"hmdriver2 not available: {exc}"}
@@ -388,7 +443,12 @@ def clear_background_processes(device_serial: Optional[str]) -> dict:
                 continue
         hm.go_home()
         time.sleep(0.5)
-        return {"ok": True, "method": "force_stop_3p", "stopped": stopped, "platform": "harmony"}
+        return {
+            "ok": True,
+            "method": "force_stop_3p",
+            "stopped": stopped,
+            "platform": "harmony",
+        }
     except Exception as exc:
         logger.warning("Force-stop fallback failed: %s", exc)
 

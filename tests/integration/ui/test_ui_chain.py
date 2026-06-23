@@ -44,6 +44,9 @@ def test_chain_repeat_step(monkeypatch) -> None:
     from phone_pilot.core.ui.chain import find_text as step_find_text
 
     ctx = ScriptContext(device_serial="dummy")
-    monkeypatch.setattr("phone_pilot.script_api.find_text", lambda *_a, **_k: UIElement(x=1, y=1, width=2, height=2))
+    monkeypatch.setattr(
+        "phone_pilot.script_api.find_text",
+        lambda *_a, **_k: UIElement(x=1, y=1, width=2, height=2),
+    )
     res = chain(ctx).repeat(step_find_text("ok"), max=2).done()
     assert res["ok"] is True

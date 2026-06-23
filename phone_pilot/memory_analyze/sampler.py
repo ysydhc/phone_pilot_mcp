@@ -18,12 +18,12 @@ Does not block main script execution; captures only summary core fields per samp
     - 30s 间隔: 3 分钟脚本约 6 次采样, 额外 ~6s (+3%)
     - 采集失败（设备断连等）静默跳过
 """
+
 from __future__ import annotations
 
 import threading
 import time
 from typing import Any, Optional
-
 
 
 class MemInfoSampler:
@@ -104,7 +104,10 @@ class MemInfoSampler:
         """采集一次 meminfo 快照（仅 summary 字段）/ Take a single meminfo snapshot."""
         try:
             from phone_pilot.memory_analyze.meminfo import capture_meminfo
-            result = capture_meminfo(self._device_serial, self._package_name, timeout_s=10.0)
+
+            result = capture_meminfo(
+                self._device_serial, self._package_name, timeout_s=10.0
+            )
             if not result.get("ok"):
                 return None
 

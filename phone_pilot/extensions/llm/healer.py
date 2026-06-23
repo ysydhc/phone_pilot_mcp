@@ -8,6 +8,7 @@ Supports OpenAI Vision / Ollama multimodal / any OpenAI-compatible API.
 默认关闭，需要用户配置 API key 并显式启用。
 Off by default, requires API key configuration and explicit opt-in.
 """
+
 from __future__ import annotations
 
 import base64
@@ -22,6 +23,7 @@ from phone_pilot.core.log import _log
 # ---------------------------------------------------------------------------
 # 数据结构
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class LLMHealSuggestion:
@@ -82,6 +84,7 @@ _USER_PROMPT_TEMPLATE = """\
 # ---------------------------------------------------------------------------
 # LLM 调用
 # ---------------------------------------------------------------------------
+
 
 def _get_llm_config() -> dict:
     """从环境变量读取 LLM 配置 / Read LLM config from env vars."""
@@ -174,7 +177,9 @@ def analyze_and_suggest(
                 f"fix_detail={json.dumps(exp.get('fix_detail', {}), ensure_ascii=False)}, "
                 f"success_rate={exp.get('success_rate', '?')}"
             )
-        experience_section = "历史参考经验（同一页面的过往纠正记录）：\n" + "\n".join(exp_lines)
+        experience_section = "历史参考经验（同一页面的过往纠正记录）：\n" + "\n".join(
+            exp_lines
+        )
 
     user_prompt = _USER_PROMPT_TEMPLATE.format(
         action=error_context.get("action", "?"),
@@ -195,16 +200,21 @@ def analyze_and_suggest(
     if screenshot_bytes:
         # Vision API — 发送截图
         b64 = base64.b64encode(screenshot_bytes).decode("ascii")
-        messages.append({
-            "role": "user",
-            "content": [
-                {"type": "text", "text": user_prompt},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "low"},
-                },
-            ],
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{b64}",
+                            "detail": "low",
+                        },
+                    },
+                ],
+            }
+        )
     else:
         messages.append({"role": "user", "content": user_prompt})
 
@@ -239,12 +249,14 @@ def _call_openai_compatible(
     import urllib.error
 
     url = f"{base_url}/chat/completions"
-    payload = json.dumps({
-        "model": model,
-        "messages": messages,
-        "temperature": 0.2,
-        "max_tokens": 500,
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": 500,
+        }
+    ).encode("utf-8")
 
     headers = {
         "Content-Type": "application/json",

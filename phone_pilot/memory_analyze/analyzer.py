@@ -51,7 +51,7 @@ HPROF_GC_PRIM_ARRAY_DUMP = 0x23
 
 # Basic type sizes
 HPROF_BASIC_TYPES = {
-    2: ("object", 4),    # Object reference (will be id_size)
+    2: ("object", 4),  # Object reference (will be id_size)
     4: ("boolean", 1),
     5: ("char", 2),
     6: ("float", 4),
@@ -66,6 +66,7 @@ HPROF_BASIC_TYPES = {
 @dataclass
 class ClassInfo:
     """Class information from hprof."""
+
     class_id: int
     name_id: int
     name: str = ""
@@ -79,6 +80,7 @@ class ClassInfo:
 @dataclass
 class InstanceInfo:
     """Instance information."""
+
     obj_id: int
     class_id: int
     size: int = 0
@@ -156,7 +158,7 @@ class HprofParser:
     def _parse_string_record(self, data: bytes) -> None:
         string_id = self._read_id(data, 0)
         try:
-            string = data[self.id_size:].decode("utf-8", errors="replace")
+            string = data[self.id_size :].decode("utf-8", errors="replace")
         except Exception:
             string = ""
         self.string_table[string_id] = string
@@ -203,11 +205,11 @@ class HprofParser:
 
         # skip class loader, signers, protection domain, reserved, instance size
         offset += self.id_size * 4
-        instance_size = struct.unpack(">I", data[offset:offset + 4])[0]
+        instance_size = struct.unpack(">I", data[offset : offset + 4])[0]
         offset += 4
 
         # Skip constant pool
-        cp_count = struct.unpack(">H", data[offset:offset + 2])[0]
+        cp_count = struct.unpack(">H", data[offset : offset + 2])[0]
         offset += 2
         for _ in range(cp_count):
             offset += 2  # constant pool index
@@ -217,7 +219,7 @@ class HprofParser:
             offset += size
 
         # Skip static fields
-        static_count = struct.unpack(">H", data[offset:offset + 2])[0]
+        static_count = struct.unpack(">H", data[offset : offset + 2])[0]
         offset += 2
         for _ in range(static_count):
             offset += self.id_size  # name_id
@@ -227,7 +229,7 @@ class HprofParser:
             offset += size
 
         # Read instance fields
-        field_count = struct.unpack(">H", data[offset:offset + 2])[0]
+        field_count = struct.unpack(">H", data[offset : offset + 2])[0]
         offset += 2
         fields = []
         for _ in range(field_count):
@@ -257,7 +259,7 @@ class HprofParser:
         offset += self.id_size
 
         # instance data length
-        data_len = struct.unpack(">I", data[offset:offset + 4])[0]
+        data_len = struct.unpack(">I", data[offset : offset + 4])[0]
         offset += 4
 
         # Skip instance data for now
@@ -280,7 +282,7 @@ class HprofParser:
         offset += self.id_size
         offset += 4  # stack trace serial
 
-        num_elements = struct.unpack(">I", data[offset:offset + 4])[0]
+        num_elements = struct.unpack(">I", data[offset : offset + 4])[0]
         offset += 4
 
         if is_primitive:
@@ -316,21 +318,23 @@ class HprofParser:
 
     def _read_id(self, data: bytes, offset: int) -> int:
         if self.id_size == 4:
-            return struct.unpack(">I", data[offset:offset + 4])[0]
+            return struct.unpack(">I", data[offset : offset + 4])[0]
         if self.id_size == 8:
-            return struct.unpack(">Q", data[offset:offset + 8])[0]
+            return struct.unpack(">Q", data[offset : offset + 8])[0]
         raise ValueError("Unsupported id_size")
 
     def _build_stats(self) -> dict:
         stats = []
         for cls_id, cls in self.classes.items():
             if cls.instance_count > 0:
-                stats.append({
-                    "class_name": cls.name,
-                    "instance_count": cls.instance_count,
-                    "total_size": cls.total_size,
-                    "instance_size": cls.instance_size,
-                })
+                stats.append(
+                    {
+                        "class_name": cls.name,
+                        "instance_count": cls.instance_count,
+                        "total_size": cls.total_size,
+                        "instance_size": cls.instance_size,
+                    }
+                )
 
         # Sort by total size desc
         stats.sort(key=lambda x: x["total_size"], reverse=True)
@@ -354,7 +358,7 @@ def get_large_objects(file_path: str, top_n: int = 20) -> dict:
     if not res.get("ok"):
         return res
     stats = res.get("stats", [])
-    return {"ok": True, "top": stats[:max(1, int(top_n))]}
+    return {"ok": True, "top": stats[: max(1, int(top_n))]}
 
 
 def diff_hprof(
@@ -380,11 +384,13 @@ def diff_hprof(
     for cls in all_classes:
         b = before_stats.get(cls, {"instance_count": 0, "total_size": 0})
         a = after_stats.get(cls, {"instance_count": 0, "total_size": 0})
-        diff.append({
-            "class_name": cls,
-            "instance_count_diff": a["instance_count"] - b["instance_count"],
-            "total_size_diff": a["total_size"] - b["total_size"],
-        })
+        diff.append(
+            {
+                "class_name": cls,
+                "instance_count_diff": a["instance_count"] - b["instance_count"],
+                "total_size_diff": a["total_size"] - b["total_size"],
+            }
+        )
 
     diff.sort(key=lambda x: abs(x["total_size_diff"]), reverse=True)
 

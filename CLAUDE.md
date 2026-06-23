@@ -55,6 +55,7 @@ The server is split by domain. `server.py` creates the single `FastMCP` instance
 - `tool_contracts.py` holds shared schema/response contract definitions. `_state.py` holds shared mutable state (recording/logcat) guarded by `_state_lock`.
 - **Response contract**: every `phone_*` tool returns a `dict`. Success → `{"ok": True, ...}`; failure → `{"ok": False, "error": str, ...}`. Never raise out of a tool. `_with_device` in `_helpers.py` wraps tool bodies to resolve the serial and convert exceptions into this envelope.
 - `phone_get_page_state` is the LLM-first tool: one call returns Activity, numbered interactive elements with coordinates, scrollable regions, and all text. With `annotate_elements=True` it overlays element numbers on the screenshot so the agent can call `phone_tap_element(index=N)`.
+- **Session recording → script (`_recorder.py` + `_script_record_tools.py`)**: `server.py` wraps `mcp.tool` via `install_recording_hook` *before* tool modules import, so every registered tool reports its calls. `phone_record_script_start` / `phone_record_script_stop` capture whitelisted **action** tools (tap/swipe/input/launch/…; pure queries like `phone_get_page_state` are excluded) and `stop` returns a runnable `script_api` script generated from the `CODEGEN` map (MCP tool name → script_api source line). `phone_replay_trace` re-executes a captured trace. The hook is a no-op unless recording is active, and recording failures never break a tool call. When adding a new action tool that should be recordable, add a `CODEGEN` entry for it.
 
 ### script_api (`phone_pilot/script_api/`)
 
@@ -63,6 +64,43 @@ The Python authoring surface for automation scripts (the non-MCP path). `__init_
 - `context.py` — `ScriptContext` carries device/platform plus toggles: `auto_screenshot`, `auto_dump_hprof`, `popup_guard` (default on), `llm_healing`, `max_heal_attempts`.
 - `runner.py` — `run_script(main, ctx=...)` is the script entry harness: handles exit codes, tracebacks, and `RunSession` finalization. `chain(ctx)` is the fluent API; `retry()` and `scroll_to_find()` are the retrying helpers. `_finalize_run` stops recording/logcat, writes the summary, and persists healing events.
 - `find.py` / `_locate.py` / `_ocr.py` — element location (UIAutomator → OCR → image fallback). `actions.py` — taps/swipes/text/app control. `popup_guard.py` + `self_healer.py` — the self-healing pipeline.
+- `logcat.py` — log search/wait helpers: `logcat_find`, `logcat_wait_for`, `logcat_mark` (capture device timestamp), `logcat_since` (read logs after a timestamp via `logcat -T`), `logcat_assert_sequence` (verify patterns appear in order, subsequence match).
+
+#### Robust interaction & waiting (in `actions.py` / `android/ui/wait.py`)
+
+These exist to fix flaky fixed-`sleep` timing and mis-taps that jump out of the app:
+
+- `tap_when_ready(ctx, text=/resource_id=, require_clickable=True)` — poll until the element is clickable/enabled, then tap it; matched element and tap coords come from the same query (no drift). On timeout it does **not** tap.
+- `safe_tap(ctx, x, y, expect_activity=/expect_package=)` — tap then verify foreground state; if `package` changed (jumped out of the app) or expectations aren't met, auto `go_back` and re-verify recovery. Default: any package change is treated as a mis-tap.
+- `safe_close(ctx, resource_id=/text=, fallback_coord=, max_attempts=)` — full close flow: wait button ready → tap → verify the button disappeared → `go_back` and retry. Falls back to a fixed coordinate (with mis-tap protection) when the button can't be located.
+- `wait_for_element_appear(..., require_clickable=, require_enabled=)` — element-present checks can now require interactive state. `wait_for_activity_change(from_activity=None, to_activity=None)` — confirms an actual transition occurred (baseline + leave), unlike `wait_for_activity` which succeeds if already on the target.
+
+#### Discoverability
+
+The public surface is enumerated from `__all__` via `script_api/_introspect.py` (single source of truth):
+
+- `phone-pilot-call --list-script-api` prints every public function with its signature and one-line summary.
+- The same `list_public_api()` powers any generated docs, so the list never drifts from code.
+
+#### MCP tool ↔ script_api mapping
+
+MCP tools (for agents) and script_api (for Python scripts) are two surfaces over the same drivers. Rough correspondence:
+
+| MCP tool | script_api equivalent |
+|----------|----------------------|
+| `phone_tap(x, y)` | `tap_xy(ctx, x, y)` |
+| `phone_tap_text(text)` | `find_text(ctx, text).tap()` |
+| `phone_tap_element(index)` | (via `phone_get_page_state` numbering; script side uses `find_*().tap()`) |
+| `phone_input_text(text)` | `type_text(ctx, text)` |
+| `phone_swipe(...)` | `swipe(ctx, ...)` / `swipe_up/down/left/right(ctx)` |
+| `phone_find_element(text=/resource_id=)` | `find_text(ctx, text)` / `raw_uia(ctx, selector, by=)` |
+| `phone_wait_for_element(..., require_clickable=)` | `tap_when_ready(ctx, ...)` (wait) / `wait_for_element_appear(...)` |
+| `phone_scroll_to_find(text)` | `scroll_to_find(ctx, text)` |
+| `phone_screenshot()` | `screenshot(ctx, name)` |
+| `phone_launch_app(pkg)` / `phone_force_stop(pkg)` | `restart_app_pkg(ctx, pkg)` |
+| `phone_go_back()` / `phone_go_home()` | `ctx.driver.go_back()` / `reset_home_screen(ctx)` |
+| `phone_search_logcat(pattern)` | `logcat_find(ctx, pattern)` / `logcat_since` / `logcat_assert_sequence` |
+| `phone_run_script(path)` | `run_script(main, ctx=...)` (the harness scripts call) |
 
 ### Self-healing (3 tiers, when a step fails)
 

@@ -36,7 +36,9 @@ def ensure_adb_env() -> None:
     if (os.environ.get("ADB_PATH") or os.environ.get("ANDROID_ADB_PATH") or "").strip():
         _ENV_ENSURED = True
         return
-    if (os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "").strip():
+    if (
+        os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or ""
+    ).strip():
         _ENV_ENSURED = True
         return
 
@@ -49,7 +51,10 @@ def ensure_adb_env() -> None:
     if sys.platform == "darwin":
         try:
             import glob
-            candidates += sorted(glob.glob("/Users/*/Library/Android/sdk/platform-tools/adb"))
+
+            candidates += sorted(
+                glob.glob("/Users/*/Library/Android/sdk/platform-tools/adb")
+            )
             candidates += sorted(glob.glob("/Users/*/Android/Sdk/platform-tools/adb"))
         except Exception:
             pass
@@ -57,7 +62,9 @@ def ensure_adb_env() -> None:
         if p and os.path.exists(p) and os.access(p, os.X_OK):
             os.environ["ADB_PATH"] = p
             sdk_root = str(os.path.dirname(os.path.dirname(p)))
-            if not os.environ.get("ANDROID_HOME") and not os.environ.get("ANDROID_SDK_ROOT"):
+            if not os.environ.get("ANDROID_HOME") and not os.environ.get(
+                "ANDROID_SDK_ROOT"
+            ):
                 os.environ["ANDROID_HOME"] = sdk_root
             path_dir = os.path.dirname(p)
             path_val = os.environ.get("PATH", "")
@@ -97,12 +104,16 @@ def adb_executable() -> str:
     if _ADB_CACHED:
         return _ADB_CACHED
 
-    env_path = (os.environ.get("ADB_PATH") or os.environ.get("ANDROID_ADB_PATH") or "").strip()
+    env_path = (
+        os.environ.get("ADB_PATH") or os.environ.get("ANDROID_ADB_PATH") or ""
+    ).strip()
     if env_path:
         _ADB_CACHED = env_path
         return _ADB_CACHED
 
-    sdk_root = (os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "").strip()
+    sdk_root = (
+        os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or ""
+    ).strip()
     if sdk_root:
         cand = os.path.join(sdk_root, "platform-tools", "adb")
         if os.path.exists(cand) and os.access(cand, os.X_OK):
@@ -121,7 +132,9 @@ def adb_executable() -> str:
         try:
             import glob
 
-            candidates += sorted(glob.glob("/Users/*/Library/Android/sdk/platform-tools/adb"))
+            candidates += sorted(
+                glob.glob("/Users/*/Library/Android/sdk/platform-tools/adb")
+            )
             candidates += sorted(glob.glob("/Users/*/Android/Sdk/platform-tools/adb"))
         except Exception:
             pass
@@ -150,7 +163,9 @@ def wait_for_device(device: Optional[str]) -> None:
     """
     CommandRunner.run(adb_prefix(device) + ["wait-for-device"])
     # Some devices return empty until fully booted; we don't hard-fail here.
-    CommandRunner.run(adb_prefix(device) + ["shell", "getprop", "sys.boot_completed"], check=False)
+    CommandRunner.run(
+        adb_prefix(device) + ["shell", "getprop", "sys.boot_completed"], check=False
+    )
 
 
 def push_file(device: Optional[str], local_path: str, remote_path: str) -> None:

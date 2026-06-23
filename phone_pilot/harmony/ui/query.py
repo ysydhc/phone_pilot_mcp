@@ -151,7 +151,8 @@ def element_exists(
             hierarchy = dump_hierarchy_dict(device_serial)
             nodes = parse_hierarchy_nodes(hierarchy)
             filtered = _filter_nodes(
-                nodes, selector,
+                nodes,
+                selector,
                 case_sensitive=False,
             )
             if filtered:
@@ -200,6 +201,7 @@ async def element_exists_async(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _selector_to_kwargs(selector: dict) -> dict:
     """Convert our selector dict to hmdriver2 kwargs."""
     kwargs = {}
@@ -243,15 +245,33 @@ def _filter_nodes(
             break
 
         if key == "text":
-            results = [n for n in results if _match(n.text, value, exact=True, cs=case_sensitive)]
+            results = [
+                n
+                for n in results
+                if _match(n.text, value, exact=True, cs=case_sensitive)
+            ]
         elif key == "text_contains":
-            results = [n for n in results if _match(n.text, value, exact=False, cs=case_sensitive)]
+            results = [
+                n
+                for n in results
+                if _match(n.text, value, exact=False, cs=case_sensitive)
+            ]
         elif key == "description" or key == "desc" or key == "content_desc":
-            results = [n for n in results if _match(n.description, value, exact=False, cs=case_sensitive)]
+            results = [
+                n
+                for n in results
+                if _match(n.description, value, exact=False, cs=case_sensitive)
+            ]
         elif key == "id" or key == "resource_id":
-            results = [n for n in results if _match(n.id, value, exact=True, cs=case_sensitive)]
+            results = [
+                n for n in results if _match(n.id, value, exact=True, cs=case_sensitive)
+            ]
         elif key == "type" or key == "class_name":
-            results = [n for n in results if _match(n.type, value, exact=False, cs=case_sensitive)]
+            results = [
+                n
+                for n in results
+                if _match(n.type, value, exact=False, cs=case_sensitive)
+            ]
         elif key == "clickable":
             results = [n for n in results if n.clickable == bool(value)]
         elif key == "scrollable":

@@ -6,6 +6,7 @@
     from phone_pilot.script_api import ScriptContext, find_text, ...
     from phone_pilot import script_api as api; api.find_text(...)
 """
+
 from __future__ import annotations
 
 # ---- 重新导出：核心类 & 异常 ----
@@ -33,6 +34,9 @@ from .actions import (
     type_text,
     keyevent,
     tap_xy,
+    tap_when_ready,
+    safe_tap,
+    safe_close,
     mem_snapshot,
     mem_diff,
     mem_check_leak,
@@ -45,7 +49,23 @@ from .actions import (
 )
 
 # ---- 重新导出：日志 API ----
-from .logcat import logcat_find, logcat_wait_for, _merge_logcat_lines
+from .logcat import (
+    logcat_find,
+    logcat_wait_for,
+    logcat_mark,
+    logcat_since,
+    logcat_assert_sequence,
+    _merge_logcat_lines,
+)
+
+# ---- 重新导出：等待条件（android/ui/wait.py）----
+from phone_pilot.android.ui.wait import (
+    wait_for_element_appear,
+    wait_for_element_disappear,
+    wait_for_activity,
+    wait_for_activity_change,
+    wait_for_page_stable,
+)
 
 # ---- 重新导出：执行器 & 链式 API ----
 from .runner import (
@@ -140,9 +160,21 @@ __all__ = [
     "type_text",
     "keyevent",
     "tap_xy",
+    "tap_when_ready",
+    "safe_tap",
+    "safe_close",
     # 日志
     "logcat_find",
     "logcat_wait_for",
+    "logcat_mark",
+    "logcat_since",
+    "logcat_assert_sequence",
+    # 等待条件
+    "wait_for_element_appear",
+    "wait_for_element_disappear",
+    "wait_for_activity",
+    "wait_for_activity_change",
+    "wait_for_page_stable",
     # UIAutomator 逃生通道
     "dump_ui",
     "raw_uia",

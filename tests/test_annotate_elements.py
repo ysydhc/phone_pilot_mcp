@@ -14,7 +14,7 @@ from phone_pilot.extensions.vision.annotate import (
     annotate_elements_on_screenshot,
     _color_for_type,
 )
-from phone_pilot.mcp.server import (
+from phone_pilot.mcp._page_state_tools import (
     _collect_page_elements,
 )
 
@@ -22,6 +22,7 @@ from phone_pilot.mcp.server import (
 # ---------------------------------------------------------------------------
 # Helpers: fake UINode & driver
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class FakeUINode:
@@ -48,6 +49,7 @@ class FakeUINode:
 
     def bounds_tuple(self) -> Optional[tuple[int, int, int, int]]:
         import re
+
         m = re.search(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", self.bounds)
         if not m:
             return None
@@ -128,6 +130,7 @@ class FakeDriver:
 # annotate_elements_on_screenshot tests
 # ---------------------------------------------------------------------------
 
+
 class TestAnnotateElementsOnScreenshot:
     """Test the annotate_elements_on_screenshot function."""
 
@@ -148,16 +151,18 @@ class TestAnnotateElementsOnScreenshot:
     def test_single_element(self):
         """单个元素标注应生成有效 PNG。"""
         png = self._make_png()
-        elements = [{
-            "index": 0,
-            "type": "button",
-            "label": "确定",
-            "bounds": [10, 20, 80, 60],
-            "center": [45, 40],
-            "clickable": True,
-            "scrollable": False,
-            "resource_id": "btn_ok",
-        }]
+        elements = [
+            {
+                "index": 0,
+                "type": "button",
+                "label": "确定",
+                "bounds": [10, 20, 80, 60],
+                "center": [45, 40],
+                "clickable": True,
+                "scrollable": False,
+                "resource_id": "btn_ok",
+            }
+        ]
         result = annotate_elements_on_screenshot(png, elements)
         assert isinstance(result, bytes)
         assert result[:4] == b"\x89PNG"
@@ -168,10 +173,34 @@ class TestAnnotateElementsOnScreenshot:
         """不同类型的元素应使用不同颜色标注。"""
         png = self._make_png(400, 600)
         elements = [
-            {"index": 0, "type": "button", "label": "按钮", "bounds": [10, 10, 100, 50], "center": [55, 30]},
-            {"index": 1, "type": "input", "label": "输入框", "bounds": [10, 60, 200, 100], "center": [105, 80]},
-            {"index": 2, "type": "text", "label": "文本", "bounds": [10, 110, 150, 140], "center": [80, 125]},
-            {"index": 3, "type": "scroll_container", "label": "", "bounds": [10, 150, 390, 580], "center": [200, 365]},
+            {
+                "index": 0,
+                "type": "button",
+                "label": "按钮",
+                "bounds": [10, 10, 100, 50],
+                "center": [55, 30],
+            },
+            {
+                "index": 1,
+                "type": "input",
+                "label": "输入框",
+                "bounds": [10, 60, 200, 100],
+                "center": [105, 80],
+            },
+            {
+                "index": 2,
+                "type": "text",
+                "label": "文本",
+                "bounds": [10, 110, 150, 140],
+                "center": [80, 125],
+            },
+            {
+                "index": 3,
+                "type": "scroll_container",
+                "label": "",
+                "bounds": [10, 150, 390, 580],
+                "center": [200, 365],
+            },
         ]
         result = annotate_elements_on_screenshot(png, elements)
         assert isinstance(result, bytes)
@@ -181,9 +210,27 @@ class TestAnnotateElementsOnScreenshot:
         """bounds 无效的元素应跳过，不崩溃。"""
         png = self._make_png()
         elements = [
-            {"index": 0, "type": "button", "label": "OK", "bounds": None, "center": [50, 50]},
-            {"index": 1, "type": "text", "label": "Hi", "bounds": [10, 10, 5, 5], "center": [7, 7]},  # x2 < x1
-            {"index": 2, "type": "text", "label": "Valid", "bounds": [10, 10, 90, 50], "center": [50, 30]},
+            {
+                "index": 0,
+                "type": "button",
+                "label": "OK",
+                "bounds": None,
+                "center": [50, 50],
+            },
+            {
+                "index": 1,
+                "type": "text",
+                "label": "Hi",
+                "bounds": [10, 10, 5, 5],
+                "center": [7, 7],
+            },  # x2 < x1
+            {
+                "index": 2,
+                "type": "text",
+                "label": "Valid",
+                "bounds": [10, 10, 90, 50],
+                "center": [50, 30],
+            },
         ]
         result = annotate_elements_on_screenshot(png, elements)
         assert isinstance(result, bytes)
@@ -191,13 +238,15 @@ class TestAnnotateElementsOnScreenshot:
     def test_long_label_truncated(self):
         """超长标签应被截断（不崩溃）。"""
         png = self._make_png()
-        elements = [{
-            "index": 0,
-            "type": "text",
-            "label": "这是一个非常非常非常非常非常非常长的标签文字需要被截断",
-            "bounds": [10, 10, 180, 50],
-            "center": [95, 30],
-        }]
+        elements = [
+            {
+                "index": 0,
+                "type": "text",
+                "label": "这是一个非常非常非常非常非常非常长的标签文字需要被截断",
+                "bounds": [10, 10, 180, 50],
+                "center": [95, 30],
+            }
+        ]
         result = annotate_elements_on_screenshot(png, elements)
         assert isinstance(result, bytes)
 
@@ -205,6 +254,7 @@ class TestAnnotateElementsOnScreenshot:
 # ---------------------------------------------------------------------------
 # _color_for_type tests
 # ---------------------------------------------------------------------------
+
 
 class TestColorForType:
     """Test color mapping for element types."""
@@ -231,6 +281,7 @@ class TestColorForType:
 # _collect_page_elements tests
 # ---------------------------------------------------------------------------
 
+
 class TestCollectPageElements:
     """Test the extracted _collect_page_elements function."""
 
@@ -244,8 +295,14 @@ class TestCollectPageElements:
     def test_filters_containers(self):
         """纯容器节点应被过滤。"""
         nodes = [
-            FakeUINode(class_name="android.widget.FrameLayout", bounds="[0,0][100,100]"),
-            FakeUINode(text="Hello", class_name="android.widget.TextView", bounds="[10,10][90,50]"),
+            FakeUINode(
+                class_name="android.widget.FrameLayout", bounds="[0,0][100,100]"
+            ),
+            FakeUINode(
+                text="Hello",
+                class_name="android.widget.TextView",
+                bounds="[10,10][90,50]",
+            ),
         ]
         driver = FakeDriver(nodes=nodes)
         elements, _, _ = _collect_page_elements(driver)
@@ -255,7 +312,11 @@ class TestCollectPageElements:
     def test_interactive_elements_kept(self):
         """可交互元素（无文本但 clickable）应保留。"""
         nodes = [
-            FakeUINode(class_name="android.widget.ImageButton", clickable=True, bounds="[10,10][60,60]"),
+            FakeUINode(
+                class_name="android.widget.ImageButton",
+                clickable=True,
+                bounds="[10,10][60,60]",
+            ),
         ]
         driver = FakeDriver(nodes=nodes)
         elements, _, _ = _collect_page_elements(driver)
@@ -280,10 +341,18 @@ class TestCollectPageElements:
     def test_visual_sort_and_reindex(self):
         """元素应按视觉位置排序，编号应重新从 0 开始。"""
         nodes = [
-            FakeUINode(text="Bottom", class_name="android.widget.Button", clickable=True,
-                       bounds="[10,500][200,550]"),
-            FakeUINode(text="Top", class_name="android.widget.Button", clickable=True,
-                       bounds="[10,10][200,60]"),
+            FakeUINode(
+                text="Bottom",
+                class_name="android.widget.Button",
+                clickable=True,
+                bounds="[10,500][200,550]",
+            ),
+            FakeUINode(
+                text="Top",
+                class_name="android.widget.Button",
+                clickable=True,
+                bounds="[10,10][200,60]",
+            ),
         ]
         driver = FakeDriver(nodes=nodes)
         elements, _, _ = _collect_page_elements(driver)
@@ -325,7 +394,11 @@ class TestCollectPageElements:
         """include_invisible=True 时应包含更多元素。"""
         nodes = [
             FakeUINode(class_name="android.view.View", bounds="[0,0][100,100]"),
-            FakeUINode(text="Visible", class_name="android.widget.TextView", bounds="[0,100][100,200]"),
+            FakeUINode(
+                text="Visible",
+                class_name="android.widget.TextView",
+                bounds="[0,100][100,200]",
+            ),
         ]
         driver = FakeDriver(nodes=nodes)
         elems_default, _, _ = _collect_page_elements(driver, include_invisible=False)

@@ -3,6 +3,7 @@
 logcat_find, logcat_wait_for — 设备日志搜索与等待。
 Device log searching and waiting functions.
 """
+
 from __future__ import annotations
 
 import re
@@ -14,43 +15,46 @@ from ._helpers import _auto_log_print
 
 
 def _merge_logcat_lines(raw: str) -> list[str]:
-    """按 logcat PID+Tag 前缀合并属于同一逻辑消息的连续多行。
+    """合并"没有自己时间戳头"的续行到前一条逻辑消息。
+
+    用途：Java 异常堆栈那种"一条消息占好几行"——只有首行带 logcat 头，
+    后续 ``at com.x.Y(...)`` 等续行没有头，应并入首行。
+    Merges only header-less continuation lines (e.g. Java stack-trace frames)
+    into the preceding message.
 
     Android logcat 格式示例::
 
-        02-09 15:13:46.062 14459 15444 D Adm-Tag: first line
-        02-09 15:13:46.062 14459 15444 D Adm-Tag: second line (same logical msg)
+        02-09 15:13:46.062 14459 15444 E Adm-Tag: java.lang.RuntimeException: boom
+            at com.example.Foo.bar(Foo.java:42)        <- 续行，无头，合并
+        02-09 15:13:46.063 14459 15444 D Adm-Tag: next message  <- 有头，独立一条
 
-    相邻行如果 PID、TID、Tag 完全一致且时间戳相同/递增极小，则合并为一条。
+    关键：**每一行只要自己带完整 logcat 头，就是独立的一条消息**，即使与上一条
+    PID/TID/Tag 相同也绝不合并。这样"同 tag、连续发、各自带时间戳"的密集日志
+    （如广告回调）不会被错误并成一行，避免 logcat_assert_sequence 漏判。
+    A line that carries its own logcat header is ALWAYS a standalone message,
+    even when its PID/TID/Tag match the previous line — so dense same-tag logs
+    are never collapsed.
     """
     lines = raw.splitlines()
     if not lines:
         return []
 
-    # logcat line pattern: date time PID TID level Tag: message
+    # logcat threadtime header: date time PID TID level Tag: message
     _LOG_RE = re.compile(
-        r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+(\d+)\s+\w\s+([\w\-./]+):\s"
+        r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\d+\s+\w\s+[\w\-./]+:\s"
     )
 
     merged: list[str] = []
     buf: list[str] = []
-    prev_key: Optional[tuple] = None
 
     for line in lines:
-        m = _LOG_RE.match(line)
-        if m:
-            key = (m.group(1), m.group(2), m.group(3))  # (PID, TID, Tag)
-            if key == prev_key and buf:
-                # Same logical message – append
-                buf.append(line)
-            else:
-                # New message — flush previous
-                if buf:
-                    merged.append("\n".join(buf))
-                buf = [line]
-                prev_key = key
+        if _LOG_RE.match(line):
+            # Has its own header → a new standalone message. Flush the previous.
+            if buf:
+                merged.append("\n".join(buf))
+            buf = [line]
         else:
-            # Continuation line without logcat header – belongs to previous
+            # Header-less continuation line → belongs to the previous message.
             if buf:
                 buf.append(line)
             else:
@@ -68,6 +72,7 @@ def logcat_find(
     lines: int = 5000,
     regex: bool = False,
     merge_multiline: bool = False,
+    clear_before: bool = False,
 ) -> dict:
     """在设备日志中查找 pattern。
     Find pattern in device log (logcat).
@@ -81,10 +86,17 @@ def logcat_find(
         lines: 读取的日志行数 / Number of log lines to read
         regex: 是否将 pattern 视为正则 / Treat pattern as regex
         merge_multiline: 是否合并多行日志消息 / Merge multiline log messages
+        clear_before: 查找前是否清空日志 buffer / Clear log buffer before reading
 
     Returns / 返回值:
         dict: {"ok": bool, "count": int, "pattern": str, "hits": list[str]}
     """
+    if clear_before:
+        try:
+            ctx.driver.clear_log()
+        except Exception:
+            pass
+        time.sleep(0.5)
     content = ctx.driver.read_log(lines=int(lines))
     ok = bool(content)
 
@@ -99,6 +111,209 @@ def logcat_find(
     else:
         hits = [line for line in search_lines if pattern in line]
     return {"ok": ok, "count": len(hits), "pattern": pattern, "hits": hits}
+
+
+def logcat_mark(ctx: ScriptContext) -> Optional[str]:
+    """记录当前设备时间，作为后续 logcat_since 的起点。
+    Capture the current device time as a marker for later logcat_since.
+
+    典型用法 / Typical usage::
+
+        mark = logcat_mark(ctx)     # 操作前打标 / mark before action
+        tap_play_button()
+        logcat_since(ctx, mark, pattern="onAdImpression")
+
+    Returns / 返回值:
+        logcat 格式时间戳字符串 "MM-DD HH:MM:SS.mmm"，失败返回 None。
+    """
+    try:
+        return ctx.driver.logcat_time()
+    except Exception:
+        return None
+
+
+def logcat_since(
+    ctx: ScriptContext,
+    since: str,
+    *,
+    pattern: Optional[str] = None,
+    regex: bool = False,
+    merge_multiline: bool = False,
+) -> dict:
+    """只读取某个设备时间点之后的日志，可选地查找 pattern。
+    Read only logs at/after a device timestamp; optionally search for pattern.
+
+    避免历史日志干扰：配合 logcat_mark 实现"打标 → 操作 → 筛区间"。
+    Avoids historical-log interference; pair with logcat_mark.
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        since: 起点时间戳 "MM-DD HH:MM:SS.mmm"（来自 logcat_mark）/ Start timestamp
+        pattern: 可选查找模式，None 则返回全部行 / Optional search pattern
+        regex: 是否将 pattern 视为正则 / Treat pattern as regex
+        merge_multiline: 是否合并多行日志消息 / Merge multiline log messages
+
+    Returns / 返回值:
+        dict: {"ok": bool, "since": str, "count": int, "pattern": str|None,
+               "hits": list[str], "lines": list[str]}
+        - lines: since 之后的全部行 / all lines after `since`
+        - hits: 匹配 pattern 的行（pattern=None 时等于 lines）/ matched lines
+    """
+    content = ctx.driver.read_log(since=since)
+    ok = bool(content)
+
+    if merge_multiline:
+        all_lines = _merge_logcat_lines(content)
+    else:
+        all_lines = content.splitlines()
+
+    if pattern is None:
+        hits = list(all_lines)
+    elif regex:
+        pat = re.compile(pattern)
+        hits = [line for line in all_lines if pat.search(line)]
+    else:
+        hits = [line for line in all_lines if pattern in line]
+
+    return {
+        "ok": ok,
+        "since": since,
+        "count": len(hits),
+        "pattern": pattern,
+        "hits": hits,
+        "lines": all_lines,
+    }
+
+
+def logcat_assert_sequence(
+    ctx: ScriptContext,
+    patterns: list[str],
+    *,
+    tag: Optional[str] = None,
+    timeout_s: float = 60,
+    interval_s: float = 2,
+    regex: bool = True,
+    merge_multiline: bool = True,
+) -> dict:
+    """验证一组 pattern 在日志中按给定顺序出现（子序列匹配）。
+    Assert that patterns appear in the given order in logcat (subsequence match).
+
+    子序列语义 / Subsequence semantics:
+        pattern[i] 命中后，从其**之后**的行继续找 pattern[i+1]；
+        两个 pattern 之间允许夹杂任意其他日志（广告回调间必然有噪声）。
+        After matching pattern[i], search for pattern[i+1] only in lines that
+        follow it; arbitrary other log lines in between are allowed.
+
+    进入函数即记录起点时间（logcat_mark），只验证此刻之后的日志，
+    避免历史日志干扰。轮询直到完整序列命中（立即返回）或超时。
+    Marks the current device time on entry and only inspects logs after it.
+    Polls until the full sequence matches (returns immediately) or times out.
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        patterns: 期望按顺序出现的模式列表 / Patterns expected in order
+        tag: 可选 logcat tag 过滤（设备端）/ Optional logcat tag filter (device-side)
+        timeout_s: 最长等待秒数 / Max wait seconds
+        interval_s: 轮询间隔秒数 / Poll interval seconds
+        regex: pattern 是否为正则（默认 True）/ Treat patterns as regex (default True)
+        merge_multiline: 合并多行日志 / Merge multiline messages
+
+    Returns / 返回值:
+        dict: {
+            "ok": bool,                # 是否完整有序命中 / full ordered match
+            "matched": int,            # 已按序命中的数量 / patterns matched in order
+            "total": int,              # 期望总数 / total expected
+            "stuck_at_index": int|None,# 卡住的 pattern 下标（ok=True 时为 None）
+            "stuck_pattern": str|None, # 卡住的 pattern 文本
+            "matched_lines": list[str],# 各 pattern 命中的日志行 / matched log lines
+            "since": str|None,         # 起点时间戳 / start timestamp
+            "elapsed_s": float,
+        }
+    """
+    total = len(patterns)
+    if total == 0:
+        return {
+            "ok": True,
+            "matched": 0,
+            "total": 0,
+            "stuck_at_index": None,
+            "stuck_pattern": None,
+            "matched_lines": [],
+            "since": None,
+            "elapsed_s": 0.0,
+        }
+
+    compiled = [re.compile(p) if regex else None for p in patterns]
+
+    def _line_matches(idx: int, line: str) -> bool:
+        if regex:
+            return bool(compiled[idx].search(line))
+        return patterns[idx] in line
+
+    since = logcat_mark(ctx)
+    start = time.monotonic()
+    deadline = start + max(0.0, float(timeout_s))
+
+    best_matched = 0
+    best_lines: list[str] = []
+
+    while True:
+        content = ctx.driver.read_log(since=since, tag_filter=tag)
+        lines = (
+            _merge_logcat_lines(content) if merge_multiline else content.splitlines()
+        )
+
+        # Advance a cursor through the lines, matching patterns in order.
+        cursor = 0
+        matched = 0
+        matched_lines: list[str] = []
+        for line in lines:
+            if cursor >= total:
+                break
+            if _line_matches(cursor, line):
+                matched_lines.append(line)
+                cursor += 1
+                matched += 1
+        if matched > best_matched:
+            best_matched = matched
+            best_lines = matched_lines
+
+        if matched >= total:
+            return {
+                "ok": True,
+                "matched": total,
+                "total": total,
+                "stuck_at_index": None,
+                "stuck_pattern": None,
+                "matched_lines": matched_lines,
+                "since": since,
+                "elapsed_s": round(time.monotonic() - start, 3),
+            }
+
+        if time.monotonic() >= deadline:
+            return {
+                "ok": False,
+                "matched": best_matched,
+                "total": total,
+                "stuck_at_index": best_matched,
+                "stuck_pattern": patterns[best_matched]
+                if best_matched < total
+                else None,
+                "matched_lines": best_lines,
+                "since": since,
+                "elapsed_s": round(time.monotonic() - start, 3),
+            }
+
+        _auto_log_print(
+            f"  ... logcat 序列等待中 ({max(0, deadline - time.monotonic()):.0f}s)"
+            f" {best_matched}/{total}"
+            + (
+                f" 卡在 #{best_matched}: {patterns[best_matched][:40]}"
+                if best_matched < total
+                else ""
+            )
+        )
+        time.sleep(max(0.5, float(interval_s)))
 
 
 def logcat_wait_for(

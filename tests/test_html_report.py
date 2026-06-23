@@ -6,6 +6,7 @@
 - generate_html_report: 端到端，验证 report.html 生成
 - 边界场景：空目录、缺失文件、损坏 JSON
 """
+
 from __future__ import annotations
 
 import json
@@ -47,9 +48,24 @@ def _make_run_dir(
             "status": "passed" if exit_code == 0 else "failed",
             "error_message": "" if exit_code == 0 else "something went wrong",
             "device": {"serial": "ABC123", "platform": "android"},
-            "git": {"commit": "abc1234", "branch": "main", "dirty": False, "dirty_files_count": 0},
-            "steps": {"total": num_steps, "passed": num_steps if exit_code == 0 else num_steps - 1, "failed": 0 if exit_code == 0 else 1},
-            "artifacts": {"screenshots": num_steps, "screen_recordings": 0, "logcat_dumps": 0, "meminfo_snapshots": 0, "console_log_lines": 50},
+            "git": {
+                "commit": "abc1234",
+                "branch": "main",
+                "dirty": False,
+                "dirty_files_count": 0,
+            },
+            "steps": {
+                "total": num_steps,
+                "passed": num_steps if exit_code == 0 else num_steps - 1,
+                "failed": 0 if exit_code == 0 else 1,
+            },
+            "artifacts": {
+                "screenshots": num_steps,
+                "screen_recordings": 0,
+                "logcat_dumps": 0,
+                "meminfo_snapshots": 0,
+                "console_log_lines": 50,
+            },
             "run_dir": str(tmpdir),
         }
         (tmpdir / "run_meta.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -66,10 +82,14 @@ def _make_run_dir(
                 "timestamp": f"2026-02-06T10:{i:02d}:00",
                 "status": status,
                 "detail": f"Found element {i}",
-                "screenshot": f"{i:03d}_find_text_{i}.png" if with_screenshots else None,
+                "screenshot": f"{i:03d}_find_text_{i}.png"
+                if with_screenshots
+                else None,
             }
             steps.append(step)
-        (tmpdir / "steps.json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
+        (tmpdir / "steps.json").write_text(
+            json.dumps({"steps": steps}), encoding="utf-8"
+        )
 
     if with_screenshots:
         ss_dir = tmpdir / "screenshots"
@@ -88,15 +108,41 @@ def _make_run_dir(
     if with_meminfo:
         mi_dir = tmpdir / "meminfo"
         mi_dir.mkdir()
-        (mi_dir / "before.json").write_text(json.dumps({"totalPss": 128000, "nativeHeap": 45000}), encoding="utf-8")
-        (mi_dir / "after.json").write_text(json.dumps({"totalPss": 135000, "nativeHeap": 48000}), encoding="utf-8")
+        (mi_dir / "before.json").write_text(
+            json.dumps({"totalPss": 128000, "nativeHeap": 45000}), encoding="utf-8"
+        )
+        (mi_dir / "after.json").write_text(
+            json.dumps({"totalPss": 135000, "nativeHeap": 48000}), encoding="utf-8"
+        )
 
     if with_healing:
         events = [
-            {"timestamp": "2026-02-06T10:00:30", "action": "find_text", "query": "OK", "error_type": "popup_blocked", "fix_type": "popup_dismiss", "fix_source": "popup_guard", "fix_detail": {"dismiss_text": "OK"}, "success": True, "duration_ms": 120},
-            {"timestamp": "2026-02-06T10:01:00", "action": "find_image", "query": "btn.png", "error_type": "element_not_found", "fix_type": "llm_fix", "fix_source": "llm_analysis", "fix_detail": {}, "success": False, "duration_ms": 3500},
+            {
+                "timestamp": "2026-02-06T10:00:30",
+                "action": "find_text",
+                "query": "OK",
+                "error_type": "popup_blocked",
+                "fix_type": "popup_dismiss",
+                "fix_source": "popup_guard",
+                "fix_detail": {"dismiss_text": "OK"},
+                "success": True,
+                "duration_ms": 120,
+            },
+            {
+                "timestamp": "2026-02-06T10:01:00",
+                "action": "find_image",
+                "query": "btn.png",
+                "error_type": "element_not_found",
+                "fix_type": "llm_fix",
+                "fix_source": "llm_analysis",
+                "fix_detail": {},
+                "success": False,
+                "duration_ms": 3500,
+            },
         ]
-        (tmpdir / "healing_events.json").write_text(json.dumps({"healing_events": events, "count": 2}), encoding="utf-8")
+        (tmpdir / "healing_events.json").write_text(
+            json.dumps({"healing_events": events, "count": 2}), encoding="utf-8"
+        )
 
     if with_console:
         lines = [f"[10:{i:02d}:00] Step {i} completed" for i in range(60)]
@@ -125,8 +171,10 @@ class TestReadJson(unittest.TestCase):
 class TestLoadRunData(unittest.TestCase):
     def test_full_data(self):
         run_dir = _make_run_dir(
-            with_logcat=True, with_meminfo=True,
-            with_healing=True, with_console=True,
+            with_logcat=True,
+            with_meminfo=True,
+            with_healing=True,
+            with_console=True,
         )
         data = _load_run_data(run_dir)
 
@@ -143,14 +191,26 @@ class TestLoadRunData(unittest.TestCase):
 
     def test_empty_dir(self):
         run_dir = _make_run_dir(
-            with_meta=False, with_steps=False, with_screenshots=False,
+            with_meta=False,
+            with_steps=False,
+            with_screenshots=False,
         )
         data = _load_run_data(run_dir)
-        self.assertEqual(data["meta"], {
-            "device": {}, "git": {},
-            "steps": {"total": 0, "passed": 0, "failed": 0},
-            "artifacts": {"screenshots": 0, "screen_recordings": 0, "logcat_dumps": 0, "meminfo_snapshots": 0, "console_log_lines": 0},
-        })
+        self.assertEqual(
+            data["meta"],
+            {
+                "device": {},
+                "git": {},
+                "steps": {"total": 0, "passed": 0, "failed": 0},
+                "artifacts": {
+                    "screenshots": 0,
+                    "screen_recordings": 0,
+                    "logcat_dumps": 0,
+                    "meminfo_snapshots": 0,
+                    "console_log_lines": 0,
+                },
+            },
+        )
         self.assertEqual(data["steps"], [])
         self.assertEqual(data["screenshots"], [])
 
@@ -217,8 +277,10 @@ class TestRenderHtml(unittest.TestCase):
 class TestGenerateHtmlReport(unittest.TestCase):
     def test_generates_report_file(self):
         run_dir = _make_run_dir(
-            with_logcat=True, with_meminfo=True,
-            with_healing=True, with_console=True,
+            with_logcat=True,
+            with_meminfo=True,
+            with_healing=True,
+            with_console=True,
         )
         report_path = generate_html_report(run_dir)
 

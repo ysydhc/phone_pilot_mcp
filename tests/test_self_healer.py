@@ -7,6 +7,7 @@
 - LLM healer: JSON 解析 / 响应处理
 - RunSession: healing_events.json 持久化
 """
+
 from __future__ import annotations
 
 import json
@@ -43,6 +44,7 @@ from phone_pilot.script_api.self_healer import (
 # Helpers / Mocks
 # ---------------------------------------------------------------------------
 
+
 class MockUINode:
     """Minimal UINode mock for testing."""
 
@@ -75,6 +77,7 @@ class MockUINode:
         if not self.bounds:
             return None
         import re
+
         m = re.search(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", self.bounds)
         if m:
             return int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
@@ -118,6 +121,7 @@ def _make_mock_ctx(
 # ---------------------------------------------------------------------------
 # HealingExperienceStore Tests
 # ---------------------------------------------------------------------------
+
 
 class TestHealingRecord(unittest.TestCase):
     """Test HealingRecord dataclass."""
@@ -270,18 +274,26 @@ class TestHealingExperienceStore(unittest.TestCase):
         self.assertEqual(pruned, 1)
 
     def test_get_stats(self):
-        self.store.learn(HealingRecord(
-            action="a", query="q", app_package="p", activity="act",
-            fix_type="popup_dismiss", source="popup_guard",
-        ))
+        self.store.learn(
+            HealingRecord(
+                action="a",
+                query="q",
+                app_package="p",
+                activity="act",
+                fix_type="popup_dismiss",
+                source="popup_guard",
+            )
+        )
         stats = self.store.get_stats()
         self.assertEqual(stats["total_records"], 1)
         self.assertIn("popup_dismiss", stats["by_fix_type"])
 
     def test_global_experience(self):
         rec = HealingRecord(
-            action="find_text", query="global_query",
-            fix_type="wait_increase", source="llm_analysis",
+            action="find_text",
+            query="global_query",
+            fix_type="wait_increase",
+            source="llm_analysis",
         )
         self.store.learn_global(rec)
 
@@ -308,6 +320,7 @@ class TestSafeFilename(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # PopupGuard Tests
 # ---------------------------------------------------------------------------
+
 
 class TestPopupGuard(unittest.TestCase):
     """Test PopupGuard detection and dismissal."""
@@ -389,6 +402,7 @@ class TestPopupGuard(unittest.TestCase):
 # LLM Healer Tests
 # ---------------------------------------------------------------------------
 
+
 class TestLLMHealSuggestion(unittest.TestCase):
     def test_default_values(self):
         s = LLMHealSuggestion()
@@ -451,6 +465,7 @@ class TestParseLLMResponse(unittest.TestCase):
 # SelfHealer Tests
 # ---------------------------------------------------------------------------
 
+
 class TestSelfHealer(unittest.TestCase):
     """Test SelfHealer pipeline orchestration."""
 
@@ -460,16 +475,18 @@ class TestSelfHealer(unittest.TestCase):
 
     def test_try_heal_experience_hit(self):
         store = HealingExperienceStore(store_dir=self.tmpdir)
-        store.learn(HealingRecord(
-            action="find_text",
-            query="hello",
-            app_package="com.test.app",
-            activity="com.test.app.MainActivity",
-            fix_type="popup_dismiss",
-            fix_detail={"dismiss_text": "OK"},
-            success=True,
-            hit_count=10,
-        ))
+        store.learn(
+            HealingRecord(
+                action="find_text",
+                query="hello",
+                app_package="com.test.app",
+                activity="com.test.app.MainActivity",
+                fix_type="popup_dismiss",
+                fix_detail={"dismiss_text": "OK"},
+                success=True,
+                hit_count=10,
+            )
+        )
 
         pg = PopupGuard(self.ctx)
         healer = SelfHealer(self.ctx, experience_store=store, popup_guard=pg)
@@ -504,15 +521,17 @@ class TestSelfHealer(unittest.TestCase):
 
     def test_report_outcome_updates_store(self):
         store = HealingExperienceStore(store_dir=self.tmpdir)
-        learned = store.learn(HealingRecord(
-            action="find_text",
-            query="hello",
-            app_package="com.test.app",
-            activity="com.test.app.MainActivity",
-            fix_type="popup_dismiss",
-            success=True,
-            hit_count=5,
-        ))
+        learned = store.learn(
+            HealingRecord(
+                action="find_text",
+                query="hello",
+                app_package="com.test.app",
+                activity="com.test.app.MainActivity",
+                fix_type="popup_dismiss",
+                success=True,
+                hit_count=5,
+            )
+        )
 
         pg = PopupGuard(self.ctx)
         healer = SelfHealer(self.ctx, experience_store=store, popup_guard=pg)
@@ -525,7 +544,9 @@ class TestSelfHealer(unittest.TestCase):
         healer.report_outcome(heal, True)
 
         # Verify store was updated
-        results = store.lookup("find_text", "hello", "com.test.app", "com.test.app.MainActivity")
+        results = store.lookup(
+            "find_text", "hello", "com.test.app", "com.test.app.MainActivity"
+        )
         self.assertEqual(results[0].hit_count, 6)
 
     def test_healing_events_recorded(self):
@@ -580,6 +601,7 @@ class TestGetSelfHealer(unittest.TestCase):
 # RunSession healing_events integration
 # ---------------------------------------------------------------------------
 
+
 class TestRunSessionHealingEvents(unittest.TestCase):
     """Test saving healing events to RunSession."""
 
@@ -590,8 +612,18 @@ class TestRunSessionHealingEvents(unittest.TestCase):
         session = RunSession(Path(tmpdir), script_name="test")
 
         events = [
-            {"timestamp": "2026-02-06T10:00:00", "action": "find_text", "fix_type": "popup_dismiss", "success": True},
-            {"timestamp": "2026-02-06T10:00:05", "action": "find_image", "fix_type": "llm_fix", "success": False},
+            {
+                "timestamp": "2026-02-06T10:00:00",
+                "action": "find_text",
+                "fix_type": "popup_dismiss",
+                "success": True,
+            },
+            {
+                "timestamp": "2026-02-06T10:00:05",
+                "action": "find_image",
+                "fix_type": "llm_fix",
+                "success": False,
+            },
         ]
         path = session.save_healing_events(events)
 
@@ -605,6 +637,7 @@ class TestRunSessionHealingEvents(unittest.TestCase):
 # Cross-script experience reuse
 # ---------------------------------------------------------------------------
 
+
 class TestCrossScriptExperienceReuse(unittest.TestCase):
     """Verify experience learned in one script is available to another."""
 
@@ -614,23 +647,27 @@ class TestCrossScriptExperienceReuse(unittest.TestCase):
     def test_cross_script_reuse(self):
         # Script A learns an experience
         store_a = HealingExperienceStore(store_dir=self.tmpdir)
-        store_a.learn(HealingRecord(
-            action="find_text",
-            query="广告关闭",
-            app_package="com.gravity",
-            activity="com.gravity.TaskActivity",
-            fix_type="popup_dismiss",
-            fix_detail={"dismiss_text": "閉じる"},
-            source="popup_guard",
-            success=True,
-            hit_count=3,
-        ))
+        store_a.learn(
+            HealingRecord(
+                action="find_text",
+                query="广告关闭",
+                app_package="com.gravity",
+                activity="com.gravity.TaskActivity",
+                fix_type="popup_dismiss",
+                fix_detail={"dismiss_text": "閉じる"},
+                source="popup_guard",
+                success=True,
+                hit_count=3,
+            )
+        )
 
         # Script B creates a new store pointing to the same directory
         store_b = HealingExperienceStore(store_dir=self.tmpdir)
         results = store_b.lookup(
-            "find_text", "広告関閉",
-            "com.gravity", "com.gravity.TaskActivity",
+            "find_text",
+            "広告関閉",
+            "com.gravity",
+            "com.gravity.TaskActivity",
         )
         # Should find via fallback (same action, same page, different query)
         self.assertGreater(len(results), 0)

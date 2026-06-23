@@ -10,6 +10,7 @@ Reads all data from a RunSession directory and generates an Allure-style HTML re
 报告输出到 run_dir/report.html，截图通过相对路径引用。
 Report written to run_dir/report.html; screenshots referenced via relative paths.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -57,11 +58,16 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     meta.setdefault("device", {})
     meta.setdefault("git", {})
     meta.setdefault("steps", {"total": 0, "passed": 0, "failed": 0})
-    meta.setdefault("artifacts", {
-        "screenshots": 0, "screen_recordings": 0,
-        "logcat_dumps": 0, "meminfo_snapshots": 0,
-        "console_log_lines": 0,
-    })
+    meta.setdefault(
+        "artifacts",
+        {
+            "screenshots": 0,
+            "screen_recordings": 0,
+            "logcat_dumps": 0,
+            "meminfo_snapshots": 0,
+            "console_log_lines": 0,
+        },
+    )
     data["meta"] = meta
 
     # ---- Duration display ----
@@ -97,13 +103,15 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     is_portrait = False  # Default: landscape/square
     if screenshots_dir.is_dir():
         screenshots = sorted(
-            f.name for f in screenshots_dir.iterdir()
+            f.name
+            for f in screenshots_dir.iterdir()
             if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
         )
         # Detect orientation from first screenshot
         if screenshots:
             try:
                 from PIL import Image
+
                 first_img = Image.open(screenshots_dir / screenshots[0])
                 w, h = first_img.size
                 first_img.close()
@@ -114,7 +122,12 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     step_by_num = {s.get("step"): s for s in steps}
     gallery_items: list[dict] = []
     for img_name in screenshots:
-        item: dict[str, Any] = {"filename": img_name, "step_num": None, "step_action": None, "step_detail": None}
+        item: dict[str, Any] = {
+            "filename": img_name,
+            "step_num": None,
+            "step_action": None,
+            "step_detail": None,
+        }
         # Parse step number from filename like "003_find_text.png"
         if "_" in img_name:
             try:
@@ -124,7 +137,10 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
                 matched = step_by_num.get(sn)
                 if matched:
                     item["step_action"] = matched.get("action", "")
-                    item["step_detail"] = _extract_query(matched.get("detail", "")) or matched.get("detail", "")[:40]
+                    item["step_detail"] = (
+                        _extract_query(matched.get("detail", ""))
+                        or matched.get("detail", "")[:40]
+                    )
             except (ValueError, IndexError):
                 pass
         gallery_items.append(item)
@@ -146,13 +162,15 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
                 except Exception:
                     lines = 0
                     size_kb = 0
-                logcat_files.append({
-                    "name": f.name,
-                    "lines": lines,
-                    "size_kb": size_kb,
-                    "abs_path": str(f),
-                    "abs_dir": str(f.parent),
-                })
+                logcat_files.append(
+                    {
+                        "name": f.name,
+                        "lines": lines,
+                        "size_kb": size_kb,
+                        "abs_path": str(f),
+                        "abs_dir": str(f.parent),
+                    }
+                )
     data["logcat_files"] = logcat_files
 
     # ---- Console log tail ----
@@ -161,8 +179,14 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     console_tail_lines = 50
     if console_path.is_file():
         try:
-            all_lines = console_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            tail = all_lines[-console_tail_lines:] if len(all_lines) > console_tail_lines else all_lines
+            all_lines = console_path.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
+            tail = (
+                all_lines[-console_tail_lines:]
+                if len(all_lines) > console_tail_lines
+                else all_lines
+            )
             console_tail = "\n".join(tail)
         except Exception:
             pass
@@ -233,6 +257,7 @@ def _extract_query(detail: str) -> str:
     if not detail:
         return ""
     import re
+
     m = re.match(r"'([^']+)'", detail)
     return m.group(1) if m else ""
 
@@ -344,11 +369,15 @@ def _load_memory_data(meminfo_dir: Path) -> dict[str, Any]:
 
         native_pct = diff_data.get("native_heap_percent", 0)
         if native_pct > 20:
-            alerts.append({"level": "error", "text": f"Native Heap 异常增长 +{native_pct:.1f}%"})
+            alerts.append(
+                {"level": "error", "text": f"Native Heap 异常增长 +{native_pct:.1f}%"}
+            )
 
         dalvik_pct = diff_data.get("dalvik_heap_percent", 0)
         if dalvik_pct > 20:
-            alerts.append({"level": "error", "text": f"Dalvik Heap 异常增长 +{dalvik_pct:.1f}%"})
+            alerts.append(
+                {"level": "error", "text": f"Dalvik Heap 异常增长 +{dalvik_pct:.1f}%"}
+            )
 
         # Build comparison rows for the diff table
         diff_rows = []
@@ -364,10 +393,16 @@ def _load_memory_data(meminfo_dir: Path) -> dict[str, Any]:
             d_val = diff_data.get(f"{field}_mb", 0)
             d_pct = diff_data.get(f"{field}_percent", 0)
             level = "error" if d_pct > 20 else ("warn" if d_pct > 5 else "ok")
-            diff_rows.append({
-                "label": label, "before": b_val, "after": a_val,
-                "delta": d_val, "percent": d_pct, "level": level,
-            })
+            diff_rows.append(
+                {
+                    "label": label,
+                    "before": b_val,
+                    "after": a_val,
+                    "delta": d_val,
+                    "percent": d_pct,
+                    "level": level,
+                }
+            )
 
         mem["diff"] = {
             "before": before_d,
@@ -453,17 +488,21 @@ def _build_mem_segments(summary: dict) -> list[dict]:
         if kb > 0:
             pct = round(kb / total * 100, 1)
             mb = round(kb / 1024, 1)
-            segments.append({"name": name, "kb": kb, "mb": mb, "pct": pct, "color": color})
+            segments.append(
+                {"name": name, "kb": kb, "mb": mb, "pct": pct, "color": color}
+            )
             used += kb
     others_kb = total - used
     if others_kb > 0:
-        segments.append({
-            "name": "Others",
-            "kb": others_kb,
-            "mb": round(others_kb / 1024, 1),
-            "pct": round(others_kb / total * 100, 1),
-            "color": "#94a3b8",
-        })
+        segments.append(
+            {
+                "name": "Others",
+                "kb": others_kb,
+                "mb": round(others_kb / 1024, 1),
+                "pct": round(others_kb / total * 100, 1),
+                "color": "#94a3b8",
+            }
+        )
     return segments
 
 

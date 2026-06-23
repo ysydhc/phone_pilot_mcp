@@ -20,6 +20,7 @@ from phone_pilot.extensions.ocr.config import normalize_ocr_lang
 @dataclass
 class OCRBox:
     """OCR text box result."""
+
     text: str
     x: int
     y: int
@@ -60,7 +61,7 @@ def _run_tesseract_tsv(
     img = pathlib.Path(image_path).expanduser().resolve()
     if not img.exists():
         raise RuntimeError(f"image not found: {img}")
-    
+
     cmd = [
         "tesseract",
         str(img),
@@ -71,9 +72,18 @@ def _run_tesseract_tsv(
         str(int(psm)),
         "tsv",
     ]
-    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
+    proc = subprocess.run(
+        cmd,
+        check=False,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        stdin=subprocess.DEVNULL,
+    )
     if proc.returncode != 0:
-        raise RuntimeError(f"tesseract failed (rc={proc.returncode}): {(proc.stderr or '').strip()}")
+        raise RuntimeError(
+            f"tesseract failed (rc={proc.returncode}): {(proc.stderr or '').strip()}"
+        )
     return proc.stdout or ""
 
 
@@ -122,7 +132,9 @@ def run_tesseract_tsv(
     lang: str | None = None,
     psm: int = 6,
 ) -> str:
-    return _run_tesseract_tsv(pathlib.Path(image_path), lang=normalize_ocr_lang(lang), psm=psm)
+    return _run_tesseract_tsv(
+        pathlib.Path(image_path), lang=normalize_ocr_lang(lang), psm=psm
+    )
 
 
 def parse_tesseract_tsv(tsv: str) -> list[OCRBox]:
@@ -184,7 +196,7 @@ def ocr_image(
 ) -> list[dict]:
     """
     Run OCR on image bytes.
-    
+
     Args:
         image_bytes: Image PNG bytes
         lang: Tesseract language code (e.g., "eng", "chi_sim", "eng+chi_sim")
@@ -192,7 +204,7 @@ def ocr_image(
             - 6: Assume a single uniform block of text (default)
             - 3: Fully automatic page segmentation
             - 11: Sparse text
-        
+
     Returns:
         List of OCR boxes: [{"text", "x", "y", "w", "h", "conf", "center_x", "center_y"}]
     """
@@ -201,7 +213,7 @@ def ocr_image(
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         f.write(image_bytes)
         temp_path = pathlib.Path(f.name)
-    
+
     try:
         tsv = _run_tesseract_tsv(temp_path, lang=lang, psm=psm)
         boxes = _parse_tesseract_tsv(tsv)
@@ -222,14 +234,14 @@ def find_text(
 ) -> list[dict]:
     """
     Find text in OCR results.
-    
+
     Args:
         boxes: OCR boxes from ocr_image()
         query: Text to search for
         exact: Require exact match
         case_sensitive: Case-sensitive matching
         limit: Maximum results
-        
+
     Returns:
         List of matching boxes sorted by confidence
     """
@@ -287,7 +299,7 @@ def ocr_and_find(
 ) -> dict:
     """
     OCR image and find matching text in one call.
-    
+
     Args:
         image_bytes: Image PNG bytes
         query: Text to search for
@@ -296,7 +308,7 @@ def ocr_and_find(
         exact: Require exact match
         case_sensitive: Case-sensitive matching
         limit: Maximum results
-        
+
     Returns:
         {
             "ok": bool,
@@ -348,7 +360,7 @@ def ocr_screenshot_and_find(
 ) -> dict:
     """
     Take a screenshot to out_dir, OCR it, and find matching text boxes.
-    
+
     Args:
         device_serial: Android device serial
         out_dir: Directory to save screenshot
@@ -359,7 +371,7 @@ def ocr_screenshot_and_find(
         exact: Require exact match
         case_sensitive: Case-sensitive matching
         limit: Maximum results
-        
+
     Returns:
         {
             "ok": bool,
@@ -371,11 +383,11 @@ def ocr_screenshot_and_find(
     """
     if not device_serial:
         return {"ok": False, "error": "device_serial is required"}
-    
+
     lang = normalize_ocr_lang(lang)
     # Import here to avoid circular deps
     from phone_pilot.android.adb.screenshot import save_screenshot_png
-    
+
     out_root = pathlib.Path(out_dir).expanduser().resolve()
     out_path = out_root / f"{name}.png"
     out_root.mkdir(parents=True, exist_ok=True)
@@ -383,7 +395,7 @@ def ocr_screenshot_and_find(
 
     tsv = _run_tesseract_tsv(out_path, lang=lang, psm=psm)
     boxes = _parse_tesseract_tsv(tsv)
-    
+
     # Convert to dict for find_text
     box_dicts = [b.to_dict() for b in boxes]
     hits = find_text(

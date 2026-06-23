@@ -8,6 +8,7 @@ shared across scripts, improving over time. LLM fixes are cached for zero-cost r
 存储路径 / Storage path:
     .recordings/healing_experience/{package}/{activity}.json
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -23,6 +24,7 @@ from phone_pilot.core.storage import iso_now, recordings_root
 # ---------------------------------------------------------------------------
 # 数据结构
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class HealingRecord:
@@ -336,7 +338,8 @@ class HealingExperienceStore:
             records = [
                 r
                 for r in records
-                if _parse_ts(r.last_hit_at) > cutoff and r.success_rate >= min_success_rate
+                if _parse_ts(r.last_hit_at) > cutoff
+                and r.success_rate >= min_success_rate
             ]
             after = len(records)
             if after < before:
@@ -419,13 +422,16 @@ class HealingExperienceStore:
     def _write_file(self, path: Path, records: list[HealingRecord]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         data = [r.to_dict() for r in records]
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         self._cache[str(path)] = records
 
 
 # ---------------------------------------------------------------------------
 # 辅助
 # ---------------------------------------------------------------------------
+
 
 def _safe_filename(name: str) -> str:
     """将包名 / Activity 名转为安全文件名 / Sanitize to safe filename."""
@@ -444,6 +450,7 @@ def _parse_ts(ts_str: str) -> float:
         return 0.0
     try:
         from datetime import datetime, timezone
+
         # Handle ISO format like "2026-02-06T10:00:00"
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         if dt.tzinfo is None:

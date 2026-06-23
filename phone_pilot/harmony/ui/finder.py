@@ -75,7 +75,9 @@ def launch_from_home(
                     "engine": "hmdriver2",
                 }
         except Exception as exc:
-            logger.debug("hmdriver2 text selector failed (swipe %d): %s", swipe_idx, exc)
+            logger.debug(
+                "hmdriver2 text selector failed (swipe %d): %s", swipe_idx, exc
+            )
 
         # Strategy 2: Dump hierarchy and search
         try:
@@ -90,7 +92,8 @@ def launch_from_home(
                     return {
                         "ok": True,
                         "app_name": app_name,
-                        "x": cx, "y": cy,
+                        "x": cx,
+                        "y": cy,
                         "swipes": swipe_idx,
                         "engine": "hierarchy_search",
                     }
@@ -107,7 +110,9 @@ def launch_from_home(
                 pass
 
     # Strategy 3 (Fallback): Resolve bundle name and use start_app()
-    logger.info("Icon not found on home screen, trying start_app fallback for '%s'", app_name)
+    logger.info(
+        "Icon not found on home screen, trying start_app fallback for '%s'", app_name
+    )
     bundle = _resolve_bundle_name(hm, app_name)
     if bundle:
         try:
@@ -121,7 +126,11 @@ def launch_from_home(
             }
         except Exception as exc:
             logger.warning("start_app(%s) failed: %s", bundle, exc)
-            return {"ok": False, "app_name": app_name, "error": f"start_app failed: {exc}"}
+            return {
+                "ok": False,
+                "app_name": app_name,
+                "error": f"start_app failed: {exc}",
+            }
 
     return {"ok": False, "app_name": app_name, "error": "app_not_found"}
 

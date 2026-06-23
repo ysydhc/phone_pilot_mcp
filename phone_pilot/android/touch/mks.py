@@ -27,7 +27,13 @@ import re
 from typing import Any, Dict, Optional
 
 from phone_pilot.android.device.utils import get_screen_size, get_touch_abs_max
-from phone_pilot.android.touch.convert import Action, PointerAction, parse_getevent, scale_actions, to_monkey_script
+from phone_pilot.android.touch.convert import (
+    Action,
+    PointerAction,
+    parse_getevent,
+    scale_actions,
+    to_monkey_script,
+)
 
 
 def convert_raw_to_mks(
@@ -55,8 +61,12 @@ def convert_raw_to_mks(
         scale_y = h / max_y
         clamp = (w - 1, h - 1)
         # Scale only pointer actions; keep key actions intact.
-        ptr_actions: list[PointerAction] = [a for a in actions if isinstance(a, PointerAction)]
-        scaled_ptr = scale_actions(ptr_actions, scale_x=scale_x, scale_y=scale_y, clamp=clamp)
+        ptr_actions: list[PointerAction] = [
+            a for a in actions if isinstance(a, PointerAction)
+        ]
+        scaled_ptr = scale_actions(
+            ptr_actions, scale_x=scale_x, scale_y=scale_y, clamp=clamp
+        )
         it = iter(scaled_ptr)
         rebuilt: list[Action] = []
         for a in actions:
@@ -91,7 +101,9 @@ def convert_raw_to_mks(
     return out
 
 
-_DISPATCH_RE = re.compile(r"^(?P<prefix>\s*DispatchPointer\()(?P<body>.*?)(?P<suffix>\)\s*)$")
+_DISPATCH_RE = re.compile(
+    r"^(?P<prefix>\s*DispatchPointer\()(?P<body>.*?)(?P<suffix>\)\s*)$"
+)
 
 
 def scale_mks_for_screen(
@@ -164,5 +176,3 @@ def scale_mks_for_screen(
         "scale_x": scale_x,
         "scale_y": scale_y,
     }
-
-

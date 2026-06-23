@@ -4,6 +4,7 @@
 链式查找结果（ChainResult）以及链式 API 入口（chain）。
 Script lifecycle (run_script), generic retry, scroll find, chain result, and chain API entry.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -78,6 +79,7 @@ class ChainResult(dict):
 
     def tap(self) -> dict:
         from .actions import tap_xy
+
         box = self._anchor_box()
         if not box:
             return {"ok": False, "error": "no_anchor"}
@@ -153,7 +155,9 @@ class ChainResult(dict):
     ) -> "ChainResult":
         anchor = self._anchor_box()
         if not anchor:
-            return ChainResult(self._ctx, ok=False, kind="relative", error="anchor_not_found")
+            return ChainResult(
+                self._ctx, ok=False, kind="relative", error="anchor_not_found"
+            )
         screen = _get_screen_size(self._ctx) or (0, 0)
         sw, sh = screen
         # Internal expansion: start from direct side, then expand by 100px.
@@ -170,7 +174,9 @@ class ChainResult(dict):
             queries.insert(0, text)
         ocr_langs = _expand_ocr_langs(self._ctx, lang)
         if image:
-            candidates = _airtest_find_image_boxes(self._ctx, path=image, threshold=threshold, grayscale=grayscale)
+            candidates = _airtest_find_image_boxes(
+                self._ctx, path=image, threshold=threshold, grayscale=grayscale
+            )
             method = "airtest"
             kind = "image"
         else:
@@ -227,7 +233,9 @@ class ChainResult(dict):
                             method = f"ocr:{ocr_lang}"
                             break
         if not candidates:
-            return ChainResult(self._ctx, ok=False, kind="relative", error="relative_not_found")
+            return ChainResult(
+                self._ctx, ok=False, kind="relative", error="relative_not_found"
+            )
         best = _select_relative_box(
             anchor=anchor,
             candidates=candidates,
@@ -239,8 +247,17 @@ class ChainResult(dict):
             expand_max=int(expand_max),
         )
         if not best:
-            return ChainResult(self._ctx, ok=False, kind="relative", error="relative_not_found")
-        return ChainResult(self._ctx, ok=True, kind=kind, method=method, box=best, query=queries[0] if queries else None)
+            return ChainResult(
+                self._ctx, ok=False, kind="relative", error="relative_not_found"
+            )
+        return ChainResult(
+            self._ctx,
+            ok=True,
+            kind=kind,
+            method=method,
+            box=best,
+            query=queries[0] if queries else None,
+        )
 
 
 def chain(ctx: ScriptContext):
@@ -267,6 +284,7 @@ def chain(ctx: ScriptContext):
 # ---------------------------------------------------------------------------
 # retry — 通用重试封装
 # ---------------------------------------------------------------------------
+
 
 def retry(
     fn: Callable[[], _T],
@@ -318,17 +336,22 @@ def retry(
             if ctx is not None:
                 try:
                     from .self_healer import get_self_healer
+
                     healer = get_self_healer(ctx)
                     if healer:
                         error_msg = str(last_err) if last_err else "返回 None/False"
-                        heal = healer.try_heal(label, desc, error_msg, retry_count=attempt)
+                        heal = healer.try_heal(
+                            label, desc, error_msg, retry_count=attempt
+                        )
                         if heal:
                             # 自愈完成后立即重试 fn()
                             try:
                                 result = fn()
                                 if result is not None and result is not False:
                                     healer.report_outcome(heal, True)
-                                    _auto_log_print(f"  >> {label} 自愈后第 {attempt + 1} 次重试成功")
+                                    _auto_log_print(
+                                        f"  >> {label} 自愈后第 {attempt + 1} 次重试成功"
+                                    )
                                     return result
                                 healer.report_outcome(heal, False)
                             except Exception as exc2:
@@ -337,12 +360,16 @@ def retry(
                 except Exception:
                     pass  # 自愈失败不影响正常重试流程
             time.sleep(max(0, float(interval)))
-    raise RetryExhausted(f"{label} — 重试 {max_attempts} 次后失败" + (f" ({last_err})" if last_err else ""))
+    raise RetryExhausted(
+        f"{label} — 重试 {max_attempts} 次后失败"
+        + (f" ({last_err})" if last_err else "")
+    )
 
 
 # ---------------------------------------------------------------------------
 # scroll_to_find — 滚动查找
 # ---------------------------------------------------------------------------
+
 
 def scroll_to_find(
     ctx: ScriptContext,
@@ -390,14 +417,14 @@ def scroll_to_find(
 
     # ---- 解析滚动方向序列 ----
     _DIR_MAP: dict[str, list[str]] = {
-        "up":          ["up"],
-        "down":        ["down"],
-        "left":        ["left"],
-        "right":       ["right"],
-        "up_down":     ["up", "down"],
-        "down_up":     ["down", "up"],
-        "left_right":  ["left", "right"],
-        "right_left":  ["right", "left"],
+        "up": ["up"],
+        "down": ["down"],
+        "left": ["left"],
+        "right": ["right"],
+        "up_down": ["up", "down"],
+        "down_up": ["down", "up"],
+        "left_right": ["left", "right"],
+        "right_left": ["right", "left"],
     }
     phases = _DIR_MAP.get(d, ["up", "down"])
 
@@ -412,9 +439,15 @@ def scroll_to_find(
             pass
 
     # ---- Step 0: 先查当前页面 ----
-    elem = find_text(ctx, text, exact=exact, use_ocr=use_ocr, retry_attempts=1, _silent_fail=True)
+    elem = find_text(
+        ctx, text, exact=exact, use_ocr=use_ocr, retry_attempts=1, _silent_fail=True
+    )
     if elem:
-        ctx._observe("scroll_to_find", f"'{text}' 当前页面已存在 @ ({elem.center_x}, {elem.center_y})", element=elem)
+        ctx._observe(
+            "scroll_to_find",
+            f"'{text}' 当前页面已存在 @ ({elem.center_x}, {elem.center_y})",
+            element=elem,
+        )
         return elem
 
     # ---- 滑动函数 (支持锚点) ----
@@ -454,9 +487,20 @@ def scroll_to_find(
             time.sleep(max(0, float(settle_s)))
             # 滑动后页面已变化，必须丢弃旧的 UI 树缓存
             ctx._ui_cache = None
-            elem = find_text(ctx, text, exact=exact, use_ocr=use_ocr, retry_attempts=1, _silent_fail=True)
+            elem = find_text(
+                ctx,
+                text,
+                exact=exact,
+                use_ocr=use_ocr,
+                retry_attempts=1,
+                _silent_fail=True,
+            )
             if elem:
-                ctx._observe("scroll_to_find", f"'{text}' 滚动 {total_swipes} 次后找到 @ ({elem.center_x}, {elem.center_y})", element=elem)
+                ctx._observe(
+                    "scroll_to_find",
+                    f"'{text}' 滚动 {total_swipes} 次后找到 @ ({elem.center_x}, {elem.center_y})",
+                    element=elem,
+                )
                 return elem
 
     msg = f"scroll_to_find('{text}') — {d} 方向滚动 {total_swipes} 次未找到"
@@ -467,6 +511,7 @@ def scroll_to_find(
 # ---------------------------------------------------------------------------
 # run_script — 标准脚本入口
 # ---------------------------------------------------------------------------
+
 
 def run_script(fn: Callable[[], int], *, ctx: Optional[ScriptContext] = None) -> None:
     """脚本标准入口 / Standard script entry point.
@@ -498,6 +543,7 @@ def run_script(fn: Callable[[], int], *, ctx: Optional[ScriptContext] = None) ->
     if ctx is not None and ctx.auto_meminfo:
         try:
             from .actions import mem_snapshot
+
             mem_snapshot(ctx, "before")
         except Exception as exc:
             _runner_log(f"  [auto-meminfo] before 快照失败: {exc}")
@@ -506,12 +552,17 @@ def run_script(fn: Callable[[], int], *, ctx: Optional[ScriptContext] = None) ->
         try:
             from phone_pilot.memory_analyze.sampler import MemInfoSampler
             from ._helpers import _get_current_focus
+
             focus = _get_current_focus(ctx)
             pkg = focus.get("package", "") if isinstance(focus, dict) else ""
             if pkg:
-                _meminfo_sampler = MemInfoSampler(ctx.device_serial, pkg, interval_s=ctx.meminfo_interval_s)
+                _meminfo_sampler = MemInfoSampler(
+                    ctx.device_serial, pkg, interval_s=ctx.meminfo_interval_s
+                )
                 _meminfo_sampler.start()
-                _runner_log(f"  [sampler] 后台内存采样已启动 (间隔 {ctx.meminfo_interval_s}s)")
+                _runner_log(
+                    f"  [sampler] 后台内存采样已启动 (间隔 {ctx.meminfo_interval_s}s)"
+                )
         except Exception as exc:
             _runner_log(f"  [sampler] 启动失败: {exc}")
     # ---- perfetto heapprofd ----
@@ -520,13 +571,19 @@ def run_script(fn: Callable[[], int], *, ctx: Optional[ScriptContext] = None) ->
         try:
             from phone_pilot.memory_analyze.perfetto_profiler import start_heap_profile
             from ._helpers import _get_current_focus
+
             focus = _get_current_focus(ctx)
             pkg = focus.get("package", "") if isinstance(focus, dict) else ""
             if pkg:
                 session = ctx.session
-                out = str(session.meminfo_dir) if session else (ctx.out_dir or "./.recordings")
+                out = (
+                    str(session.meminfo_dir)
+                    if session
+                    else (ctx.out_dir or "./.recordings")
+                )
                 pf = start_heap_profile(
-                    ctx.device_serial or "", pkg,
+                    ctx.device_serial or "",
+                    pkg,
                     duration_s=ctx.perfetto_duration_s,
                     out_dir=out,
                 )
@@ -550,9 +607,16 @@ def run_script(fn: Callable[[], int], *, ctx: Optional[ScriptContext] = None) ->
         error_msg = str(exc)
         _runner_log(f"[FATAL] {exc}")
         import traceback as _tb
+
         _tb.print_exc()
     finally:
-        _finalize_run(ctx, code, error_msg, _meminfo_sampler=_meminfo_sampler, _perfetto_ctx=_perfetto_ctx)
+        _finalize_run(
+            ctx,
+            code,
+            error_msg,
+            _meminfo_sampler=_meminfo_sampler,
+            _perfetto_ctx=_perfetto_ctx,
+        )
     sys.exit(code)
 
 
@@ -601,6 +665,7 @@ def _finalize_run(
     if ctx.auto_meminfo:
         try:
             from .actions import mem_snapshot, mem_diff, mem_check_leak
+
             mem_snapshot(ctx, "after")
             mem_diff(ctx, "before", "after")
             mem_check_leak(ctx)
@@ -611,13 +676,19 @@ def _finalize_run(
     if _meminfo_sampler is not None:
         try:
             import json as _json
+
             samples = _meminfo_sampler.stop()
             if samples:
                 session = ctx.session
                 if session:
                     tl_path = session.meminfo_dir / "timeline.json"
-                    tl_path.write_text(_json.dumps({"samples": samples}, ensure_ascii=False, indent=2), encoding="utf-8")
-                    _runner_log(f"  [sampler] 已保存 {len(samples)} 个采样点到 timeline.json")
+                    tl_path.write_text(
+                        _json.dumps({"samples": samples}, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    _runner_log(
+                        f"  [sampler] 已保存 {len(samples)} 个采样点到 timeline.json"
+                    )
         except Exception as exc:
             _runner_log(f"  [sampler] 停止/保存失败: {exc}")
 
@@ -627,6 +698,7 @@ def _finalize_run(
             from phone_pilot.memory_analyze.perfetto_profiler import stop_and_analyze
             import json as _json
             from ._helpers import _get_current_focus
+
             focus = _get_current_focus(ctx)
             pkg = focus.get("package", "") if isinstance(focus, dict) else ""
             trace_file = _perfetto_ctx.get("trace_file", "")
@@ -635,8 +707,13 @@ def _finalize_run(
                 session = ctx.session
                 if session and result.get("ok"):
                     pf_path = session.meminfo_dir / "perfetto_analysis.json"
-                    pf_path.write_text(_json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                    _runner_log("  [perfetto] 分析完成，已保存到 perfetto_analysis.json")
+                    pf_path.write_text(
+                        _json.dumps(result, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    _runner_log(
+                        "  [perfetto] 分析完成，已保存到 perfetto_analysis.json"
+                    )
         except Exception as exc:
             _runner_log(f"  [perfetto] 分析失败: {exc}")
 
@@ -644,6 +721,7 @@ def _finalize_run(
     if code == 0 and ctx.auto_dump_hprof:
         try:
             from .actions import dump_hprof_snapshot
+
             _runner_log("[auto] dump hprof ...")
             dump_hprof_snapshot(ctx, f"{ctx.script_name or 'auto'}_final_hprof")
         except Exception as exc:
@@ -663,7 +741,10 @@ def _finalize_run(
             except Exception:
                 pass
             session.add_step(
-                ctx._step_counter, "script_error", "fail", error_msg,
+                ctx._step_counter,
+                "script_error",
+                "fail",
+                error_msg,
                 png_bytes=png_bytes,
             )
         except Exception:
@@ -672,7 +753,9 @@ def _finalize_run(
     elapsed = time.time() - ctx._started_at
     steps_total = ctx._step_counter
     # Count failures from in-memory steps
-    steps_failed = sum(1 for s in session._steps if s.get("status") not in ("ok", "passed"))
+    steps_failed = sum(
+        1 for s in session._steps if s.get("status") not in ("ok", "passed")
+    )
     steps_passed = steps_total - steps_failed
 
     try:
@@ -691,6 +774,7 @@ def _finalize_run(
     if getattr(ctx, "auto_report", True):
         try:
             from phone_pilot.core.html_report import generate_html_report
+
             report_path = generate_html_report(session.run_dir)
         except Exception as exc:
             _runner_log(f"  [report] HTML 报告生成失败: {exc}")
@@ -703,7 +787,9 @@ def _finalize_run(
     status = "PASSED" if code == 0 else "FAILED"
     _runner_log("")
     _runner_log(sep)
-    _runner_log(f"  {mark} {status} | {steps_passed}/{steps_total} 步通过 | 耗时 {mins}m{secs:02d}s")
+    _runner_log(
+        f"  {mark} {status} | {steps_passed}/{steps_total} 步通过 | 耗时 {mins}m{secs:02d}s"
+    )
     if error_msg:
         _runner_log(f"  错误: {error_msg[:120]}")
     try:

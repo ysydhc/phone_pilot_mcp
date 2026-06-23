@@ -6,7 +6,7 @@ Provides unified MCP tools with phone_* prefix for multi-platform support.
 Usage:
     # Run the server
     python -m phone_pilot.mcp.server
-    
+
     # Or via mcp CLI
     mcp dev phone_pilot/mcp/server.py
 """

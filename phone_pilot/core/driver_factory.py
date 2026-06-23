@@ -38,10 +38,12 @@ def create_driver(
 
     if plat == "android":
         from phone_pilot.android.driver import AndroidDriver
+
         return AndroidDriver(device_serial)
 
     if plat == "harmony":
         from phone_pilot.harmony.driver import HarmonyDriver
+
         return HarmonyDriver(device_serial)
 
     if plat == "ios":
@@ -88,20 +90,24 @@ def create_driver_auto() -> DeviceDriver:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _auto_detect_driver(serial: str) -> DeviceDriver:
     """Given a serial, figure out if it's ADB or HDC and create the driver."""
     if _is_adb_device(serial):
         from phone_pilot.android.driver import AndroidDriver
+
         return AndroidDriver(serial)
 
     if _is_hdc_device(serial):
         from phone_pilot.harmony.driver import HarmonyDriver
+
         return HarmonyDriver(serial)
 
     # Last resort: try to connect as HarmonyOS (HDC serial format varies)
     # then fall back to Android
     try:
         from phone_pilot.harmony.driver import HarmonyDriver
+
         drv = HarmonyDriver(serial)
         # Quick sanity check — try to get screen size
         drv.screen.get_screen_size()
@@ -111,6 +117,7 @@ def _auto_detect_driver(serial: str) -> DeviceDriver:
 
     try:
         from phone_pilot.android.driver import AndroidDriver
+
         return AndroidDriver(serial)
     except Exception:
         pass
@@ -130,7 +137,9 @@ def _first_adb_device() -> Optional[str]:
 
         proc = CommandRunner.run(
             [adb_executable(), "devices"],
-            check=False, delay_s=0, log_output=False,
+            check=False,
+            delay_s=0,
+            log_output=False,
         )
         devices = parse_adb_devices(proc.stdout or "")
         for d in devices:
@@ -149,7 +158,10 @@ def _first_hdc_device() -> Optional[str]:
 
         proc = HdcCommandRunner.run(
             [hdc_executable(), "list", "targets"],
-            check=False, delay_s=0, log_output=False, silent=True,
+            check=False,
+            delay_s=0,
+            log_output=False,
+            silent=True,
         )
         for line in (proc.stdout or "").strip().splitlines():
             s = line.strip()
@@ -169,7 +181,9 @@ def _is_adb_device(serial: str) -> bool:
 
         proc = CommandRunner.run(
             [adb_executable(), "devices"],
-            check=False, delay_s=0, log_output=False,
+            check=False,
+            delay_s=0,
+            log_output=False,
         )
         for d in parse_adb_devices(proc.stdout or ""):
             if d.get("serial") == serial and d.get("state") == "device":
@@ -187,7 +201,10 @@ def _is_hdc_device(serial: str) -> bool:
 
         proc = HdcCommandRunner.run(
             [hdc_executable(), "list", "targets"],
-            check=False, delay_s=0, log_output=False, silent=True,
+            check=False,
+            delay_s=0,
+            log_output=False,
+            silent=True,
         )
         for line in (proc.stdout or "").strip().splitlines():
             if line.strip() == serial:

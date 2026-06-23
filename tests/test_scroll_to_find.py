@@ -8,7 +8,16 @@ class TestScrollDirectionParsing(unittest.TestCase):
 
     def test_simple_directions(self):
         """Test that simple direction strings are valid."""
-        valid = {"up", "down", "left", "right", "up_down", "down_up", "left_right", "right_left"}
+        valid = {
+            "up",
+            "down",
+            "left",
+            "right",
+            "up_down",
+            "down_up",
+            "left_right",
+            "right_left",
+        }
         for d in valid:
             # Just verify these are recognized strings
             self.assertIn(d.split("_")[0], {"up", "down", "left", "right"})
@@ -27,6 +36,7 @@ class TestBoxShortcuts(unittest.TestCase):
 
     def test_box_bottom(self):
         from phone_pilot.core.ui.element import Box
+
         b = Box.bottom()
         # Bottom region of screen
         self.assertEqual(b.x_pct, 0.0)
@@ -35,6 +45,7 @@ class TestBoxShortcuts(unittest.TestCase):
 
     def test_box_top(self):
         from phone_pilot.core.ui.element import Box
+
         b = Box.top()
         self.assertEqual(b.x_pct, 0.0)
         self.assertEqual(b.y_pct, 0.0)
@@ -42,6 +53,7 @@ class TestBoxShortcuts(unittest.TestCase):
 
     def test_box_left_side(self):
         from phone_pilot.core.ui.element import Box
+
         b = Box.left_side()
         self.assertEqual(b.x_pct, 0.0)
         self.assertEqual(b.y_pct, 0.0)
@@ -49,6 +61,7 @@ class TestBoxShortcuts(unittest.TestCase):
 
     def test_box_right_side(self):
         from phone_pilot.core.ui.element import Box
+
         b = Box.right_side()
         self.assertGreater(b.x_pct, 0.0)
 

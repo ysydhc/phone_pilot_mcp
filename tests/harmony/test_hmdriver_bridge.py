@@ -22,7 +22,6 @@ class MockDriver:
 
 
 class TestHmDriverBridge(unittest.TestCase):
-
     def setUp(self):
         """Clear cache before each test."""
         _cache.clear()
@@ -53,7 +52,10 @@ class TestHmDriverBridge(unittest.TestCase):
         reset_hmdriver("serial1")
         self.assertFalse(has_hmdriver("serial1"))
 
-    @patch("phone_pilot.harmony.hmdriver_bridge._HmDriver", side_effect=Exception("connect failed"))
+    @patch(
+        "phone_pilot.harmony.hmdriver_bridge._HmDriver",
+        side_effect=Exception("connect failed"),
+    )
     def test_connection_failure_marks_failed(self, _):
         with self.assertRaises(RuntimeError):
             get_hmdriver("bad_serial")
@@ -62,7 +64,9 @@ class TestHmDriverBridge(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             get_hmdriver("bad_serial")
 
-    @patch("phone_pilot.harmony.hmdriver_bridge._HmDriver", side_effect=Exception("fail"))
+    @patch(
+        "phone_pilot.harmony.hmdriver_bridge._HmDriver", side_effect=Exception("fail")
+    )
     def test_reset_clears_failure_flag(self, _):
         with self.assertRaises(RuntimeError):
             get_hmdriver("fail_serial")
@@ -73,7 +77,9 @@ class TestHmDriverBridge(unittest.TestCase):
     def test_is_hmdriver_available(self):
         self.assertTrue(is_hmdriver_available("serial1"))
 
-    @patch("phone_pilot.harmony.hmdriver_bridge._HmDriver", side_effect=Exception("fail"))
+    @patch(
+        "phone_pilot.harmony.hmdriver_bridge._HmDriver", side_effect=Exception("fail")
+    )
     def test_is_hmdriver_available_false(self, _):
         self.assertFalse(is_hmdriver_available("bad"))
 

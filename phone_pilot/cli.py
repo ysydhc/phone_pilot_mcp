@@ -10,7 +10,9 @@ def main(argv: list[str] | None = None) -> int:
 
     This is a thin wrapper around `phone_pilot.mcp.server`.
     """
-    p = argparse.ArgumentParser(description="Start phone-pilot MCP server (stdio by default).")
+    p = argparse.ArgumentParser(
+        description="Start phone-pilot MCP server (stdio by default)."
+    )
     p.add_argument(
         "--transport",
         default=os.environ.get("PHONE_PILOT_MCP_TRANSPORT", "stdio"),
@@ -21,11 +23,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # Import at runtime to avoid import-time side effects for tooling.
     import phone_pilot.mcp.server as mcp
+
     mcp.run_server(transport=ns.transport)
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

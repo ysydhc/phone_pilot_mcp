@@ -14,23 +14,26 @@ from typing import Optional, Sequence
 
 import cv2
 
-from phone_pilot.extensions.vision.template import decode_png_to_bgr, encode_bgr_to_png_bytes
+from phone_pilot.extensions.vision.template import (
+    decode_png_to_bgr,
+    encode_bgr_to_png_bytes,
+)
 
 
 # ---------------------------------------------------------------------------
 # 元素类型 → 颜色映射 / Element type → color mapping (BGR)
 # ---------------------------------------------------------------------------
 _TYPE_COLORS: dict[str, tuple[int, int, int]] = {
-    "button":           (0, 200, 0),      # 绿色 / green  — clickable
-    "toggle":           (0, 200, 0),      # 绿色 / green  — clickable
-    "radio":            (0, 200, 0),      # 绿色 / green  — clickable
-    "input":            (200, 120, 0),    # 蓝色 / blue   — editable
-    "text":             (160, 160, 160),  # 灰色 / gray   — static text
-    "image":            (160, 160, 160),  # 灰色 / gray
-    "scroll_container": (0, 160, 255),    # 橙色 / orange — scrollable
-    "list":             (0, 160, 255),    # 橙色 / orange
-    "pager":            (0, 160, 255),    # 橙色 / orange
-    "webview":          (200, 0, 200),    # 紫色 / purple
+    "button": (0, 200, 0),  # 绿色 / green  — clickable
+    "toggle": (0, 200, 0),  # 绿色 / green  — clickable
+    "radio": (0, 200, 0),  # 绿色 / green  — clickable
+    "input": (200, 120, 0),  # 蓝色 / blue   — editable
+    "text": (160, 160, 160),  # 灰色 / gray   — static text
+    "image": (160, 160, 160),  # 灰色 / gray
+    "scroll_container": (0, 160, 255),  # 橙色 / orange — scrollable
+    "list": (0, 160, 255),  # 橙色 / orange
+    "pager": (0, 160, 255),  # 橙色 / orange
+    "webview": (200, 0, 200),  # 紫色 / purple
 }
 _DEFAULT_COLOR: tuple[int, int, int] = (0, 200, 255)  # 黄色 / yellow — fallback
 
@@ -43,6 +46,7 @@ def _color_for_type(elem_type: str) -> tuple[int, int, int]:
 @dataclass
 class Box:
     """Generic box with optional label for annotation."""
+
     x: int
     y: int
     w: int
@@ -71,18 +75,18 @@ def annotate_boxes(
     """
     Draw labeled boxes on an image.
     在图片上绘制带标签的矩形框。
-    
+
     Args:
         image_bytes: Image PNG bytes / 图片 PNG 字节
         boxes: List of box dicts with keys: x, y, w, h, label (optional)
         color: BGR color tuple / BGR 颜色
         thickness: Line thickness / 线条粗细
-        
+
     Returns:
         Annotated image PNG bytes / 标注后的图片 PNG 字节
     """
     img_bgr = decode_png_to_bgr(image_bytes)
-    
+
     out_boxes: list[Box] = []
     for i, b in enumerate(boxes or []):
         if not isinstance(b, dict):
@@ -100,8 +104,10 @@ def annotate_boxes(
         if label is None:
             label = f"#{i}"
         out_boxes.append(Box(x=x, y=y, w=w, h=h, label=str(label)))
-    
-    annotated = _annotate_boxes_on_bgr(img_bgr, out_boxes, color=color, thickness=thickness)
+
+    annotated = _annotate_boxes_on_bgr(
+        img_bgr, out_boxes, color=color, thickness=thickness
+    )
     return encode_bgr_to_png_bytes(annotated)
 
 
@@ -120,14 +126,26 @@ def _annotate_boxes_on_bgr(
         label = (b.label or f"#{i}").strip()
         ty = y1 - 10 if y1 - 10 > 20 else (y2 + 25)
         # Draw text with black outline
-        cv2.putText(vis, label, (x1, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 4, cv2.LINE_AA)
-        cv2.putText(vis, label, (x1, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
+        cv2.putText(
+            vis,
+            label,
+            (x1, ty),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 0),
+            4,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            vis, label, (x1, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA
+        )
     return vis
 
 
 # ---------------------------------------------------------------------------
 # 元素标注截图 / Annotate elements on screenshot
 # ---------------------------------------------------------------------------
+
 
 def annotate_elements_on_screenshot(
     png_bytes: bytes,
@@ -192,7 +210,16 @@ def annotate_elements_on_screenshot(
         # Badge background (solid, same color)
         cv2.rectangle(vis, (bx1, by1), (bx2, by2), color, cv2.FILLED)
         # Badge text (white)
-        cv2.putText(vis, badge_text, (bx1 + 5, by2 - 4), font, font_scale, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(
+            vis,
+            badge_text,
+            (bx1 + 5, by2 - 4),
+            font,
+            font_scale,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
 
         # 4) Label text (right of badge, if non-empty and short enough)
         if label:
@@ -200,8 +227,19 @@ def annotate_elements_on_screenshot(
             tx = bx2 + 4
             ty = by2 - 4
             # Black outline + colored text for readability
-            cv2.putText(vis, display_label, (tx, ty), font, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
-            cv2.putText(vis, display_label, (tx, ty), font, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+            cv2.putText(
+                vis, display_label, (tx, ty), font, 0.45, (0, 0, 0), 3, cv2.LINE_AA
+            )
+            cv2.putText(
+                vis,
+                display_label,
+                (tx, ty),
+                font,
+                0.45,
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
 
     # Blend overlay for semi-transparent fill
     alpha = 0.15
@@ -251,7 +289,13 @@ def annotate_boxes_on_image_file(
         out_boxes.append(Box(x=x, y=y, w=w, h=h, label=str(label)))
     annotated = _annotate_boxes_on_bgr(img, out_boxes)
     png = encode_bgr_to_png_bytes(annotated)
-    return {"ok": True, "image_path": str(p), "count": len(out_boxes), "boxes": [b.to_dict() for b in out_boxes], "annotated_png": png}
+    return {
+        "ok": True,
+        "image_path": str(p),
+        "count": len(out_boxes),
+        "boxes": [b.to_dict() for b in out_boxes],
+        "annotated_png": png,
+    }
 
 
 def is_mostly_black(
@@ -262,12 +306,12 @@ def is_mostly_black(
 ) -> dict:
     """
     Check if an image is mostly black (e.g., locked screen).
-    
+
     Args:
         image_bytes: Image PNG bytes
         mean_thresh: Mean grayscale threshold
         ratio_thresh: Dark pixel ratio threshold
-        
+
     Returns:
         {
             "is_black": bool,
@@ -277,12 +321,12 @@ def is_mostly_black(
     """
     img_bgr = decode_png_to_bgr(image_bytes)
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    
+
     mean = float(gray.mean())
     dark_ratio = float((gray < 10).mean())
-    
-    is_black = (mean <= float(mean_thresh) and dark_ratio >= float(ratio_thresh))
-    
+
+    is_black = mean <= float(mean_thresh) and dark_ratio >= float(ratio_thresh)
+
     return {
         "is_black": is_black,
         "mean_gray": mean,

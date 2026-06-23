@@ -11,7 +11,11 @@ from typing import Optional
 
 from phone_pilot.android.adb.utils import adb_prefix
 from phone_pilot.android.adb.runner import CommandRunner
-from phone_pilot.android.device.utils import input_keyevent, input_swipe, get_screen_size
+from phone_pilot.android.device.utils import (
+    input_keyevent,
+    input_swipe,
+    get_screen_size,
+)
 
 
 def get_display_state(device_serial: Optional[str]) -> dict:
@@ -24,7 +28,14 @@ def get_display_state(device_serial: Optional[str]) -> dict:
     cmd = adb_prefix(device_serial) + ["shell", "dumpsys", "power"]
     timed_out = False
     try:
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=2.0, stdin=subprocess.DEVNULL)
+        proc = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            stdin=subprocess.DEVNULL,
+        )
     except subprocess.TimeoutExpired:
         timed_out = True
         proc = None
@@ -32,7 +43,15 @@ def get_display_state(device_serial: Optional[str]) -> dict:
     raw = (proc.stdout or "").strip() if proc is not None else ""
     lines = []
     for line in raw.splitlines():
-        if any(tok in line for tok in ("mWakefulness=", "mInteractive=", "mHoldingDisplaySuspendBlocker", "Display Power: state=")):
+        if any(
+            tok in line
+            for tok in (
+                "mWakefulness=",
+                "mInteractive=",
+                "mHoldingDisplaySuspendBlocker",
+                "Display Power: state=",
+            )
+        ):
             lines.append(line.strip())
         if len(lines) >= 20:
             break
@@ -79,7 +98,12 @@ def get_device_state(device_serial: Optional[str]) -> dict:
         return {"ok": False, "error": "device_serial is required"}
 
     # 1) screen state (Awake + holding display suspend blocker)
-    power_proc = CommandRunner.run(adb_prefix(device_serial) + ["shell", "dumpsys", "power"], check=False, log_output=False, silent=True)
+    power_proc = CommandRunner.run(
+        adb_prefix(device_serial) + ["shell", "dumpsys", "power"],
+        check=False,
+        log_output=False,
+        silent=True,
+    )
     power_text = power_proc.stdout or ""
     power_lines = []
     for line in power_text.splitlines():
@@ -88,10 +112,17 @@ def get_device_state(device_serial: Optional[str]) -> dict:
         if len(power_lines) >= 20:
             break
     power_text = "\n".join(power_lines)
-    screen_on = ("Awake" in power_text) and ("mHoldingDisplaySuspendBlocker=true" in power_text)
+    screen_on = ("Awake" in power_text) and (
+        "mHoldingDisplaySuspendBlocker=true" in power_text
+    )
 
     # 2) policy state (mShowingLockscreen / isStatusBarKeyguard)
-    policy_proc = CommandRunner.run(adb_prefix(device_serial) + ["shell", "dumpsys", "window", "policy"], check=False, log_output=False, silent=True)
+    policy_proc = CommandRunner.run(
+        adb_prefix(device_serial) + ["shell", "dumpsys", "window", "policy"],
+        check=False,
+        log_output=False,
+        silent=True,
+    )
     policy_text = policy_proc.stdout or ""
     showing_lock = ""
     status_bar_keyguard = ""
@@ -104,7 +135,12 @@ def get_device_state(device_serial: Optional[str]) -> dict:
             break
 
     # 3) focus window
-    focus_proc = CommandRunner.run(adb_prefix(device_serial) + ["shell", "dumpsys", "window"], check=False, log_output=False, silent=True)
+    focus_proc = CommandRunner.run(
+        adb_prefix(device_serial) + ["shell", "dumpsys", "window"],
+        check=False,
+        log_output=False,
+        silent=True,
+    )
     focus_line = ""
     for line in (focus_proc.stdout or "").splitlines():
         if "mCurrentFocus" in line:
@@ -158,10 +194,25 @@ def detect_lock_method(device_serial: Optional[str]) -> dict:
     if not (isinstance(state, dict) and state.get("ok")):
         return {"ok": False, "error": "device_state_failed", "device_state": state}
     if state.get("screen_on") is False:
-        return {"ok": True, "device_serial": device_serial, "lock_method": "screen_off", "device_state": state}
+        return {
+            "ok": True,
+            "device_serial": device_serial,
+            "lock_method": "screen_off",
+            "device_state": state,
+        }
     if state.get("locked") is True:
-        return {"ok": True, "device_serial": device_serial, "lock_method": "locked_unknown", "device_state": state}
-    return {"ok": True, "device_serial": device_serial, "lock_method": "none", "device_state": state}
+        return {
+            "ok": True,
+            "device_serial": device_serial,
+            "lock_method": "locked_unknown",
+            "device_state": state,
+        }
+    return {
+        "ok": True,
+        "device_serial": device_serial,
+        "lock_method": "none",
+        "device_state": state,
+    }
 
 
 def lock_screen(device_serial: Optional[str], *, settle_s: float = 0.6) -> dict:
@@ -173,16 +224,22 @@ def lock_screen(device_serial: Optional[str], *, settle_s: float = 0.6) -> dict:
 
     actions: list[dict] = []
     r1 = input_keyevent(device_serial, "223", wait_s=0.0)  # KEYCODE_SLEEP
-    actions.append({"step": "KEYCODE_SLEEP", **(r1 if isinstance(r1, dict) else {"ok": False})})
+    actions.append(
+        {"step": "KEYCODE_SLEEP", **(r1 if isinstance(r1, dict) else {"ok": False})}
+    )
     if not (isinstance(r1, dict) and r1.get("ok")):
         r2 = input_keyevent(device_serial, "KEYCODE_POWER", wait_s=0.0)
-        actions.append({"step": "KEYCODE_POWER", **(r2 if isinstance(r2, dict) else {"ok": False})})
+        actions.append(
+            {"step": "KEYCODE_POWER", **(r2 if isinstance(r2, dict) else {"ok": False})}
+        )
 
     if settle_s and settle_s > 0:
         time.sleep(float(settle_s))
 
     state = get_device_state(device_serial)
-    ok = bool(state.get("ok")) and (state.get("screen_on") is False or state.get("locked") is True)
+    ok = bool(state.get("ok")) and (
+        state.get("screen_on") is False or state.get("locked") is True
+    )
     return {
         "ok": ok,
         "device_serial": device_serial,
@@ -192,7 +249,9 @@ def lock_screen(device_serial: Optional[str], *, settle_s: float = 0.6) -> dict:
     }
 
 
-def _input_pin_via_keyevents(device_serial: Optional[str], pin: str, *, wait_s: float = 0.08) -> dict:
+def _input_pin_via_keyevents(
+    device_serial: Optional[str], pin: str, *, wait_s: float = 0.08
+) -> dict:
     """Enter a numeric PIN using keyevents and press Enter."""
     if not device_serial:
         return {"ok": False, "error": "device_serial is required"}
@@ -232,12 +291,18 @@ def wake_and_unlock(
 
     if wakeup:
         try:
-            actions.append(input_keyevent(device_serial, "KEYCODE_WAKEUP", wait_s=0.0, silent=True))
+            actions.append(
+                input_keyevent(device_serial, "KEYCODE_WAKEUP", wait_s=0.0, silent=True)
+            )
         except Exception as e:
             actions.append({"ok": False, "error": "wakeup_failed", "exception": str(e)})
 
     state0 = get_device_state(device_serial)
-    if isinstance(state0, dict) and state0.get("screen_state") in ("unlocked_launcher", "unlocked_app", "unlocked"):
+    if isinstance(state0, dict) and state0.get("screen_state") in (
+        "unlocked_launcher",
+        "unlocked_app",
+        "unlocked",
+    ):
         return {
             "ok": True,
             "device_serial": device_serial,
@@ -256,7 +321,13 @@ def wake_and_unlock(
             wh = get_screen_size(device_serial)
         except Exception:
             wh = None
-        if wh and isinstance(wh, tuple) and len(wh) == 2 and int(wh[0]) > 0 and int(wh[1]) > 0:
+        if (
+            wh
+            and isinstance(wh, tuple)
+            and len(wh) == 2
+            and int(wh[0]) > 0
+            and int(wh[1]) > 0
+        ):
             w, h = int(wh[0]), int(wh[1])
         else:
             w, h = 1080, 1920
@@ -282,10 +353,16 @@ def wake_and_unlock(
                     )
                 )
             except Exception as e:
-                actions.append({"ok": False, "error": "swipe_failed", "exception": str(e)})
+                actions.append(
+                    {"ok": False, "error": "swipe_failed", "exception": str(e)}
+                )
 
     state1 = get_device_state(device_serial)
-    if isinstance(state1, dict) and state1.get("screen_state") in ("unlocked_launcher", "unlocked_app", "unlocked"):
+    if isinstance(state1, dict) and state1.get("screen_state") in (
+        "unlocked_launcher",
+        "unlocked_app",
+        "unlocked",
+    ):
         return {
             "ok": True,
             "device_serial": device_serial,
@@ -306,7 +383,11 @@ def wake_and_unlock(
         time.sleep(float(settle_s))
 
     state2 = get_device_state(device_serial)
-    unlocked = isinstance(state2, dict) and state2.get("screen_state") in ("unlocked_launcher", "unlocked_app", "unlocked")
+    unlocked = isinstance(state2, dict) and state2.get("screen_state") in (
+        "unlocked_launcher",
+        "unlocked_app",
+        "unlocked",
+    )
     ok = unlocked or all(bool(a.get("ok")) for a in actions if isinstance(a, dict))
     return {
         "ok": ok,

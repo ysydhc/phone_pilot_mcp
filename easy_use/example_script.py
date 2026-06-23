@@ -13,6 +13,7 @@ Example automation script for phone_pilot.
 
 运行: python easy_use/example_script.py
 """
+
 from __future__ import annotations
 
 
@@ -34,18 +35,19 @@ PACKAGE = "com.example.app"  # 替换为你的应用包名 / Replace with your a
 
 ctx = ScriptContext(
     # device_serial="your_device",  # 可选，单设备时自动检测
-    auto_screenshot=True,            # 每步自动截图
-    auto_dump_hprof=False,           # 成功后自动 dump 内存（可选）
-    auto_report=True,                # 结束后自动生成 HTML 报告（默认开启）
-    popup_guard=True,                # 弹窗自动检测与关闭（默认开启）
-    llm_healing=False,               # LLM 全局分析兜底（需 OPENAI_API_KEY）
-    max_heal_attempts=3,             # 单步最大自愈尝试次数
+    auto_screenshot=True,  # 每步自动截图
+    auto_dump_hprof=False,  # 成功后自动 dump 内存（可选）
+    auto_report=True,  # 结束后自动生成 HTML 报告（默认开启）
+    popup_guard=True,  # 弹窗自动检测与关闭（默认开启）
+    llm_healing=False,  # LLM 全局分析兜底（需 OPENAI_API_KEY）
+    max_heal_attempts=3,  # 单步最大自愈尝试次数
 )
 
 
 # ---------------------------------------------------------------------------
 # 主流程 / Main Flow
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     # Step 1: 清理后台 & 启动应用

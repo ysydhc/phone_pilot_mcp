@@ -11,6 +11,7 @@ Provides unified try_heal(action, query, error) interface.
     Called between retries in find_text / retry etc.,
     applies fix suggestion and reports outcome.
 """
+
 from __future__ import annotations
 
 import time
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # HealAction — 自愈动作
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class HealAction:
@@ -61,6 +63,7 @@ class HealAction:
 # ---------------------------------------------------------------------------
 # HealEvent — 自愈事件（写入 RunSession）
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class HealEvent:
@@ -97,6 +100,7 @@ class HealEvent:
 # ---------------------------------------------------------------------------
 # SelfHealer 编排器
 # ---------------------------------------------------------------------------
+
 
 class SelfHealer:
     """自愈编排器 — 统一入口 / Self-healing orchestrator — unified entry.
@@ -200,17 +204,19 @@ class SelfHealer:
             learned = self._exp.learn(rec)
 
             elapsed = (time.monotonic() - t0) * 1000
-            self._events.append(HealEvent(
-                timestamp=_iso_now(),
-                action=action,
-                query=query,
-                error_type="popup_blocked",
-                fix_type="popup_dismiss",
-                fix_source="popup_guard",
-                fix_detail=popup_result,
-                success=True,
-                duration_ms=elapsed,
-            ))
+            self._events.append(
+                HealEvent(
+                    timestamp=_iso_now(),
+                    action=action,
+                    query=query,
+                    error_type="popup_blocked",
+                    fix_type="popup_dismiss",
+                    fix_source="popup_guard",
+                    fix_detail=popup_result,
+                    success=True,
+                    duration_ms=elapsed,
+                )
+            )
 
             return HealAction(
                 fix_type="popup_dismiss",
@@ -228,17 +234,19 @@ class SelfHealer:
             )
             if llm_action:
                 elapsed = (time.monotonic() - t0) * 1000
-                self._events.append(HealEvent(
-                    timestamp=_iso_now(),
-                    action=action,
-                    query=query,
-                    error_type="llm_diagnosed",
-                    fix_type=llm_action.fix_type,
-                    fix_source="llm_analysis",
-                    fix_detail=llm_action.fix_detail,
-                    success=False,  # 尚未验证，report_outcome 后更新
-                    duration_ms=elapsed,
-                ))
+                self._events.append(
+                    HealEvent(
+                        timestamp=_iso_now(),
+                        action=action,
+                        query=query,
+                        error_type="llm_diagnosed",
+                        fix_type=llm_action.fix_type,
+                        fix_source="llm_analysis",
+                        fix_detail=llm_action.fix_detail,
+                        success=False,  # 尚未验证，report_outcome 后更新
+                        duration_ms=elapsed,
+                    )
+                )
                 return llm_action
 
         return None
@@ -257,12 +265,18 @@ class SelfHealer:
 
         if heal_action.record_id:
             self._exp.report_outcome(
-                heal_action.record_id, success,
-                package=pkg, activity=act,
+                heal_action.record_id,
+                success,
+                package=pkg,
+                activity=act,
             )
 
         # LLM 修复成功 → 写入经验库供下次复用
-        if success and heal_action.source == "llm_analysis" and not heal_action.record_id:
+        if (
+            success
+            and heal_action.source == "llm_analysis"
+            and not heal_action.record_id
+        ):
             rec = HealingRecord(
                 action=self._events[-1].action if self._events else "",
                 query=self._events[-1].query if self._events else "",
@@ -277,8 +291,7 @@ class SelfHealer:
             learned = self._exp.learn(rec)
             heal_action.record_id = learned.record_id
             _runner_log(
-                f"  [self-heal] LLM 修复成功，已写入经验库 "
-                f"(id={learned.record_id[:8]})"
+                f"  [self-heal] LLM 修复成功，已写入经验库 (id={learned.record_id[:8]})"
             )
 
         # 更新最后一个 event 的 success 状态
@@ -380,6 +393,7 @@ class SelfHealer:
 # 便捷函数
 # ---------------------------------------------------------------------------
 
+
 def get_self_healer(ctx: "ScriptContext") -> Optional[SelfHealer]:
     """获取 ctx 上的 SelfHealer 实例（若 popup_guard 启用）。
     Get SelfHealer instance from ctx (if popup_guard enabled).
@@ -414,4 +428,5 @@ def get_self_healer(ctx: "ScriptContext") -> Optional[SelfHealer]:
 def _iso_now() -> str:
     """当前时间 ISO 格式 / Current time in ISO format."""
     from phone_pilot.core.storage import iso_now
+
     return iso_now()

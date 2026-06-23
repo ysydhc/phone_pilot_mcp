@@ -4,6 +4,7 @@ Minimal stdio MCP client for calling tools exposed by phone-pilot MCP server.
 
 Examples:
   phone-pilot-call --list-tools
+  phone-pilot-call --list-script-api
   phone-pilot-call phone_list_devices
   phone-pilot-call phone_screenshot --args '{"device_serial":"<serial>"}'
   phone-pilot-call phone_go_home --args '{}'
@@ -55,7 +56,11 @@ async def _run(tool_name: str | None, args: dict[str, Any], list_tools: bool) ->
 
             if list_tools:
                 res = await session.list_tools()
-                print(json.dumps(res.model_dump(mode="json"), ensure_ascii=False, indent=2))
+                print(
+                    json.dumps(
+                        res.model_dump(mode="json"), ensure_ascii=False, indent=2
+                    )
+                )
                 return 0
 
             if not tool_name:
@@ -67,16 +72,31 @@ async def _run(tool_name: str | None, args: dict[str, Any], list_tools: bool) ->
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="Call MCP tools exposed by phone-pilot (stdio).")
+    p = argparse.ArgumentParser(
+        description="Call MCP tools exposed by phone-pilot (stdio)."
+    )
     p.add_argument("tool_name", nargs="?", help="Tool name, e.g. android_record_start")
     p.add_argument("--args", default="{}", help="JSON object of tool arguments")
-    p.add_argument("--list-tools", action="store_true", help="List available tools and exit")
+    p.add_argument(
+        "--list-tools", action="store_true", help="List available tools and exit"
+    )
+    p.add_argument(
+        "--list-script-api",
+        action="store_true",
+        help="List script_api public functions (signatures) and exit",
+    )
     ns = p.parse_args(argv)
+
+    # Local introspection — no MCP server needed.
+    if ns.list_script_api:
+        from phone_pilot.script_api._introspect import format_public_api
+
+        print(format_public_api())
+        return 0
+
     args = _parse_json_arg(ns.args)
     return anyio.run(_run, ns.tool_name, args, ns.list_tools)
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-

@@ -27,21 +27,25 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_hm(serial: str):
     """Get hmdriver2 Driver instance (may raise on first connect)."""
     from phone_pilot.harmony.hmdriver_bridge import get_hmdriver
+
     return get_hmdriver(serial)
 
 
 def _hm_available(serial: str) -> bool:
     """Check whether hmdriver2 is available for this serial."""
     from phone_pilot.harmony.hmdriver_bridge import is_hmdriver_available
+
     return is_hmdriver_available(serial)
 
 
 # ---------------------------------------------------------------------------
 # HarmonyInputDriver
 # ---------------------------------------------------------------------------
+
 
 class HarmonyInputDriver:
     """HarmonyOS InputDriver — prefers hmdriver2 uitest, falls back to HDC."""
@@ -58,6 +62,7 @@ class HarmonyInputDriver:
         except Exception as exc:
             logger.debug("hmdriver2 tap failed, fallback to HDC: %s", exc)
             from phone_pilot.harmony.device.utils import input_tap
+
             return input_tap(self._serial, x, y, wait_s=wait_s)
 
     def swipe(
@@ -77,14 +82,17 @@ class HarmonyInputDriver:
             hm.swipe(int(x1), int(y1), int(x2), int(y2), speed=speed)
             return {
                 "ok": True,
-                "x1": int(x1), "y1": int(y1),
-                "x2": int(x2), "y2": int(y2),
+                "x1": int(x1),
+                "y1": int(y1),
+                "x2": int(x2),
+                "y2": int(y2),
                 "duration_ms": duration_ms,
                 "engine": "hmdriver2",
             }
         except Exception as exc:
             logger.debug("hmdriver2 swipe failed, fallback to HDC: %s", exc)
             from phone_pilot.harmony.device.utils import input_swipe
+
             return input_swipe(self._serial, x1, y1, x2, y2, duration_ms=duration_ms)
 
     def long_press(self, x: int, y: int, duration_ms: int = 500) -> dict:
@@ -96,6 +104,7 @@ class HarmonyInputDriver:
         except Exception as exc:
             logger.debug("hmdriver2 long_press failed, fallback to HDC: %s", exc)
             from phone_pilot.harmony.device.utils import input_long_press
+
             return input_long_press(self._serial, x, y, duration_ms=duration_ms)
 
     def input_text(self, text: str, enter: bool = False) -> dict:
@@ -105,11 +114,13 @@ class HarmonyInputDriver:
             hm.input_text(text)
             if enter:
                 from hmdriver2.proto import KeyCode
+
                 hm.press_key(KeyCode.ENTER)
             return {"ok": True, "text": text, "engine": "hmdriver2"}
         except Exception as exc:
             logger.debug("hmdriver2 input_text failed, fallback to HDC: %s", exc)
             from phone_pilot.harmony.device.utils import input_text as _hdc_input_text
+
             return _hdc_input_text(self._serial, text, enter=enter)
 
     def keyevent(self, keycode: str) -> dict:
@@ -118,12 +129,14 @@ class HarmonyInputDriver:
             hm = _get_hm(self._serial)
             # Try to map string keycode to hmdriver2 KeyCode enum
             from hmdriver2.proto import KeyCode
+
             kc = _resolve_keycode(keycode, KeyCode)
             hm.press_key(kc)
             return {"ok": True, "keycode": keycode, "engine": "hmdriver2"}
         except Exception as exc:
             logger.debug("hmdriver2 keyevent failed, fallback to HDC: %s", exc)
             from phone_pilot.harmony.device.utils import input_keyevent
+
             return input_keyevent(self._serial, keycode)
 
     # -- Extra methods (not in Protocol) --
@@ -138,6 +151,7 @@ class HarmonyInputDriver:
 # ---------------------------------------------------------------------------
 # HarmonyScreenDriver
 # ---------------------------------------------------------------------------
+
 
 class HarmonyScreenDriver:
     """HarmonyOS ScreenDriver — prefers hmdriver2, falls back to HDC."""
@@ -165,6 +179,7 @@ class HarmonyScreenDriver:
         except Exception as exc:
             logger.debug("hmdriver2 screenshot failed, fallback to HDC: %s", exc)
             from phone_pilot.harmony.hdc.screenshot import take_screenshot_png_bytes
+
             return take_screenshot_png_bytes(self._serial)
 
     def screenshot_fast(self) -> bytes:
@@ -193,6 +208,7 @@ class HarmonyScreenDriver:
 
         # Fallback to HDC
         from phone_pilot.harmony.device.utils import get_screen_size
+
         size = get_screen_size(self._serial)
         if size is None:
             raise RuntimeError("Failed to get screen size via both hmdriver2 and HDC")
@@ -208,7 +224,12 @@ class HarmonyScreenDriver:
         try:
             hm = _get_hm(self._serial)
             hm.screenrecord.start(path)
-            return {"ok": True, "path": path, "remote_path": path, "engine": "hmdriver2"}
+            return {
+                "ok": True,
+                "path": path,
+                "remote_path": path,
+                "engine": "hmdriver2",
+            }
         except Exception as exc:
             return {
                 "ok": False,
@@ -230,6 +251,7 @@ class HarmonyScreenDriver:
 # HarmonyUIDriver
 # ---------------------------------------------------------------------------
 
+
 class HarmonyUIDriver:
     """HarmonyOS UIDriver — powered by hmdriver2 uitest."""
 
@@ -244,6 +266,7 @@ class HarmonyUIDriver:
         The caller can parse this with json.loads() to get a dict/list.
         """
         import json
+
         hm = _get_hm(self._serial)
         hierarchy = hm.dump_hierarchy()
         if isinstance(hierarchy, dict):
@@ -262,6 +285,7 @@ class HarmonyUIDriver:
             dump_hierarchy_dict,
             parse_hierarchy_nodes,
         )
+
         hierarchy = dump_hierarchy_dict(self._serial)
         hm_nodes = parse_hierarchy_nodes(hierarchy)
         return [_harmony_node_to_universal(n, UnivNode) for n in hm_nodes]
@@ -273,6 +297,7 @@ class HarmonyUIDriver:
             parse_hierarchy_nodes,
             collect_node_texts,
         )
+
         hierarchy = dump_hierarchy_dict(self._serial)
         nodes = parse_hierarchy_nodes(hierarchy)
         return collect_node_texts(nodes)
@@ -290,10 +315,21 @@ class HarmonyUIDriver:
         # Map our selector to hmdriver2 kwargs
         hm_kwargs = {}
         _DIRECT_KEYS = {
-            "text", "type", "id", "key", "description",
-            "clickable", "enabled", "focused", "selected",
-            "scrollable", "checked", "checkable",
-            "longClickable", "isBefore", "isAfter",
+            "text",
+            "type",
+            "id",
+            "key",
+            "description",
+            "clickable",
+            "enabled",
+            "focused",
+            "selected",
+            "scrollable",
+            "checked",
+            "checkable",
+            "longClickable",
+            "isBefore",
+            "isAfter",
         }
         for k, v in selector.items():
             if k in _DIRECT_KEYS:
@@ -362,12 +398,14 @@ class HarmonyUIDriver:
             return {"package": pkg, "activity": page}
         except Exception:
             from phone_pilot.harmony.device.utils import get_current_focus
+
             return get_current_focus(self._serial)
 
 
 # ---------------------------------------------------------------------------
 # HarmonyAppDriver
 # ---------------------------------------------------------------------------
+
 
 class HarmonyAppDriver:
     """HarmonyOS AppDriver — prefers hmdriver2, falls back to HDC."""
@@ -382,6 +420,7 @@ class HarmonyAppDriver:
             return hm.list_apps(include_system_apps=include_system)
         except Exception:
             from phone_pilot.harmony.device.utils import list_installed_packages
+
             return list_installed_packages(self._serial, include_system=include_system)
 
     def launch_app(self, package: str, activity: Optional[str] = None) -> dict:
@@ -392,10 +431,16 @@ class HarmonyAppDriver:
                 hm.start_app(package, activity)
             else:
                 hm.start_app(package)
-            return {"ok": True, "package": package, "activity": activity, "engine": "hmdriver2"}
+            return {
+                "ok": True,
+                "package": package,
+                "activity": activity,
+                "engine": "hmdriver2",
+            }
         except Exception as exc:
             logger.debug("hmdriver2 launch_app failed, fallback to HDC: %s", exc)
             from phone_pilot.harmony.device.utils import launch_app
+
             return launch_app(self._serial, package=package, activity=activity)
 
     def force_stop(self, package: str) -> dict:
@@ -406,6 +451,7 @@ class HarmonyAppDriver:
             return {"ok": True, "package": package, "engine": "hmdriver2"}
         except Exception:
             from phone_pilot.harmony.device.utils import force_stop_package
+
             return force_stop_package(self._serial, package)
 
     def clear_data(self, package: str) -> dict:
@@ -416,6 +462,7 @@ class HarmonyAppDriver:
             return {"ok": True, "package": package, "engine": "hmdriver2"}
         except Exception:
             from phone_pilot.harmony.device.utils import clear_app_data
+
             return clear_app_data(self._serial, package)
 
     def uninstall(self, package: str, keep_data: bool = False) -> dict:
@@ -461,6 +508,7 @@ class HarmonyAppDriver:
 # ---------------------------------------------------------------------------
 # HarmonyDriver (composite)
 # ---------------------------------------------------------------------------
+
 
 class HarmonyDriver:
     """
@@ -552,6 +600,7 @@ class HarmonyDriver:
     def clear_background(self) -> dict:
         """Best-effort clear background apps."""
         from phone_pilot.harmony.device.utils import clear_background_processes
+
         return clear_background_processes(self._device_serial)
 
     # ---- file transfer ----
@@ -576,6 +625,7 @@ class HarmonyDriver:
     def pull_file(self, remote_path: str, local_path: str) -> dict:
         """Pull a file from device to host via ``hdc file recv``."""
         from phone_pilot.harmony.hdc.utils import pull_file as _hdc_pull
+
         pathlib.Path(local_path).parent.mkdir(parents=True, exist_ok=True)
         return _hdc_pull(self._device_serial, remote_path, local_path)
 
@@ -583,9 +633,12 @@ class HarmonyDriver:
         """Remove a file from the device via ``hdc shell rm``."""
         from phone_pilot.harmony.hdc.utils import hdc_prefix
         from phone_pilot.harmony.hdc.runner import HdcCommandRunner
+
         proc = HdcCommandRunner.run(
             hdc_prefix(self._device_serial) + ["shell", "rm", "-f", remote_path],
-            check=False, delay_s=0.0, log_output=False,
+            check=False,
+            delay_s=0.0,
+            log_output=False,
         )
         return {
             "ok": proc.returncode == 0,
@@ -604,8 +657,10 @@ class HarmonyDriver:
     def launch_from_home(self, app_name: str, **kwargs) -> dict:
         """Launch an app from the home screen (HarmonyOS flow)."""
         from phone_pilot.harmony.ui.finder import launch_from_home as _h_launch
+
         return _h_launch(
-            self._device_serial, app_name,
+            self._device_serial,
+            app_name,
             reset_home=bool(kwargs.get("reset_home", True)),
             max_swipes=int(kwargs.get("max_swipes", 5)),
         )
@@ -654,7 +709,10 @@ class HarmonyDriver:
         if not hasattr(self, "_log_captures"):
             self._log_captures: dict[str, dict] = {}
         if output_path in self._log_captures:
-            return {"ok": False, "error": f"log capture already running for {output_path}"}
+            return {
+                "ok": False,
+                "error": f"log capture already running for {output_path}",
+            }
 
         out = pathlib.Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -664,7 +722,11 @@ class HarmonyDriver:
             hilog_cmd += ["-L", level.upper()[0]]
 
         include_tags = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-        exclude_list = [t.strip() for t in exclude_tags.split(",") if t.strip()] if exclude_tags else []
+        exclude_list = (
+            [t.strip() for t in exclude_tags.split(",") if t.strip()]
+            if exclude_tags
+            else []
+        )
         proc_kw = process.strip() if process else ""
 
         # hilog supports native -T tag filter (one at a time)
@@ -745,18 +807,22 @@ class HarmonyDriver:
     def read_log(self, lines: int = 200, **kwargs) -> str:
         """Read recent hilog output."""
         from phone_pilot.harmony.hdc.logcat import read_hilog
+
         return read_hilog(self._device_serial, lines=lines, **kwargs)
 
     def clear_log(self) -> dict:
         """Clear hilog buffer."""
         from phone_pilot.harmony.hdc.logcat import clear_hilog
+
         return clear_hilog(self._device_serial)
 
     def dump_log(self, path: str, **kwargs) -> dict:
         """Export hilog to a file on host."""
         from phone_pilot.harmony.hdc.logcat import dump_hilog
+
         return dump_hilog(
-            self._device_serial, path,
+            self._device_serial,
+            path,
             lines=kwargs.get("lines", 500),
         )
 
@@ -794,6 +860,7 @@ class HarmonyDriver:
 # Utility functions
 # ---------------------------------------------------------------------------
 
+
 def _resolve_keycode(keycode_str: str, keycode_enum):
     """
     Convert a string keycode to hmdriver2 KeyCode enum.
@@ -807,7 +874,7 @@ def _resolve_keycode(keycode_str: str, keycode_enum):
 
     # Strip Android-style prefix
     if s.startswith("KEYCODE_"):
-        s = s[len("KEYCODE_"):]
+        s = s[len("KEYCODE_") :]
 
     # Try direct enum name lookup
     try:
@@ -863,10 +930,21 @@ def _element_info_to_dict(info) -> dict:
 
     if not isinstance(d, dict):
         d = {}
-        for attr in ("id", "key", "type", "text", "description",
-                      "isSelected", "isChecked", "isEnabled", "isFocused",
-                      "isCheckable", "isClickable", "isLongClickable",
-                      "isScrollable"):
+        for attr in (
+            "id",
+            "key",
+            "type",
+            "text",
+            "description",
+            "isSelected",
+            "isChecked",
+            "isEnabled",
+            "isFocused",
+            "isCheckable",
+            "isClickable",
+            "isLongClickable",
+            "isScrollable",
+        ):
             val = getattr(info, attr, None)
             if val is not None:
                 d[attr] = val
@@ -876,8 +954,10 @@ def _element_info_to_dict(info) -> dict:
         bounds = getattr(info, "bounds", None)
         if bounds:
             d["bounds"] = {
-                "left": bounds.left, "top": bounds.top,
-                "right": bounds.right, "bottom": bounds.bottom,
+                "left": bounds.left,
+                "top": bounds.top,
+                "right": bounds.right,
+                "bottom": bounds.bottom,
             }
 
     # Ensure boundsCenter and top-level center_x / center_y
@@ -896,9 +976,15 @@ def _element_info_to_dict(info) -> dict:
     return d
 
 
-def _filter_log_file_inplace(path: pathlib.Path, exclude_tag: str, process_filter: str) -> None:
+def _filter_log_file_inplace(
+    path: pathlib.Path, exclude_tag: str, process_filter: str
+) -> None:
     """In-place filter log file by exclude_tag and process."""
-    excludes = {t.strip() for t in exclude_tag.split(",") if t.strip()} if exclude_tag else set()
+    excludes = (
+        {t.strip() for t in exclude_tag.split(",") if t.strip()}
+        if exclude_tag
+        else set()
+    )
     proc_kw = process_filter.strip() if process_filter else ""
     if not excludes and not proc_kw:
         return
@@ -924,7 +1010,7 @@ def _harmony_node_to_universal(node, UnivNode):
     bounds_str = node.bounds or ""
     if not bounds_str and node.bounds_raw:
         br = node.bounds_raw
-        bounds_str = f"[{br.get('left',0)},{br.get('top',0)}][{br.get('right',0)},{br.get('bottom',0)}]"
+        bounds_str = f"[{br.get('left', 0)},{br.get('top', 0)}][{br.get('right', 0)},{br.get('bottom', 0)}]"
     return UnivNode(
         text=node.text or "",
         content_desc=node.description or "",  # Harmony .description → .content_desc

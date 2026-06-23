@@ -55,7 +55,9 @@ def capture_meminfo(
 
     try:
         cmd = adb_prefix(device_serial) + ["shell", "dumpsys", "meminfo", package_name]
-        proc = CommandRunner.run(cmd, check=False, timeout_s=timeout_s, log_output=False)
+        proc = CommandRunner.run(
+            cmd, check=False, timeout_s=timeout_s, log_output=False
+        )
 
         if proc.returncode != 0:
             return {
@@ -112,13 +114,19 @@ def parse_meminfo(output: str) -> dict:
     #   Native Heap    70613    70560        8       83    71944    87076    81605     5470
 
     # More flexible pattern - capture category name and all numbers
-    memory_line_pattern = re.compile(r"^\s*([A-Za-z][A-Za-z0-9\s\.]+?)\s+(\d+(?:\s+\d+)*)\s*$")
+    memory_line_pattern = re.compile(
+        r"^\s*([A-Za-z][A-Za-z0-9\s\.]+?)\s+(\d+(?:\s+\d+)*)\s*$"
+    )
 
     in_memory_table = False
     for line in lines:
         # Check for table header
         # Header can be: "Pss  Private  Private  SwapPss" (new) or contain "Dirty" (old)
-        if "Pss" in line and "Private" in line and ("Dirty" in line or "SwapPss" in line):
+        if (
+            "Pss" in line
+            and "Private" in line
+            and ("Dirty" in line or "SwapPss" in line)
+        ):
             in_memory_table = True
             continue
 
@@ -199,7 +207,9 @@ def parse_meminfo(output: str) -> dict:
             if line.strip().startswith("------"):
                 continue
             if "TOTAL" in line:
-                match = re.search(r"TOTAL\s+(?:PSS|RSS)[:\s]+(\d+)", line, re.IGNORECASE)
+                match = re.search(
+                    r"TOTAL\s+(?:PSS|RSS)[:\s]+(\d+)", line, re.IGNORECASE
+                )
                 if match:
                     result["app_summary"]["total_pss_kb"] = int(match.group(1))
                 in_app_summary = False
@@ -242,11 +252,21 @@ def parse_meminfo(output: str) -> dict:
                 result["objects"][key] = int(value)
 
     # Extract key metrics for easy access
-    result["summary"]["native_heap_kb"] = result["details"].get("Native Heap", {}).get("pss_total_kb", 0)
-    result["summary"]["dalvik_heap_kb"] = result["details"].get("Dalvik Heap", {}).get("pss_total_kb", 0)
-    result["summary"]["graphics_kb"] = result["details"].get("Graphics", {}).get("pss_total_kb", 0)
-    result["summary"]["gl_mtrack_kb"] = result["details"].get("GL mtrack", {}).get("pss_total_kb", 0)
-    result["summary"]["egl_mtrack_kb"] = result["details"].get("EGL mtrack", {}).get("pss_total_kb", 0)
+    result["summary"]["native_heap_kb"] = (
+        result["details"].get("Native Heap", {}).get("pss_total_kb", 0)
+    )
+    result["summary"]["dalvik_heap_kb"] = (
+        result["details"].get("Dalvik Heap", {}).get("pss_total_kb", 0)
+    )
+    result["summary"]["graphics_kb"] = (
+        result["details"].get("Graphics", {}).get("pss_total_kb", 0)
+    )
+    result["summary"]["gl_mtrack_kb"] = (
+        result["details"].get("GL mtrack", {}).get("pss_total_kb", 0)
+    )
+    result["summary"]["egl_mtrack_kb"] = (
+        result["details"].get("EGL mtrack", {}).get("pss_total_kb", 0)
+    )
 
     # Also try from app_summary
     if result["app_summary"]:
@@ -258,11 +278,21 @@ def parse_meminfo(output: str) -> dict:
             result["summary"]["graphics_kb"] = result["app_summary"]["Graphics"]
 
     # Convert to MB for convenience
-    result["summary"]["native_heap_mb"] = round(result["summary"].get("native_heap_kb", 0) / 1024, 2)
-    result["summary"]["dalvik_heap_mb"] = round(result["summary"].get("dalvik_heap_kb", 0) / 1024, 2)
-    result["summary"]["java_heap_mb"] = round(result["summary"].get("java_heap_kb", 0) / 1024, 2)
-    result["summary"]["graphics_mb"] = round(result["summary"].get("graphics_kb", 0) / 1024, 2)
-    result["summary"]["total_pss_mb"] = round(result["summary"].get("total_pss_kb", 0) / 1024, 2)
+    result["summary"]["native_heap_mb"] = round(
+        result["summary"].get("native_heap_kb", 0) / 1024, 2
+    )
+    result["summary"]["dalvik_heap_mb"] = round(
+        result["summary"].get("dalvik_heap_kb", 0) / 1024, 2
+    )
+    result["summary"]["java_heap_mb"] = round(
+        result["summary"].get("java_heap_kb", 0) / 1024, 2
+    )
+    result["summary"]["graphics_mb"] = round(
+        result["summary"].get("graphics_kb", 0) / 1024, 2
+    )
+    result["summary"]["total_pss_mb"] = round(
+        result["summary"].get("total_pss_kb", 0) / 1024, 2
+    )
 
     return result
 
@@ -364,6 +394,7 @@ def diff_meminfo(before: dict, after: dict) -> dict:
 # Activity 泄漏检测
 # ---------------------------------------------------------------------------
 
+
 def _get_activity_count_from_meminfo(snapshot: dict) -> int:
     """从 meminfo 快照的 Objects 段获取 Activity 实例数。"""
     return snapshot.get("objects", {}).get("Activities", 0)
@@ -374,9 +405,7 @@ def _get_visible_activities(
     package_name: str,
 ) -> list[str]:
     """通过 dumpsys activity 获取当前可见的 Activity 列表。"""
-    cmd = adb_prefix(device_serial) + [
-        "shell", "dumpsys", "activity", "activities"
-    ]
+    cmd = adb_prefix(device_serial) + ["shell", "dumpsys", "activity", "activities"]
     proc = CommandRunner.run(cmd, check=False, timeout_s=15.0, log_output=False)
     if proc.returncode != 0:
         return []
@@ -389,10 +418,15 @@ def _get_visible_activities(
         if package_name in line and ("ActivityRecord" in line or "Activity" in line):
             # 提取 Activity 名
             import re as _re
-            m = _re.search(rf'{_re.escape(package_name)}/([^\s\}},]+)', line)
+
+            m = _re.search(rf"{_re.escape(package_name)}/([^\s\}},]+)", line)
             if m:
                 act_name = m.group(1)
-                full = f"{package_name}/{act_name}" if act_name.startswith(".") else act_name
+                full = (
+                    f"{package_name}/{act_name}"
+                    if act_name.startswith(".")
+                    else act_name
+                )
                 if full not in activities:
                     activities.append(full)
     return activities
@@ -458,7 +492,9 @@ def check_activity_leak(
 
     # Step 2: 疑似泄漏 → 触发 GC
     suspect_count = mem_activities - visible_count
-    result["suspect"] = f"疑似泄漏 {suspect_count} 个 Activity（内存 {mem_activities} > 可见 {visible_count}）"
+    result["suspect"] = (
+        f"疑似泄漏 {suspect_count} 个 Activity（内存 {mem_activities} > 可见 {visible_count}）"
+    )
 
     gc_result = trigger_gc(device_serial, package_name, wait_s=gc_wait_s)
     result["gc"] = {
@@ -486,7 +522,9 @@ def check_activity_leak(
     # 判定
     leak_count = mem_activities_after_gc - visible_count_after
     if leak_count <= 0:
-        result["verdict"] = f"GC 后恢复正常（{mem_activities} → {mem_activities_after_gc}），非真实泄漏"
+        result["verdict"] = (
+            f"GC 后恢复正常（{mem_activities} → {mem_activities_after_gc}），非真实泄漏"
+        )
         return result
 
     # Step 4: 确认泄漏
@@ -501,8 +539,11 @@ def check_activity_leak(
     if save_hprof:
         out_dir = hprof_out_dir or "./.recordings"
         hprof_result = dump_hprof(
-            device_serial, package_name,
-            out_dir=out_dir, hprof_subdir="", name="leak_dump",
+            device_serial,
+            package_name,
+            out_dir=out_dir,
+            hprof_subdir="",
+            name="leak_dump",
         )
         result["hprof"] = {
             "dumped": hprof_result.get("ok", False),
@@ -515,11 +556,13 @@ def check_activity_leak(
         if hprof_result.get("ok") and hprof_result.get("path"):
             try:
                 from phone_pilot.memory_analyze.analyzer import analyze_hprof
+
                 analysis = analyze_hprof(hprof_result["path"])
                 if analysis.get("ok"):
                     # 找出所有 Activity 子类的实例
                     activity_classes = [
-                        s for s in analysis.get("stats", [])
+                        s
+                        for s in analysis.get("stats", [])
                         if "Activity" in s.get("class_name", "")
                         and s.get("instance_count", 0) > 0
                     ]

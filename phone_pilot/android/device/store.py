@@ -55,7 +55,9 @@ def devices_index_path(out_root: pathlib.Path) -> pathlib.Path:
 
 def _migrate_devices_index(out_root: pathlib.Path) -> None:
     """Migrate legacy devices index.jsonl to index.json."""
-    migrate_jsonl_to_json(devices_index_path(out_root), devices_dir(out_root) / "index.jsonl")
+    migrate_jsonl_to_json(
+        devices_index_path(out_root), devices_dir(out_root) / "index.jsonl"
+    )
 
 
 def device_profile_path(out_root: pathlib.Path, device_id: str) -> pathlib.Path:
@@ -84,7 +86,11 @@ def _normalize_android_device_info(data: Any) -> dict[str, Any]:
     """
     Normalize legacy Android_device_info.json formats into the current schema.
     """
-    if isinstance(data, dict) and "devices" in data and isinstance(data.get("devices"), dict):
+    if (
+        isinstance(data, dict)
+        and "devices" in data
+        and isinstance(data.get("devices"), dict)
+    ):
         return data
     if isinstance(data, dict):
         # Legacy: { "<device_serial>": { ...profile... }, ... }
@@ -92,7 +98,9 @@ def _normalize_android_device_info(data: Any) -> dict[str, Any]:
     return {"schema_version": 1, "updated_at": None, "devices": {}}
 
 
-def _update_android_device_info(out_root: pathlib.Path, *, device_serial: str, profile: dict[str, Any]) -> None:
+def _update_android_device_info(
+    out_root: pathlib.Path, *, device_serial: str, profile: dict[str, Any]
+) -> None:
     """
     Best-effort update the aggregate Android_device_info.json.
     """
@@ -119,6 +127,7 @@ def _update_android_device_info(out_root: pathlib.Path, *, device_serial: str, p
     cur["schema_version"] = 1
     cur["updated_at"] = iso_now()
     write_json(p, cur)
+
 
 def _fold_index(index_file: pathlib.Path) -> dict[str, dict]:
     """Fold device index records into latest-per-device mapping."""
@@ -170,15 +179,31 @@ def _capture_installed_apps(
     Best-effort capture installed apps with label + package name.
     """
     if not device_serial:
-        return {"ok": False, "error": "device_serial is required", "include_system": include_system, "count": 0, "apps": []}
+        return {
+            "ok": False,
+            "error": "device_serial is required",
+            "include_system": include_system,
+            "count": 0,
+            "apps": [],
+        }
     try:
         res = get_installed_apps(device_serial, include_system=include_system)
     except Exception as e:
-        return {"ok": False, "error": f"get_installed_apps failed: {e}", "include_system": include_system, "count": 0, "apps": []}
+        return {
+            "ok": False,
+            "error": f"get_installed_apps failed: {e}",
+            "include_system": include_system,
+            "count": 0,
+            "apps": [],
+        }
     if not (isinstance(res, dict) and res.get("ok")):
         return {
             "ok": False,
-            "error": (res.get("stderr") if isinstance(res, dict) else "get_installed_apps failed"),
+            "error": (
+                res.get("stderr")
+                if isinstance(res, dict)
+                else "get_installed_apps failed"
+            ),
             "include_system": include_system,
             "count": 0,
             "apps": [],
@@ -200,13 +225,21 @@ def _capture_installed_apps(
         )
         apps.append(
             {
-                "PackageName": info.get("PackageName") if isinstance(info, dict) else pkg,
+                "PackageName": info.get("PackageName")
+                if isinstance(info, dict)
+                else pkg,
                 "AppName": info.get("AppName") if isinstance(info, dict) else pkg,
-                "VersionCode": info.get("VersionCode") if isinstance(info, dict) else None,
-                "VersionName": info.get("VersionName") if isinstance(info, dict) else None,
+                "VersionCode": info.get("VersionCode")
+                if isinstance(info, dict)
+                else None,
+                "VersionName": info.get("VersionName")
+                if isinstance(info, dict)
+                else None,
                 "IconPath": info.get("IconPath") if isinstance(info, dict) else None,
                 "IconDpi": info.get("IconDpi") if isinstance(info, dict) else None,
-                "IconSource": info.get("IconSource") if isinstance(info, dict) else None,
+                "IconSource": info.get("IconSource")
+                if isinstance(info, dict)
+                else None,
                 "IconError": info.get("IconError") if isinstance(info, dict) else None,
                 "IsSystem": 1 if is_system else 0,
             }
@@ -339,7 +372,12 @@ def capture_device_profile(
         },
     )
 
-    return {"ok": True, "device_id": device_id, "profile_path": str(path), "profile": merged}
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "profile_path": str(path),
+        "profile": merged,
+    }
 
 
 def _is_system_apk(apk_path: Optional[str]) -> bool:
@@ -347,17 +385,29 @@ def _is_system_apk(apk_path: Optional[str]) -> bool:
     p = (apk_path or "").strip().lower()
     if not p:
         return False
-    return p.startswith("/system/") or p.startswith("/product/") or p.startswith("/vendor/") or p.startswith("/system_ext/")
+    return (
+        p.startswith("/system/")
+        or p.startswith("/product/")
+        or p.startswith("/vendor/")
+        or p.startswith("/system_ext/")
+    )
 
 
-def _capture_launcher_info(device_serial: Optional[str], *, cache_dir: str) -> dict[str, Any]:
+def _capture_launcher_info(
+    device_serial: Optional[str], *, cache_dir: str
+) -> dict[str, Any]:
     """
     Best-effort capture default launcher package and version info.
     """
     comp = get_default_launcher_component(device_serial)
     pkg = comp.split("/", 1)[0].strip() if comp and "/" in comp else None
     if not pkg:
-        return {"package": None, "version_name": None, "version_code": None, "component": comp}
+        return {
+            "package": None,
+            "version_name": None,
+            "version_code": None,
+            "component": comp,
+        }
     info = get_app_info(device_serial, pkg, cache_dir=cache_dir)
     return {
         "package": pkg,
@@ -367,17 +417,32 @@ def _capture_launcher_info(device_serial: Optional[str], *, cache_dir: str) -> d
     }
 
 
-def get_device_profile_from_store(device_id: str, *, out_dir: str = "./.recordings") -> dict[str, Any]:
+def get_device_profile_from_store(
+    device_id: str, *, out_dir: str = "./.recordings"
+) -> dict[str, Any]:
     """Load a device profile JSON from recordings store."""
     out_root = recordings_root(out_dir)
     path = device_profile_path(out_root, device_id)
     if not path.exists():
-        return {"ok": False, "error": f"device not found: {device_id}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"device not found: {device_id}",
+            "profile_path": str(path),
+        }
     try:
         prof = read_json(path)
     except Exception as e:
-        return {"ok": False, "error": f"failed to read device profile: {e}", "profile_path": str(path)}
-    return {"ok": True, "device_id": device_id, "profile_path": str(path), "profile": prof}
+        return {
+            "ok": False,
+            "error": f"failed to read device profile: {e}",
+            "profile_path": str(path),
+        }
+    return {
+        "ok": True,
+        "device_id": device_id,
+        "profile_path": str(path),
+        "profile": prof,
+    }
 
 
 def list_devices_from_store(
@@ -394,6 +459,7 @@ def list_devices_from_store(
 
     q = (query or "").strip().lower()
     if q:
+
         def hit(it: dict) -> bool:
             """Return True if query matches a device record."""
             hay = " ".join(
@@ -442,13 +508,21 @@ def set_device_unlock_pin(
     out_root = recordings_root(out_dir)
     path = device_profile_path(out_root, did)
     if not path.exists():
-        return {"ok": False, "error": f"device not found: {did}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"device not found: {did}",
+            "profile_path": str(path),
+        }
     try:
         existing: dict[str, Any] = read_json(path)
     except Exception:
         existing = {}
     now = iso_now()
-    secrets = dict((existing.get("secrets") or {}) if isinstance(existing.get("secrets"), dict) else {})
+    secrets = dict(
+        (existing.get("secrets") or {})
+        if isinstance(existing.get("secrets"), dict)
+        else {}
+    )
     secrets["unlock_pin"] = p
     secrets["unlock_pin_updated_at"] = now
     merged = {**existing, "secrets": secrets, "updated_at": now, "ts": now_ts()}
@@ -468,7 +542,13 @@ def set_device_unlock_pin(
             "ts": now_ts(),
         },
     )
-    return {"ok": True, "device_id": did, "profile_path": str(path), "unlock_pin_set": True, "updated_at": now}
+    return {
+        "ok": True,
+        "device_id": did,
+        "profile_path": str(path),
+        "unlock_pin_set": True,
+        "updated_at": now,
+    }
 
 
 def set_device_unlock_method(
@@ -478,30 +558,43 @@ def set_device_unlock_method(
     out_dir: str = "./.recordings",
 ) -> dict[str, Any]:
     """
-    Persist an unlock method hint for a device in devices/<device_id>.json.
+        Persist an unlock method hint for a device in devices/<device_id>.json.
 
-    unlock_method:
-    - "pin": device requires PIN entry
-    - "swipe_only": swipe up is sufficient
+        unlock_method:
+        - "pin": device requires PIN entry
+        - "swipe_only": swipe up is sufficient
 
-Note: this is not sensitive and may be written to devices/index.json.
+    Note: this is not sensitive and may be written to devices/index.json.
     """
     did = (device_id or "").strip()
     m = (unlock_method or "").strip().lower()
     if not did:
         return {"ok": False, "error": "device_id is required"}
     if m not in ("pin", "swipe_only"):
-        return {"ok": False, "error": "invalid_unlock_method", "unlock_method": m, "hint": "expected 'pin' or 'swipe_only'."}
+        return {
+            "ok": False,
+            "error": "invalid_unlock_method",
+            "unlock_method": m,
+            "hint": "expected 'pin' or 'swipe_only'.",
+        }
     out_root = recordings_root(out_dir)
     path = device_profile_path(out_root, did)
     if not path.exists():
-        return {"ok": False, "error": f"device not found: {did}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"device not found: {did}",
+            "profile_path": str(path),
+        }
     try:
         existing: dict[str, Any] = read_json(path)
     except Exception:
         existing = {}
     now = iso_now()
-    secrets = dict((existing.get("secrets") or {}) if isinstance(existing.get("secrets"), dict) else {})
+    secrets = dict(
+        (existing.get("secrets") or {})
+        if isinstance(existing.get("secrets"), dict)
+        else {}
+    )
     secrets["unlock_method"] = m
     secrets["unlock_method_updated_at"] = now
     merged = {**existing, "secrets": secrets, "updated_at": now, "ts": now_ts()}
@@ -519,7 +612,13 @@ Note: this is not sensitive and may be written to devices/index.json.
             "ts": now_ts(),
         },
     )
-    return {"ok": True, "device_id": did, "profile_path": str(path), "unlock_method": m, "updated_at": now}
+    return {
+        "ok": True,
+        "device_id": did,
+        "profile_path": str(path),
+        "unlock_method": m,
+        "updated_at": now,
+    }
 
 
 def get_device_unlock_method(
@@ -536,15 +635,30 @@ def get_device_unlock_method(
     out_root = recordings_root(out_dir)
     path = device_profile_path(out_root, did)
     if not path.exists():
-        return {"ok": False, "error": f"device not found: {did}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"device not found: {did}",
+            "profile_path": str(path),
+        }
     try:
         prof: dict[str, Any] = read_json(path)
     except Exception as e:
-        return {"ok": False, "error": f"failed to read device profile: {e}", "profile_path": str(path)}
-    secrets = (prof.get("secrets") or {}) if isinstance(prof.get("secrets"), dict) else {}
-    m = (secrets.get("unlock_method") or "")
+        return {
+            "ok": False,
+            "error": f"failed to read device profile: {e}",
+            "profile_path": str(path),
+        }
+    secrets = (
+        (prof.get("secrets") or {}) if isinstance(prof.get("secrets"), dict) else {}
+    )
+    m = secrets.get("unlock_method") or ""
     if not isinstance(m, str) or not m.strip():
-        return {"ok": False, "device_id": did, "profile_path": str(path), "error": "unlock_method_not_set"}
+        return {
+            "ok": False,
+            "device_id": did,
+            "profile_path": str(path),
+            "error": "unlock_method_not_set",
+        }
     return {
         "ok": True,
         "device_id": did,
@@ -568,15 +682,30 @@ def get_device_unlock_pin(
     out_root = recordings_root(out_dir)
     path = device_profile_path(out_root, did)
     if not path.exists():
-        return {"ok": False, "error": f"device not found: {did}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"device not found: {did}",
+            "profile_path": str(path),
+        }
     try:
         prof: dict[str, Any] = read_json(path)
     except Exception as e:
-        return {"ok": False, "error": f"failed to read device profile: {e}", "profile_path": str(path)}
-    secrets = (prof.get("secrets") or {}) if isinstance(prof.get("secrets"), dict) else {}
-    pin = (secrets.get("unlock_pin") or "")
+        return {
+            "ok": False,
+            "error": f"failed to read device profile: {e}",
+            "profile_path": str(path),
+        }
+    secrets = (
+        (prof.get("secrets") or {}) if isinstance(prof.get("secrets"), dict) else {}
+    )
+    pin = secrets.get("unlock_pin") or ""
     if not isinstance(pin, str) or not pin.strip():
-        return {"ok": False, "device_id": did, "profile_path": str(path), "error": "unlock_pin_not_set"}
+        return {
+            "ok": False,
+            "device_id": did,
+            "profile_path": str(path),
+            "error": "unlock_pin_not_set",
+        }
     return {
         "ok": True,
         "device_id": did,
@@ -601,17 +730,39 @@ def get_device_screenrecord_prefs(
     out_root = recordings_root(out_dir)
     path = device_profile_path(out_root, did)
     if not path.exists():
-        return {"ok": False, "error": f"device not found: {did}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"device not found: {did}",
+            "profile_path": str(path),
+        }
     try:
         prof: dict[str, Any] = read_json(path)
     except Exception as e:
-        return {"ok": False, "error": f"failed to read device profile: {e}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"failed to read device profile: {e}",
+            "profile_path": str(path),
+        }
 
-    caps = (prof.get("capabilities") or {}) if isinstance(prof.get("capabilities"), dict) else {}
-    sr = (caps.get("screenrecord") or {}) if isinstance(caps.get("screenrecord"), dict) else {}
+    caps = (
+        (prof.get("capabilities") or {})
+        if isinstance(prof.get("capabilities"), dict)
+        else {}
+    )
+    sr = (
+        (caps.get("screenrecord") or {})
+        if isinstance(caps.get("screenrecord"), dict)
+        else {}
+    )
     preferred = sr.get("preferred") if isinstance(sr.get("preferred"), dict) else None
-    supported = sr.get("supported_profiles") if isinstance(sr.get("supported_profiles"), list) else []
-    supported_sizes = sr.get("supported_sizes") if isinstance(sr.get("supported_sizes"), list) else []
+    supported = (
+        sr.get("supported_profiles")
+        if isinstance(sr.get("supported_profiles"), list)
+        else []
+    )
+    supported_sizes = (
+        sr.get("supported_sizes") if isinstance(sr.get("supported_sizes"), list) else []
+    )
     return {
         "ok": True,
         "device_id": did,
@@ -644,7 +795,11 @@ def record_device_screenrecord_success(
     out_root = recordings_root(out_dir)
     path = device_profile_path(out_root, did)
     if not path.exists():
-        return {"ok": False, "error": f"device not found: {did}", "profile_path": str(path)}
+        return {
+            "ok": False,
+            "error": f"device not found: {did}",
+            "profile_path": str(path),
+        }
 
     try:
         existing: dict[str, Any] = read_json(path)
@@ -655,8 +810,16 @@ def record_device_screenrecord_success(
     br = max(100_000, int(bit_rate))
     sz = (str(size).strip() if size is not None else "") or None
 
-    caps = dict((existing.get("capabilities") or {}) if isinstance(existing.get("capabilities"), dict) else {})
-    sr = dict((caps.get("screenrecord") or {}) if isinstance(caps.get("screenrecord"), dict) else {})
+    caps = dict(
+        (existing.get("capabilities") or {})
+        if isinstance(existing.get("capabilities"), dict)
+        else {}
+    )
+    sr = dict(
+        (caps.get("screenrecord") or {})
+        if isinstance(caps.get("screenrecord"), dict)
+        else {}
+    )
 
     # Supported profiles (dedupe by (size, bitrate))
     supported_profiles0 = sr.get("supported_profiles")
@@ -668,7 +831,7 @@ def record_device_screenrecord_success(
     out_profiles: list[dict[str, Any]] = []
     for it in supported_profiles + [{"bit_rate": br, "size": sz}]:
         b0 = it.get("bit_rate")
-        s0 = (it.get("size") or None)
+        s0 = it.get("size") or None
         try:
             b1 = max(100_000, int(b0))
         except Exception:
@@ -690,7 +853,12 @@ def record_device_screenrecord_success(
     if sz and sz not in supported_sizes:
         supported_sizes.append(sz)
 
-    sr["preferred"] = {"bit_rate": br, "size": sz, "source": str(source or "workflow"), "updated_at": now}
+    sr["preferred"] = {
+        "bit_rate": br,
+        "size": sz,
+        "source": str(source or "workflow"),
+        "updated_at": now,
+    }
     sr["supported_profiles"] = out_profiles
     sr["supported_sizes"] = supported_sizes
     caps["screenrecord"] = sr
@@ -715,6 +883,9 @@ def record_device_screenrecord_success(
             "ts": now_ts(),
         },
     )
-    return {"ok": True, "device_id": did, "profile_path": str(path), "preferred": sr["preferred"]}
-
-
+    return {
+        "ok": True,
+        "device_id": did,
+        "profile_path": str(path),
+        "preferred": sr["preferred"],
+    }

@@ -11,7 +11,13 @@ import re
 import shutil
 from typing import Any, Optional
 
-from phone_pilot.core.storage import ensure_abs, iso_now, read_json, recordings_root, write_json
+from phone_pilot.core.storage import (
+    ensure_abs,
+    iso_now,
+    read_json,
+    recordings_root,
+    write_json,
+)
 
 RES_PREFIX = "@res:"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
@@ -187,11 +193,17 @@ def res_update(
             return {"ok": False, "error": "key_conflict", "key": target_key}
 
     origin_path = existing.get("origin_path")
-    origin = ensure_abs(path) if path else (ensure_abs(origin_path) if origin_path else None)
+    origin = (
+        ensure_abs(path) if path else (ensure_abs(origin_path) if origin_path else None)
+    )
     if path and (origin is None or not origin.exists()):
-        return {"ok": False, "error": "file_not_found", "path": str(origin) if origin else path}
+        return {
+            "ok": False,
+            "error": "file_not_found",
+            "path": str(origin) if origin else path,
+        }
 
-    ext = (origin.suffix.lower() if origin else (existing.get("ext") or ""))
+    ext = origin.suffix.lower() if origin else (existing.get("ext") or "")
     cached_name = f"{target_key}{ext}" if ext else target_key
     cached_path = cache_dir / cached_name
     cache_dir.mkdir(parents=True, exist_ok=True)

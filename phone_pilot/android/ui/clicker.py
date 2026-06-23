@@ -22,14 +22,21 @@ class Clicker:
     - clicker.tap_match({"x":10,"y":20,"w":30,"h":40})
     """
 
-    def __init__(self, device_serial: Optional[str], *, default_wait_s: float = 0.15) -> None:
+    def __init__(
+        self, device_serial: Optional[str], *, default_wait_s: float = 0.15
+    ) -> None:
         """Create a clicker with default wait between taps."""
         self.device_serial = device_serial
         self.default_wait_s = float(default_wait_s)
 
     def tap(self, x: int, y: int, *, wait_s: Optional[float] = None) -> dict:
         """Tap at given coordinates."""
-        return input_tap(self.device_serial, int(x), int(y), wait_s=float(wait_s or self.default_wait_s))
+        return input_tap(
+            self.device_serial,
+            int(x),
+            int(y),
+            wait_s=float(wait_s or self.default_wait_s),
+        )
 
     def tap_match(
         self,

@@ -45,7 +45,12 @@ class TestDriverProtocolConformance:
     def test_has_screen(self, driver):
         assert hasattr(driver, "screen")
         scr = driver.screen
-        for method in ("screenshot", "get_screen_size", "start_screenrecord", "stop_screenrecord"):
+        for method in (
+            "screenshot",
+            "get_screen_size",
+            "start_screenrecord",
+            "stop_screenrecord",
+        ):
             assert callable(getattr(scr, method))
 
     def test_has_ui(self, driver):
@@ -61,8 +66,14 @@ class TestDriverProtocolConformance:
             assert callable(getattr(app, method))
 
     def test_has_device_control(self, driver):
-        for method in ("go_home", "go_back", "unlock", "lock_screen",
-                        "clear_background", "device_info"):
+        for method in (
+            "go_home",
+            "go_back",
+            "unlock",
+            "lock_screen",
+            "clear_background",
+            "device_info",
+        ):
             assert callable(getattr(driver, method)), f"Missing {method}"
 
     def test_has_log(self, driver):

@@ -24,13 +24,13 @@ class UINode:
     """
 
     text: str = ""
-    content_desc: str = ""   # Android content-desc / Harmony description
-    hint: str = ""           # Android only (input hint text)
-    resource_id: str = ""    # Android resource-id / Harmony id
-    class_name: str = ""     # Android class / Harmony type
-    key: str = ""            # Harmony key
+    content_desc: str = ""  # Android content-desc / Harmony description
+    hint: str = ""  # Android only (input hint text)
+    resource_id: str = ""  # Android resource-id / Harmony id
+    class_name: str = ""  # Android class / Harmony type
+    key: str = ""  # Harmony key
     package: str = ""
-    bounds: str = ""         # "[x1,y1][x2,y2]" string for backward compat
+    bounds: str = ""  # "[x1,y1][x2,y2]" string for backward compat
     clickable: bool = False
     enabled: bool = True
     focusable: bool = False

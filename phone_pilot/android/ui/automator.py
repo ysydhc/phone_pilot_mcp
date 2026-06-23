@@ -28,8 +28,13 @@ _DUMP_PATH_RE = re.compile(r"UI hierarchy dumped to:\s*(\S+)")
 # Screen keep-alive: avoid redundant wake checks every step
 # ---------------------------------------------------------------------------
 
-_screen_timeout_ms: dict[str, int] = {}      # serial → timeout from system settings
-_last_keepalive_ts: dict[str, float] = {}     # serial → last keepalive epoch
+_screen_timeout_ms: dict[str, int] = {}  # serial → timeout from system settings
+_last_keepalive_ts: dict[str, float] = {}  # serial → last keepalive epoch
+# serial → whether `uiautomator dump /dev/tty` returns the XML on stdout.
+# Probed once per device; a `dump` call costs ~2s whether it targets tty or a
+# file, so on devices that don't support tty we must NOT pay for a doomed tty
+# attempt before falling back to the file path on every dump.
+_tty_dump_supported: dict[str, bool] = {}
 
 
 def _get_screen_timeout(device_serial: str) -> int:
@@ -38,8 +43,13 @@ def _get_screen_timeout(device_serial: str) -> int:
         return _screen_timeout_ms[device_serial]
     try:
         proc = CommandRunner.run(
-            adb_prefix(device_serial) + ["shell", "settings", "get", "system", "screen_off_timeout"],
-            check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=3.0,
+            adb_prefix(device_serial)
+            + ["shell", "settings", "get", "system", "screen_off_timeout"],
+            check=False,
+            delay_s=0.0,
+            log_output=False,
+            silent=True,
+            timeout_s=3.0,
         )
         val = int((proc.stdout or "").strip())
     except Exception:
@@ -59,18 +69,26 @@ def keep_screen_alive(device_serial: str) -> None:
         return  # still within safe window
     try:
         CommandRunner.run(
-            adb_prefix(device_serial) + ["shell", "input", "keyevent", "KEYCODE_WAKEUP"],
-            check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=3.0,
+            adb_prefix(device_serial)
+            + ["shell", "input", "keyevent", "KEYCODE_WAKEUP"],
+            check=False,
+            delay_s=0.0,
+            log_output=False,
+            silent=True,
+            timeout_s=3.0,
         )
     except Exception:
         pass
     _last_keepalive_ts[device_serial] = now
+
+
 _BOUNDS_RE = re.compile(r"^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$")
 
 
 @dataclass
 class UINode:
     """Represents a node in the UI hierarchy."""
+
     package: str | None
     text: str | None
     content_desc: str | None
@@ -147,31 +165,53 @@ def dump_ui_xml(
 
     flag = "--compressed" if compressed else ""
 
-    # 1) Try /dev/tty (all internal dump commands are silent)
-    cmd1 = adb_prefix(device_serial) + ["shell", "uiautomator", "dump"]
-    if flag:
-        cmd1.append(flag)
-    cmd1.append("/dev/tty")
-    proc1 = CommandRunner.run(cmd1, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0)
-    out1 = (proc1.stdout or "").strip()
-    if "<hierarchy" in out1:
-        idx = out1.find("<hierarchy")
-        return {"ok": True, "xml": out1[idx:], "method": "tty", "returncode": proc1.returncode}
+    # 1) Try /dev/tty (all internal dump commands are silent).
+    # Skip this attempt entirely on devices already known not to support it:
+    # a doomed tty dump still costs a full ~2s before we fall back to the file
+    # path, so probing it on every dump would double the latency.
+    if _tty_dump_supported.get(device_serial) is not False:
+        cmd1 = adb_prefix(device_serial) + ["shell", "uiautomator", "dump"]
+        if flag:
+            cmd1.append(flag)
+        cmd1.append("/dev/tty")
+        proc1 = CommandRunner.run(
+            cmd1, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0
+        )
+        out1 = (proc1.stdout or "").strip()
+        if "<hierarchy" in out1:
+            _tty_dump_supported[device_serial] = True
+            idx = out1.find("<hierarchy")
+            return {
+                "ok": True,
+                "xml": out1[idx:],
+                "method": "tty",
+                "returncode": proc1.returncode,
+            }
+        # Probed and failed → remember so future dumps go straight to file.
+        _tty_dump_supported[device_serial] = False
 
     # 2) Fallback: dump to default file path
     cmd2 = adb_prefix(device_serial) + ["shell", "uiautomator", "dump"]
     if flag:
         cmd2.append(flag)
-    proc2 = CommandRunner.run(cmd2, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0)
+    proc2 = CommandRunner.run(
+        cmd2, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0
+    )
     out2 = (proc2.stdout or "").strip()
-    
+
     if "null root node" in out2.lower():
         if force_home:
             CommandRunner.run(
-                adb_prefix(device_serial) + ["shell", "input", "keyevent", "KEYCODE_HOME"],
-                check=False, delay_s=0.2, log_output=False, silent=True,
+                adb_prefix(device_serial)
+                + ["shell", "input", "keyevent", "KEYCODE_HOME"],
+                check=False,
+                delay_s=0.2,
+                log_output=False,
+                silent=True,
             )
-        proc2 = CommandRunner.run(cmd2, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0)
+        proc2 = CommandRunner.run(
+            cmd2, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0
+        )
         out2 = (proc2.stdout or "").strip()
     m = _DUMP_PATH_RE.search(out2)
     dump_path = m.group(1) if m else "/sdcard/window_dump.xml"
@@ -179,7 +219,11 @@ def dump_ui_xml(
     # Read back the file contents from device
     proc3 = CommandRunner.run(
         adb_prefix(device_serial) + ["shell", "cat", dump_path],
-        check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0,
+        check=False,
+        delay_s=0.0,
+        log_output=False,
+        silent=True,
+        timeout_s=6.0,
     )
     xml = proc3.stdout or ""
     if "<hierarchy" not in xml:
@@ -221,6 +265,7 @@ def parse_uiautomator_nodes(xml: str) -> list[UINode]:
     text = xml or ""
     for m in re.finditer(r"<node\b[^>]*>", text):
         tag = m.group(0)
+
         def _bool_attr(k: str) -> bool | None:
             """Parse boolean attribute value from XML tag."""
             v = _attr(tag, k)
@@ -232,6 +277,7 @@ def parse_uiautomator_nodes(xml: str) -> list[UINode]:
             if vv == "false":
                 return False
             return None
+
         sc = _attr(tag, "scrollable")
         if sc is None:
             scrollable = None
@@ -282,7 +328,9 @@ def pick_scrollable_bounds(nodes: list[UINode]) -> Optional[tuple[int, int, int,
     return best
 
 
-def infer_scroll_directions(nodes: list[UINode], default_dirs: Optional[list[str]] = None) -> list[str]:
+def infer_scroll_directions(
+    nodes: list[UINode], default_dirs: Optional[list[str]] = None
+) -> list[str]:
     """
     Infer likely scroll directions based on container classes and bounds.
     Best-effort for home screen paging (horizontal) vs list scrolling (vertical).
@@ -340,7 +388,9 @@ def ui_signature(nodes: list[UINode]) -> str:
                     n.text or "",
                     n.content_desc or "",
                     n.bounds or "",
-                    "1" if n.scrollable is True else ("0" if n.scrollable is False else ""),
+                    "1"
+                    if n.scrollable is True
+                    else ("0" if n.scrollable is False else ""),
                 ]
             )
         )
@@ -374,9 +424,10 @@ def find_nodes(
         case_sensitive: Case-sensitive matching
         limit: Maximum results to return
     """
-    q = (query or "")
+    q = query or ""
     if not q:
         return []
+
     def norm(s: Optional[str]) -> str:
         """Normalize string for matching (case-fold if needed)."""
         if s is None:

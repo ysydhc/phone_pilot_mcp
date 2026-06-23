@@ -3,6 +3,7 @@
 包含 ScriptContext（脚本运行环境）和 RetryExhausted（重试耗尽异常）。
 Contains ScriptContext (script runtime environment) and RetryExhausted (retry exhaustion exception).
 """
+
 from __future__ import annotations
 
 import os
@@ -22,10 +23,13 @@ from phone_pilot.core.log import _log as _runner_log
 # 异常类
 # ---------------------------------------------------------------------------
 
+
 def _annotate_screenshot(png_bytes: bytes, element: Any) -> bytes:
     """在截图上标注找到的元素位置（绿色矩形 + 标签）/ Annotate found element on screenshot."""
     try:
-        bounds = element.bounds() if callable(getattr(element, "bounds", None)) else None
+        bounds = (
+            element.bounds() if callable(getattr(element, "bounds", None)) else None
+        )
         if not bounds:
             return png_bytes
         x1, y1, x2, y2 = bounds
@@ -50,10 +54,14 @@ def _annotate_screenshot(png_bytes: bytes, element: Any) -> bytes:
             label_text = label[:30]
             font_size = max(18, min(28, img.width // 40))
             try:
-                font = ImageFont.truetype("/System/Library/Fonts/PingFang.ttc", font_size)
+                font = ImageFont.truetype(
+                    "/System/Library/Fonts/PingFang.ttc", font_size
+                )
             except Exception:
                 try:
-                    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+                    font = ImageFont.truetype(
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size
+                    )
                 except Exception:
                     font = ImageFont.load_default()
 
@@ -79,6 +87,7 @@ class RetryExhausted(RuntimeError):
     Raised when all retry attempts of retry() or scroll_to_find() have failed.
     Used to abort script flow with non-zero exit code.
     """
+
     pass
 
 
@@ -97,6 +106,7 @@ class ScriptContext:
     - ``auto_screenshot``   — 自动截图到 RunSession 步骤目录 / Auto-screenshot to RunSession
     - ``auto_dump_hprof``   — 脚本成功结束后自动 dump hprof（默认关闭）/ Auto hprof on success (off by default)
     - ``auto_report``       — 脚本结束后自动生成 HTML 可视化报告（默认开启）/ Auto HTML report (on by default)
+    - ``clear_logcat_on_start`` — 启动时清空 logcat buffer（默认开启）/ Clear logcat buffer on start (on by default)
     - ``start_record()`` / ``stop_record()`` — 录屏控制 / Screen recording control
 
     错误自愈 / Error Self-Healing:
@@ -128,21 +138,34 @@ class ScriptContext:
     auto_log: bool = False
     auto_screenshot: bool = False
     auto_dump_hprof: bool = False
-    auto_meminfo: bool = True             # 自动 before/after meminfo 快照 / Auto before/after meminfo snapshots
-    meminfo_interval_s: float = 0         # 后台采样间隔秒数（0=关闭）/ Background sampling interval (0=off)
-    perfetto_heap_profile: bool = False   # 启用 Perfetto heapprofd / Enable Perfetto heapprofd
-    perfetto_duration_s: float = 0        # Perfetto 采集时长（0=跟随脚本全程）/ Perfetto duration (0=full script)
-    auto_report: bool = True              # 脚本结束后自动生成 HTML 报告 / Auto HTML report on finish
+    auto_meminfo: bool = (
+        False  # 自动 before/after meminfo 快照 / Auto before/after meminfo snapshots
+    )
+    meminfo_interval_s: float = (
+        0  # 后台采样间隔秒数（0=关闭）/ Background sampling interval (0=off)
+    )
+    perfetto_heap_profile: bool = (
+        False  # 启用 Perfetto heapprofd / Enable Perfetto heapprofd
+    )
+    perfetto_duration_s: float = (
+        0  # Perfetto 采集时长（0=跟随脚本全程）/ Perfetto duration (0=full script)
+    )
+    auto_report: bool = (
+        True  # 脚本结束后自动生成 HTML 报告 / Auto HTML report on finish
+    )
+    clear_logcat_on_start: bool = True  # 脚本启动时清空 logcat buffer，避免历史日志干扰 / Clear logcat buffer on start
     recordings_dir: Optional[str] = None
     script_name: str = ""
     script_path: Optional[str] = None
 
     # ---- 错误自愈配置 / Error self-healing config ----
-    on_step_fail: str = "abort"        # "abort" | "retry" | "screenshot_and_continue"
-    popup_guard: bool = True            # 启用弹窗自动检测与关闭 / Enable popup auto-detection
-    llm_healing: bool = False           # 启用 LLM 全局分析兜底 / Enable LLM analysis fallback
-    max_heal_attempts: int = 3          # 单步最大自愈尝试次数 / Max heal attempts per step
-    popup_rules: Optional[list] = None  # 自定义弹窗规则 / Custom popup rules (None for defaults)
+    on_step_fail: str = "abort"  # "abort" | "retry" | "screenshot_and_continue"
+    popup_guard: bool = True  # 启用弹窗自动检测与关闭 / Enable popup auto-detection
+    llm_healing: bool = False  # 启用 LLM 全局分析兜底 / Enable LLM analysis fallback
+    max_heal_attempts: int = 3  # 单步最大自愈尝试次数 / Max heal attempts per step
+    popup_rules: Optional[list] = (
+        None  # 自定义弹窗规则 / Custom popup rules (None for defaults)
+    )
 
     # ---- 内部状态 / Internal state ----
     _driver: Any = field(default=None, repr=False)
@@ -172,14 +195,20 @@ class ScriptContext:
         # Suppress verbose DEBUG logging from ALL internal libraries.
         # Must run before any detection/import to avoid noisy output.
         import logging as _logging
+
         _suppress_names = [
-            "phone_pilot.harmony", "hdc",
-            "airtest", "airtest.core", "airtest.core.android",
-            "airtest.core.android.cap_methods", "airtest.utils",
+            "phone_pilot.harmony",
+            "hdc",
+            "airtest",
+            "airtest.core",
+            "airtest.core.android",
+            "airtest.core.android.cap_methods",
+            "airtest.utils",
         ]
         # hmdriver2 configures its own handler at import; trigger import first
         try:
             import hmdriver2 as _hm  # noqa: F401
+
             _suppress_names.append("hmdriver2")
         except ImportError:
             pass
@@ -199,6 +228,13 @@ class ScriptContext:
 
         self._driver = create_driver(self.device_serial, self.platform)
         self.platform = self._driver.platform
+
+        # Clear logcat buffer so this run only sees its own logs (best-effort).
+        if self.clear_logcat_on_start:
+            try:
+                self._driver.clear_log()
+            except Exception:
+                pass
 
         # Auto-infer script_name from sys.argv if not set
         if not self.script_name:
@@ -261,8 +297,14 @@ class ScriptContext:
             air = self._try_install_and_import("airtest.core.api", "airtest", e)
         # Suppress airtest's verbose logging (DEBUG adb paths, ERROR minicap noise, etc.)
         import logging as _logging
-        for name in ("airtest", "airtest.core", "airtest.core.android",
-                      "airtest.core.android.cap_methods", "airtest.utils"):
+
+        for name in (
+            "airtest",
+            "airtest.core",
+            "airtest.core.android",
+            "airtest.core.android.cap_methods",
+            "airtest.utils",
+        ):
             _logging.getLogger(name).setLevel(_logging.CRITICAL)
         serial = self.device_serial or ""
         uri = f"Android:///{serial}" if serial else "Android:///"
@@ -270,7 +312,9 @@ class ScriptContext:
         if not self.device_serial:
             try:
                 dev = air.device()
-                self.device_serial = getattr(dev, "serialno", None) or getattr(dev, "serial", None)
+                self.device_serial = getattr(dev, "serialno", None) or getattr(
+                    dev, "serial", None
+                )
             except Exception:
                 pass
         self._air = air
@@ -291,7 +335,14 @@ class ScriptContext:
         self._poco = AndroidUiautomationPoco()
         return self._poco
 
-    def _try_install_and_import(self, module_name: str, pkg_name: str, err: Exception, *, attr_name: str | None = None):
+    def _try_install_and_import(
+        self,
+        module_name: str,
+        pkg_name: str,
+        err: Exception,
+        *,
+        attr_name: str | None = None,
+    ):
         import importlib, subprocess, sys  # noqa: E401
 
         try:
@@ -307,7 +358,19 @@ class ScriptContext:
             conda_prefix = os.environ.get("CONDA_PREFIX")
             if conda_prefix:
                 try:
-                    subprocess.check_call(["conda", "run", "-p", conda_prefix, "python", "-m", "pip", "install", pkg_name])
+                    subprocess.check_call(
+                        [
+                            "conda",
+                            "run",
+                            "-p",
+                            conda_prefix,
+                            "python",
+                            "-m",
+                            "pip",
+                            "install",
+                            pkg_name,
+                        ]
+                    )
                     mod = importlib.import_module(module_name)
                     return getattr(mod, attr_name) if attr_name else mod
                 except Exception:
@@ -365,10 +428,14 @@ class ScriptContext:
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 pull_result = self.driver.pull_file(remote, str(local_path))
                 if local_path.exists() and local_path.stat().st_size > 0:
-                    _runner_log(f"  [rec] 录屏已保存 → {local_path.name} ({local_path.stat().st_size // 1024}KB)")
+                    _runner_log(
+                        f"  [rec] 录屏已保存 → {local_path.name} ({local_path.stat().st_size // 1024}KB)"
+                    )
                     result["local_path"] = str(local_path)
                 else:
-                    _runner_log(f"  [rec] 录屏 pull 失败: {pull_result.get('stderr', '')}")
+                    _runner_log(
+                        f"  [rec] 录屏 pull 失败: {pull_result.get('stderr', '')}"
+                    )
             except Exception as e:
                 _runner_log(f"  [rec] 录屏保存异常: {e}")
 
@@ -459,7 +526,12 @@ class ScriptContext:
                 desc_parts.append(f"exclude={exclude_tag}")
             desc = f" ({', '.join(desc_parts)})" if desc_parts else ""
             _runner_log(f"  [log] 开始捕获 logcat → {name}{desc}")
-        return {"ok": result.get("ok", False), "name": name, "pid": result.get("pid"), "path": str(out_path)}
+        return {
+            "ok": result.get("ok", False),
+            "name": name,
+            "pid": result.get("pid"),
+            "path": str(out_path),
+        }
 
     def stop_logcat(self, name: str = "") -> dict:
         """停止 logcat/hilog 捕获并保存文件。
@@ -487,7 +559,12 @@ class ScriptContext:
 
         lines = result.get("lines", 0)
         _runner_log(f"  [log] logcat 已保存 → {out_path.name} ({lines} 行)")
-        return {"ok": result.get("ok", False), "name": name, "path": str(out_path), "lines": lines}
+        return {
+            "ok": result.get("ok", False),
+            "name": name,
+            "path": str(out_path),
+            "lines": lines,
+        }
 
     # ---- 自动观测辅助 ----
 
@@ -535,14 +612,19 @@ class ScriptContext:
         # Save to RunSession (consolidated steps.json + screenshot to screenshots/)
         if self._session:
             try:
-                self._session.add_step(step, action, status, detail, png_bytes=png_bytes)
+                self._session.add_step(
+                    step, action, status, detail, png_bytes=png_bytes
+                )
             except Exception:
                 pass
         elif png_bytes:
             try:
                 out_root = pathlib.Path(self.out_dir)
                 out_root.mkdir(parents=True, exist_ok=True)
-                path = out_root / f"auto_step{step:03d}_{action.replace(' ', '_')[:30]}.png"
+                path = (
+                    out_root
+                    / f"auto_step{step:03d}_{action.replace(' ', '_')[:30]}.png"
+                )
                 path.write_bytes(png_bytes)
             except Exception:
                 pass

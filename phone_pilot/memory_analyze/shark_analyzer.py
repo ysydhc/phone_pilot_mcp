@@ -17,6 +17,7 @@ Usage:
     from phone_pilot.memory_analyze.shark_analyzer import analyze_with_shark
     result = analyze_with_shark("path/to/app.hprof")
 """
+
 from __future__ import annotations
 
 import re
@@ -52,7 +53,10 @@ def _run_shark(hprof_path: str, *, timeout_s: float = 120.0) -> dict:
 
     shark = shutil.which("shark-cli")
     if not shark:
-        return {"ok": False, "error": "shark-cli not found. Install: brew install leakcanary-shark"}
+        return {
+            "ok": False,
+            "error": "shark-cli not found. Install: brew install leakcanary-shark",
+        }
 
     try:
         proc = subprocess.run(
@@ -64,7 +68,11 @@ def _run_shark(hprof_path: str, *, timeout_s: float = 120.0) -> dict:
         )
         output = proc.stdout + "\n" + proc.stderr
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": f"shark-cli timeout ({timeout_s}s)", "has_leak": False}
+        return {
+            "ok": False,
+            "error": f"shark-cli timeout ({timeout_s}s)",
+            "has_leak": False,
+        }
     except Exception as e:
         return {"ok": False, "error": str(e), "has_leak": False}
 
@@ -138,27 +146,32 @@ def _parse_shark_output(output: str) -> dict:
         # Build signature from class names
         sig = "::".join(leaking_classes) if leaking_classes else ""
 
-        for cls in (leaking_classes or ["Unknown"]):
-            result["leaks"].append({
-                "class_name": cls,
-                "leak_trace": trace_text,
-                "signature": sig,
-                "raw_trace": block.strip()[:2000],
-            })
+        for cls in leaking_classes or ["Unknown"]:
+            result["leaks"].append(
+                {
+                    "class_name": cls,
+                    "leak_trace": trace_text,
+                    "signature": sig,
+                    "raw_trace": block.strip()[:2000],
+                }
+            )
 
     # Also check for simpler patterns (some shark-cli versions)
     if not result["leaks"]:
         simple_leaks = re.findall(
             r"(\d+)\s+(?:APPLICATION|LIBRARY)\s+LEAKS?",
-            output, re.IGNORECASE,
+            output,
+            re.IGNORECASE,
         )
         if simple_leaks:
             for count_str in simple_leaks:
-                result["leaks"].append({
-                    "class_name": "detected_via_count",
-                    "leak_trace": output[:1000],
-                    "signature": "",
-                })
+                result["leaks"].append(
+                    {
+                        "class_name": "detected_via_count",
+                        "leak_trace": output[:1000],
+                        "signature": "",
+                    }
+                )
 
     result["leak_count"] = len(result["leaks"])
     result["has_leak"] = result["leak_count"] > 0
@@ -209,6 +222,7 @@ def analyze_with_shark(
         _log("[shark] shark-cli 未安装，降级到内置分析器")
         try:
             from phone_pilot.memory_analyze.analyzer import analyze_hprof
+
             return analyze_hprof(hprof_path)
         except Exception as e:
             return {"ok": False, "error": f"shark-cli 未安装且内置分析失败: {e}"}
@@ -247,7 +261,8 @@ def analyze_with_shark(
             # Dump new hprof
             tmp_dir = str(Path(hprof_path).parent)
             new_dump = dump_hprof(
-                device_serial, package_name,
+                device_serial,
+                package_name,
                 out_dir=tmp_dir,
                 hprof_subdir="",
                 name="shark_gc_recheck",

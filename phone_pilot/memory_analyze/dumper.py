@@ -85,7 +85,11 @@ def dump_hprof(
     # Check if app is running
     pid = _get_app_pid(device_serial, package_name)
     if pid is None:
-        return {"ok": False, "error": f"App {package_name} is not running", "package": package_name}
+        return {
+            "ok": False,
+            "error": f"App {package_name} is not running",
+            "package": package_name,
+        }
 
     # Generate unique filename
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -107,18 +111,28 @@ def dump_hprof(
 
     # Use am dumpheap command
     dump_cmd = adb_prefix(device_serial) + [
-        "shell", "am", "dumpheap", package_name, remote_path
+        "shell",
+        "am",
+        "dumpheap",
+        package_name,
+        remote_path,
     ]
 
     try:
-        proc = CommandRunner.run(dump_cmd, check=False, delay_s=0.0, log_output=True, timeout_s=timeout_s)
+        proc = CommandRunner.run(
+            dump_cmd, check=False, delay_s=0.0, log_output=True, timeout_s=timeout_s
+        )
         if proc.returncode != 0:
             # Try alternative method for debuggable apps
             if _is_app_debuggable(device_serial, package_name):
                 # Use run-as for debuggable apps
                 dump_cmd2 = adb_prefix(device_serial) + [
-                    "shell", "run-as", package_name,
-                    "kill", "-10", str(pid)  # SIGUSR1 triggers heap dump on some systems
+                    "shell",
+                    "run-as",
+                    package_name,
+                    "kill",
+                    "-10",
+                    str(pid),  # SIGUSR1 triggers heap dump on some systems
                 ]
                 CommandRunner.run(dump_cmd2, check=False, delay_s=2.0, log_output=False)
             else:
@@ -135,8 +149,16 @@ def dump_hprof(
         time.sleep(2.0)
 
         # Check if file exists and get size
-        stat_cmd = adb_prefix(device_serial) + ["shell", "stat", "-c", "%s", remote_path]
-        stat_proc = CommandRunner.run(stat_cmd, check=False, delay_s=0.0, log_output=False)
+        stat_cmd = adb_prefix(device_serial) + [
+            "shell",
+            "stat",
+            "-c",
+            "%s",
+            remote_path,
+        ]
+        stat_proc = CommandRunner.run(
+            stat_cmd, check=False, delay_s=0.0, log_output=False
+        )
         remote_size = 0
         if stat_proc.returncode == 0:
             try:
@@ -148,7 +170,9 @@ def dump_hprof(
             # File might not exist yet, wait more
             for _ in range(5):
                 time.sleep(1.0)
-                stat_proc = CommandRunner.run(stat_cmd, check=False, delay_s=0.0, log_output=False)
+                stat_proc = CommandRunner.run(
+                    stat_cmd, check=False, delay_s=0.0, log_output=False
+                )
                 if stat_proc.returncode == 0:
                     try:
                         remote_size = int((stat_proc.stdout or "0").strip())
@@ -176,7 +200,9 @@ def dump_hprof(
         local_path = hprof_dir / filename
 
         pull_cmd = adb_prefix(device_serial) + ["pull", remote_path, str(local_path)]
-        pull_proc = CommandRunner.run(pull_cmd, check=False, delay_s=0.0, log_output=True)
+        pull_proc = CommandRunner.run(
+            pull_cmd, check=False, delay_s=0.0, log_output=True
+        )
 
         if pull_proc.returncode != 0 or not local_path.exists():
             return {
@@ -285,7 +311,11 @@ def trigger_gc(
     # Check if app is running
     pid = _get_app_pid(device_serial, package_name)
     if pid is None:
-        return {"ok": False, "error": f"App {package_name} is not running", "package": package_name}
+        return {
+            "ok": False,
+            "error": f"App {package_name} is not running",
+            "package": package_name,
+        }
 
     methods_tried = []
     success = False
@@ -294,65 +324,94 @@ def trigger_gc(
     # This forces a GC and returns memory info
     try:
         gc_cmd = adb_prefix(device_serial) + [
-            "shell", "dumpsys", "meminfo", "--force-gc", package_name
+            "shell",
+            "dumpsys",
+            "meminfo",
+            "--force-gc",
+            package_name,
         ]
-        proc = CommandRunner.run(gc_cmd, check=False, delay_s=0.5, log_output=False, timeout_s=30.0)
-        methods_tried.append({
-            "method": "dumpsys-force-gc",
-            "returncode": proc.returncode,
-            "success": proc.returncode == 0,
-        })
+        proc = CommandRunner.run(
+            gc_cmd, check=False, delay_s=0.5, log_output=False, timeout_s=30.0
+        )
+        methods_tried.append(
+            {
+                "method": "dumpsys-force-gc",
+                "returncode": proc.returncode,
+                "success": proc.returncode == 0,
+            }
+        )
         if proc.returncode == 0:
             success = True
     except Exception as e:
-        methods_tried.append({
-            "method": "dumpsys-force-gc",
-            "error": str(e),
-            "success": False,
-        })
+        methods_tried.append(
+            {
+                "method": "dumpsys-force-gc",
+                "error": str(e),
+                "success": False,
+            }
+        )
 
     # Method 2: am send-trim-memory with RUNNING_CRITICAL (works for foreground apps)
     # RUNNING_CRITICAL (15) is the highest level that works for foreground processes
     try:
         trim_cmd = adb_prefix(device_serial) + [
-            "shell", "am", "send-trim-memory", package_name, "RUNNING_CRITICAL"
+            "shell",
+            "am",
+            "send-trim-memory",
+            package_name,
+            "RUNNING_CRITICAL",
         ]
         proc = CommandRunner.run(trim_cmd, check=False, delay_s=0.5, log_output=False)
-        methods_tried.append({
-            "method": "send-trim-memory-RUNNING_CRITICAL",
-            "returncode": proc.returncode,
-            "success": proc.returncode == 0,
-        })
+        methods_tried.append(
+            {
+                "method": "send-trim-memory-RUNNING_CRITICAL",
+                "returncode": proc.returncode,
+                "success": proc.returncode == 0,
+            }
+        )
         if proc.returncode == 0:
             success = True
     except Exception as e:
-        methods_tried.append({
-            "method": "send-trim-memory-RUNNING_CRITICAL",
-            "error": str(e),
-            "success": False,
-        })
+        methods_tried.append(
+            {
+                "method": "send-trim-memory-RUNNING_CRITICAL",
+                "error": str(e),
+                "success": False,
+            }
+        )
 
     # Method 3: For debuggable apps, try SIGUSR1
     if _is_app_debuggable(device_serial, package_name):
         try:
             # SIGUSR1 (signal 10) can trigger GC on some Android versions
             sig_cmd = adb_prefix(device_serial) + [
-                "shell", "run-as", package_name, "kill", "-10", str(pid)
+                "shell",
+                "run-as",
+                package_name,
+                "kill",
+                "-10",
+                str(pid),
             ]
-            proc = CommandRunner.run(sig_cmd, check=False, delay_s=0.5, log_output=False)
-            methods_tried.append({
-                "method": "sigusr1",
-                "returncode": proc.returncode,
-                "success": proc.returncode == 0,
-            })
+            proc = CommandRunner.run(
+                sig_cmd, check=False, delay_s=0.5, log_output=False
+            )
+            methods_tried.append(
+                {
+                    "method": "sigusr1",
+                    "returncode": proc.returncode,
+                    "success": proc.returncode == 0,
+                }
+            )
             if proc.returncode == 0:
                 success = True
         except Exception as e:
-            methods_tried.append({
-                "method": "sigusr1",
-                "error": str(e),
-                "success": False,
-            })
+            methods_tried.append(
+                {
+                    "method": "sigusr1",
+                    "error": str(e),
+                    "success": False,
+                }
+            )
 
     # Wait for GC to complete
     if wait_s > 0:

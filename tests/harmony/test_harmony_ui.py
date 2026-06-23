@@ -75,7 +75,6 @@ SAMPLE_HIERARCHY = {
 
 
 class TestParseHierarchy(unittest.TestCase):
-
     def test_parse_returns_nodes(self):
         nodes = parse_hierarchy_nodes(SAMPLE_HIERARCHY)
         self.assertGreater(len(nodes), 0)
@@ -112,7 +111,6 @@ class TestParseHierarchy(unittest.TestCase):
 
 
 class TestFindNodes(unittest.TestCase):
-
     def setUp(self):
         self.nodes = parse_hierarchy_nodes(SAMPLE_HIERARCHY)
 
@@ -146,12 +144,13 @@ class TestFindNodes(unittest.TestCase):
         self.assertEqual(len(results), 1)
 
     def test_find_case_insensitive(self):
-        results = find_nodes(self.nodes, "douyin", field="description", case_sensitive=False)
+        results = find_nodes(
+            self.nodes, "douyin", field="description", case_sensitive=False
+        )
         self.assertEqual(len(results), 1)
 
 
 class TestScrollable(unittest.TestCase):
-
     def test_pick_scrollable_bounds(self):
         nodes = parse_hierarchy_nodes(SAMPLE_HIERARCHY)
         bounds = pick_scrollable_bounds(nodes)
@@ -162,7 +161,6 @@ class TestScrollable(unittest.TestCase):
 
 
 class TestUISignature(unittest.TestCase):
-
     def test_signature_stable(self):
         nodes = parse_hierarchy_nodes(SAMPLE_HIERARCHY)
         sig1 = ui_signature(nodes)
@@ -172,7 +170,6 @@ class TestUISignature(unittest.TestCase):
 
 
 class TestCollectNodeTexts(unittest.TestCase):
-
     def test_collect(self):
         nodes = parse_hierarchy_nodes(SAMPLE_HIERARCHY)
         texts = collect_node_texts(nodes)

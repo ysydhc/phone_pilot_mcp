@@ -50,13 +50,21 @@ class GeteventRecording:
     started_at: float
 
 
-def start_getevent_recording(device: Optional[str], raw_log: pathlib.Path) -> GeteventRecording:
+def start_getevent_recording(
+    device: Optional[str], raw_log: pathlib.Path
+) -> GeteventRecording:
     """Start `adb shell getevent -lt` and pump stdout to raw_log in a background thread."""
     raw_log.parent.mkdir(parents=True, exist_ok=True)
     cmd = adb_prefix(device) + ["shell", "getevent", "-lt"]
     # IMPORTANT: stderr for logs so MCP stdio transport isn't corrupted.
     print(f"[recorder] 开始录制触摸事件: {' '.join(cmd)}", file=sys.stderr)
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
     stop_event = threading.Event()
 
     def pump_stdout() -> None:
@@ -136,7 +144,9 @@ def stop_getevent_recording_pid(pid: int, *, timeout_s: float = 3.0) -> None:
         return
 
 
-def stop_getevent_recording(recording: GeteventRecording, *, timeout_s: float = 3.0) -> None:
+def stop_getevent_recording(
+    recording: GeteventRecording, *, timeout_s: float = 3.0
+) -> None:
     """Stop a recording started by start_getevent_recording()."""
     recording.stop_event.set()
     recording.proc.terminate()
@@ -165,7 +175,12 @@ def record_getevent(device: Optional[str], raw_log: pathlib.Path) -> None:
     print(f"[recorder] 已保存原始事件到 {raw_log}", file=sys.stderr)
 
 
-def convert_to_monkey(raw_log: pathlib.Path, monkey_out: pathlib.Path, keep_device: Optional[str], slot: int) -> None:
+def convert_to_monkey(
+    raw_log: pathlib.Path,
+    monkey_out: pathlib.Path,
+    keep_device: Optional[str],
+    slot: int,
+) -> None:
     """Convert raw getevent log to Monkey script file."""
     with open(raw_log, "r", encoding="utf-8") as f:
         actions = list(parse_getevent(f, keep_device, slot))
@@ -177,16 +192,36 @@ def convert_to_monkey(raw_log: pathlib.Path, monkey_out: pathlib.Path, keep_devi
 
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI argument parser for touch recording."""
-    p = argparse.ArgumentParser(description="Record touches and convert to Monkey script.")
+    p = argparse.ArgumentParser(
+        description="Record touches and convert to Monkey script."
+    )
     p.add_argument("--device", "-s", help="ADB 设备序列号，可选")
-    p.add_argument("--raw-log", default="getevent.log", help="保存 getevent 原始日志的路径 (默认: getevent.log)")
-    p.add_argument("--monkey-out", default="auto.monkey", help="输出 Monkey 脚本路径 (默认: auto.monkey)")
-    p.add_argument("--keep-device", help="只保留包含该子串的 input 设备名，例如 /dev/input/event2")
+    p.add_argument(
+        "--raw-log",
+        default="getevent.log",
+        help="保存 getevent 原始日志的路径 (默认: getevent.log)",
+    )
+    p.add_argument(
+        "--monkey-out",
+        default="auto.monkey",
+        help="输出 Monkey 脚本路径 (默认: auto.monkey)",
+    )
+    p.add_argument(
+        "--keep-device", help="只保留包含该子串的 input 设备名，例如 /dev/input/event2"
+    )
     p.add_argument("--slot", type=int, default=0, help="触摸槽 (ABS_MT_SLOT) 默认 0")
-    p.add_argument("--run-monkey", action="store_true", help="生成后立即推送并执行 Monkey")
+    p.add_argument(
+        "--run-monkey", action="store_true", help="生成后立即推送并执行 Monkey"
+    )
     p.add_argument("--package", help="Monkey -p 的包名 (仅 run-monkey 时使用)")
-    p.add_argument("--remote-script", default="/data/local/tmp/auto.mks", help="设备上保存脚本的路径")
-    p.add_argument("--throttle", type=int, default=80, help="Monkey throttle 毫秒，默认 80")
+    p.add_argument(
+        "--remote-script",
+        default="/data/local/tmp/auto.mks",
+        help="设备上保存脚本的路径",
+    )
+    p.add_argument(
+        "--throttle", type=int, default=80, help="Monkey throttle 毫秒，默认 80"
+    )
     p.add_argument("--seed", type=int, default=1234, help="Monkey 随机种子，默认 1234")
     p.add_argument("--count", type=int, default=1, help="Monkey 次数，默认 1")
     return p
@@ -220,4 +255,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

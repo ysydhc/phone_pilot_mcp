@@ -119,6 +119,7 @@ class TestGraphFailureHandling:
 
     def test_exception_counts_as_failure(self):
         """节点抛异常视为失败。"""
+
         def boom():
             raise RuntimeError("test error")
 
