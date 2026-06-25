@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-`phone-pilot` is a multi-platform mobile automation toolkit exposed as an MCP server. It lets AI agents drive Android (primary; ADB + UIAutomator) and HarmonyOS (via `hmdriver2` + HDC) devices. iOS is planned but unimplemented. Requires Python >= 3.13.
+`phone-pilot` is a multi-platform mobile automation toolkit exposed as an MCP server. It lets AI agents drive Android (primary; ADB + UIAutomator) and HarmonyOS (via `hmdriver2` + HDC) devices. iOS support is **experimental**: the driver layer (`phone_pilot/ios/`, WebDriverAgent + pymobiledevice3) implements the full `DeviceDriver` protocol and is unit-tested with mocks, but is **pending real-device verification** (needs macOS + Xcode + a signed WebDriverAgent; see `docs/design/ios-driver.md`). Requires Python >= 3.13.
 
 ## Commands
 

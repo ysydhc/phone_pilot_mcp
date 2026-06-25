@@ -1,7 +1,10 @@
 """Tests for phone_pilot.core.driver_factory."""
 
+from unittest.mock import patch
+
 import pytest
 
+from phone_pilot.core import driver_factory
 from phone_pilot.core.driver_factory import create_driver
 
 
@@ -20,19 +23,50 @@ class TestCreateDriver:
         with pytest.raises(ValueError, match="Unknown platform"):
             create_driver("s", platform="foobar")
 
-    def test_ios_not_implemented(self):
-        with pytest.raises(NotImplementedError):
-            create_driver("s", platform="ios")
+    def test_ios_creates_ios_driver(self):
+        drv = create_driver("s", platform="ios")
+        assert drv.platform == "ios"
+        assert drv.device_serial == "s"
 
     def test_empty_serial_raises(self):
         with pytest.raises(ValueError, match="device_serial"):
             create_driver("", platform="android")
 
 
+class TestIosDetection:
+    UDID = "00008030-001234560A80802E"
+
+    def test_auto_detect_routes_to_ios(self):
+        with (
+            patch.object(driver_factory, "_is_adb_device", return_value=False),
+            patch.object(driver_factory, "_is_hdc_device", return_value=False),
+            patch.object(driver_factory, "_is_ios_device", return_value=True),
+        ):
+            drv = driver_factory._auto_detect_driver(self.UDID)
+        assert drv.platform == "ios"
+        assert drv.device_serial == self.UDID
+
+    def test_detect_device_finds_ios_after_adb_hdc(self):
+        with (
+            patch.object(driver_factory, "_first_adb_device", return_value=None),
+            patch.object(driver_factory, "_first_hdc_device", return_value=None),
+            patch.object(driver_factory, "_first_ios_device", return_value=self.UDID),
+        ):
+            serial, plat = driver_factory.detect_device()
+        assert serial == self.UDID
+        assert plat == "ios"
+
+    def test_first_ios_device_empty_on_failure(self):
+        with patch(
+            "phone_pilot.ios.pmd.utils.list_ios_serials", side_effect=RuntimeError()
+        ):
+            assert driver_factory._first_ios_device() is None
+
+
 class TestDriverProtocolConformance:
     """Verify both drivers expose Protocol-required attributes."""
 
-    @pytest.fixture(params=["android", "harmony"])
+    @pytest.fixture(params=["android", "harmony", "ios"])
     def driver(self, request):
         return create_driver("test_serial", platform=request.param)
 
@@ -81,5 +115,5 @@ class TestDriverProtocolConformance:
             assert callable(getattr(driver, method)), f"Missing {method}"
 
     def test_platform_identity(self, driver):
-        assert driver.platform in ("android", "harmony")
+        assert driver.platform in ("android", "harmony", "ios")
         assert driver.device_serial == "test_serial"

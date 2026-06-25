@@ -37,10 +37,12 @@ Issues = "https://github.com/aspect-build/phone-pilot-mcp/issues"
 dev = ["ruff>=0.8.0", "pytest>=8.0.0"]
 # HarmonyOS device automation
 harmony = ["hmdriver2>=1.4.0"]
+# iOS device automation (macOS only)
+ios = ["pymobiledevice3>=4.0.0", "facebook-wda>=1.4.6"]
 # Language detection & translation (for multilingual OCR/text)
 vision = ["langdetect>=1.0.9", "deep-translator>=1.11.4"]
 # Install everything
-all = ["phone-pilot[harmony,vision]"]
+all = ["phone-pilot[harmony,ios,vision]"]
 
 [project.scripts]
 phone-pilot-mcp = "phone_pilot.cli:main"

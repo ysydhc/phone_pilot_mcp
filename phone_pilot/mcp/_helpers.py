@@ -22,7 +22,9 @@ def get_driver(device_serial: str, platform: str = "android") -> DeviceDriver:
     if platform == "android":
         return AndroidDriver(device_serial)
     if platform == "ios":
-        raise NotImplementedError("iOS support is planned for a future release")
+        from phone_pilot.ios.driver import iOSDriver
+
+        return iOSDriver(device_serial)
     if platform == "harmony":
         return HarmonyDriver(device_serial)
     raise ValueError(f"Unknown platform: {platform}")
@@ -73,10 +75,62 @@ def _with_device(
         return {"ok": False, "error": str(e), "device_serial": resolved}
 
 
+def _scan_android_serials() -> list[str]:
+    """Return online ADB device serials (empty on any failure)."""
+    serials: list[str] = []
+    try:
+        from phone_pilot.android.adb.utils import adb_executable
+        from phone_pilot.android.adb.runner import CommandRunner
+        from phone_pilot.android.adb.parsers import parse_adb_devices
+
+        proc = CommandRunner.run([adb_executable(), "devices", "-l"], check=False)
+        for d in parse_adb_devices(proc.stdout or ""):
+            if not d:
+                continue
+            state = d.get("status") or d.get("state")
+            if state == "device" and d.get("serial"):
+                serials.append(d.get("serial"))
+    except Exception:
+        pass
+    return serials
+
+
+def _scan_harmony_serials() -> list[str]:
+    """Return online HDC device serials (empty on any failure)."""
+    serials: list[str] = []
+    try:
+        from phone_pilot.harmony.hdc.utils import hdc_executable
+        from phone_pilot.harmony.hdc.runner import HdcCommandRunner
+
+        proc_h = HdcCommandRunner.run(
+            [hdc_executable(), "list", "targets"], check=False, log_output=False
+        )
+        for raw in (proc_h.stdout or "").splitlines():
+            line = raw.strip()
+            if not line or "empty" in line.lower():
+                continue
+            serial = line.split()[0]
+            if serial:
+                serials.append(serial)
+    except Exception:
+        pass
+    return serials
+
+
+def _scan_ios_serials() -> list[str]:
+    """Return connected iOS UDIDs (real + booted simulators); empty on failure."""
+    try:
+        from phone_pilot.ios.pmd.utils import list_ios_serials
+
+        return list_ios_serials()
+    except Exception:
+        return []
+
+
 def _resolve_device_serial(
     device_serial: Optional[str], platform: str = "auto"
 ) -> tuple[Optional[str], Optional[str], Optional[dict]]:
-    """Resolve device_serial and platform from adb/hdc.
+    """Resolve device_serial and platform from adb/hdc/ios.
 
     Returns: (resolved_serial, resolved_platform, error_dict_or_none)
     """
@@ -84,53 +138,18 @@ def _resolve_device_serial(
 
     ensure_adb_env()
     platform = (platform or "auto").strip().lower()
-    android_serials: list[str] = []
-    harmony_serials: list[str] = []
 
-    # Scan Android devices (adb)
-    if platform in ("android", "auto"):
-        try:
-            from phone_pilot.android.adb.utils import adb_executable
-            from phone_pilot.android.adb.runner import CommandRunner
-            from phone_pilot.android.adb.parsers import parse_adb_devices
-
-            proc = CommandRunner.run([adb_executable(), "devices", "-l"], check=False)
-            devices = parse_adb_devices(proc.stdout or "")
-            for d in devices:
-                if not d:
-                    continue
-                state = d.get("status") or d.get("state")
-                if state == "device":
-                    serial = d.get("serial")
-                    if serial:
-                        android_serials.append(serial)
-        except Exception:
-            pass
-
-    # Scan Harmony devices (hdc)
-    if platform in ("harmony", "auto"):
-        try:
-            from phone_pilot.harmony.hdc.utils import hdc_executable
-            from phone_pilot.harmony.hdc.runner import HdcCommandRunner
-
-            proc_h = HdcCommandRunner.run(
-                [hdc_executable(), "list", "targets"], check=False, log_output=False
-            )
-            for raw in (proc_h.stdout or "").splitlines():
-                line = raw.strip()
-                if not line or "empty" in line.lower():
-                    continue
-                serial = line.split()[0]
-                if serial:
-                    harmony_serials.append(serial)
-        except Exception:
-            pass
+    android_serials = _scan_android_serials() if platform in ("android", "auto") else []
+    harmony_serials = _scan_harmony_serials() if platform in ("harmony", "auto") else []
+    ios_serials = _scan_ios_serials() if platform in ("ios", "auto") else []
 
     if device_serial:
         if device_serial in android_serials:
             return device_serial, "android", None
         if device_serial in harmony_serials:
             return device_serial, "harmony", None
+        if device_serial in ios_serials:
+            return device_serial, "ios", None
         return (
             None,
             None,
@@ -141,18 +160,23 @@ def _resolve_device_serial(
                 "note": "设备未找到。请确认设备已连接且授权调试。",
                 "available_android": android_serials,
                 "available_harmony": harmony_serials,
+                "available_ios": ios_serials,
             },
         )
 
-    # Auto-select
+    # Auto-select: explicit platform first, then android > harmony > ios.
     if platform == "android" and android_serials:
         return android_serials[0], "android", None
     if platform == "harmony" and harmony_serials:
         return harmony_serials[0], "harmony", None
+    if platform == "ios" and ios_serials:
+        return ios_serials[0], "ios", None
     if android_serials:
         return android_serials[0], "android", None
     if harmony_serials:
         return harmony_serials[0], "harmony", None
+    if ios_serials:
+        return ios_serials[0], "ios", None
 
     return (
         None,
@@ -160,6 +184,6 @@ def _resolve_device_serial(
         {
             "ok": False,
             "error": "no_device_connected",
-            "note": "未发现可用设备。请连接 Android 或 HarmonyOS 设备。",
+            "note": "未发现可用设备。请连接 Android / HarmonyOS / iOS 设备。",
         },
     )

@@ -2,7 +2,7 @@
 
 > 本文档追踪 phone_pilot 在三个平台上的功能实现状态。  
 > 每实现一个功能后必须更新本文档。  
-> 最后更新: 2026-06-23
+> 最后更新: 2026-06-25
 
 ## 状态说明
 
@@ -11,6 +11,8 @@
 | 已实现 | 功能完整可用 |
 | 已实现(HDC) | 仅通过 HDC 原始命令实现（基础能力） |
 | 已实现(hmdriver2) | 通过 hmdriver2 库实现（完整能力） |
+| 已实现(WDA) | 通过 WebDriverAgent (XCUITest) 实现（iOS，实验性，待真机验证） |
+| 已实现(pmd3) | 通过 pymobiledevice3 实现（iOS，实验性，待真机验证） |
 | 部分实现 | 核心功能可用但有限制 |
 | 未实现(有方案) | 尚未实现但有明确技术路线 |
 | 未实现 | 尚未实现且无明确方案 |
@@ -22,12 +24,12 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| tap (坐标点击) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | uitest uiInput click |
-| swipe (滑动) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | Driver.swipe |
-| long_press (长按) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | Driver.long_click |
+| tap (坐标点击) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | uitest uiInput click |
+| swipe (滑动) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | Driver.swipe |
+| long_press (长按) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | Driver.long_click |
 | double_click (双击) | 未实现 | 已实现(hmdriver2) | 未实现(有方案) | Driver.double_click |
-| input_text (文本输入) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 支持完整输入 |
-| input_keyevent (按键事件) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | press_key + KeyCode 映射 |
+| input_text (文本输入) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | 支持完整输入 |
+| input_keyevent (按键事件) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | press_key + KeyCode 映射 |
 | set_clipboard_text (设置剪贴板) | 已实现 | 未实现(有方案) | 未实现(有方案) | hmdriver2 暂无此 API; 可用 HDC shell |
 | complex_gesture (复杂手势) | 未实现 | 未实现(有方案) | 未实现 | hmdriver2 提供 gesture 链式 API |
 
@@ -35,13 +37,13 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| screenshot (截图) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | screenCap (PNG) + snapshot_display (JPEG快速) |
+| screenshot (截图) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | screenCap (PNG) + snapshot_display (JPEG快速) |
 | save_screenshot_png (截图保存) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 基于 screenshot 封装 |
-| png_bytes_to_base64 | 已实现 | 已实现 | 未实现(有方案) | 纯 Python 工具函数 |
-| get_screen_size (屏幕尺寸) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | Driver.getDisplaySize |
+| png_bytes_to_base64 | 已实现 | 已实现 | 已实现 | 纯 Python 工具函数 |
+| get_screen_size (屏幕尺寸) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | Driver.getDisplaySize |
 | get_screen_density (屏幕密度) | 已实现 | 未实现(有方案) | 未实现(有方案) | hmdriver2 device_info 可获取 |
-| start_screenrecord (开始录屏) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | screenrecord.start |
-| stop_screenrecord (停止录屏) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | screenrecord.stop |
+| start_screenrecord (开始录屏) | 已实现 | 已实现(hmdriver2) | 部分实现 | screenrecord.start |
+| stop_screenrecord (停止录屏) | 已实现 | 已实现(hmdriver2) | 部分实现 | screenrecord.stop |
 | display_rotation (屏幕旋转) | 未实现 | 未实现(有方案) | 未实现(有方案) | hmdriver2 提供 display_rotation |
 | set_display_rotation | 未实现 | 未实现(有方案) | 未实现(有方案) | hmdriver2 提供 set_display_rotation |
 
@@ -49,16 +51,16 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| dump_ui_hierarchy (导出 UI 树) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | uitest dumpLayout |
+| dump_ui_hierarchy (导出 UI 树) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | uitest dumpLayout |
 | parse_hierarchy_nodes (解析节点) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 递归解析 JSON dict |
 | find_nodes (节点查找) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | text/id/type/description/any 选择器 |
 | ui_signature (UI 签名) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 基于 UI 树节点计算 |
 | pick_scrollable_bounds (滚动容器) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 从 UI 树提取 scrollable 节点 |
 | infer_scroll_directions (推断滚动方向) | 已实现 | 未实现(有方案) | 未实现(有方案) | 待实现 |
-| UINode 统一数据类 | 已实现 | 已实现 | 未实现(有方案) | core/ui_node.py, 两平台共用 |
-| dump_ui_nodes (统一节点列表) | 已实现 | 已实现 | 未实现(有方案) | UIDriver protocol, 返回 list[UINode] |
-| collect_all_texts (收集 UI 文本) | 已实现 | 已实现 | 未实现(有方案) | UIDriver protocol |
-| dump_memory_profile (内存快照) | 已实现 | 不适用 | 未实现(有方案) | DeviceDriver protocol, Android hprof |
+| UINode 统一数据类 | 已实现 | 已实现 | 已实现 | core/ui_node.py, 两平台共用 |
+| dump_ui_nodes (统一节点列表) | 已实现 | 已实现 | 已实现(WDA) | UIDriver protocol, 返回 list[UINode] |
+| collect_all_texts (收集 UI 文本) | 已实现 | 已实现 | 已实现(WDA) | UIDriver protocol |
+| dump_memory_profile (内存快照) | 已实现 | 不适用 | 不适用 | DeviceDriver protocol, Android hprof |
 
 ## 4. UI 查找与交互 (UI Finder)
 
@@ -68,7 +70,7 @@
 | ~~find_and_tap_impl (630行复合函数)~~ | ~~已删除~~ | — | — | 三级回退(UI/OCR/图片)巨型函数，已拆解为独立 find + tap |
 | ~~dismiss_popups (关闭弹窗)~~ | ~~已删除~~ | ~~已删除~~ | — | 无生产代码引用，已清理 |
 | ~~find_on_screen (屏幕查找)~~ | ~~已删除~~ | ~~已删除~~ | — | 已由 UIDriver.find_elements 替代 |
-| launch_from_home (从主屏启动) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | DeviceDriver.launch_from_home protocol |
+| launch_from_home (从主屏启动) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | DeviceDriver.launch_from_home protocol |
 | ~~pick_tab_node (查找 Tab)~~ | ~~已删除~~ | — | — | 无生产代码引用 |
 | Clicker (点击辅助类) | 已实现(内部) | 已实现(hmdriver2) | 未实现(有方案) | Android 内部使用 |
 
@@ -94,19 +96,19 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| list_packages (列出应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | list_apps |
-| launch_app (启动应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | start_app |
-| force_stop (强制停止) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | stop_app |
+| list_packages (列出应用) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3) | list_apps |
+| launch_app (启动应用) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3) | start_app |
+| force_stop (强制停止) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3) | stop_app |
 | restart_app (重启应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | stop + start |
-| clear_data (清除数据) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | clear_app |
+| clear_data (清除数据) | 已实现 | 已实现(hmdriver2) | 不适用 | clear_app |
 | install_app (安装应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | install_app |
-| uninstall_app (卸载应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | uninstall_app |
+| uninstall_app (卸载应用) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3) | uninstall_app |
 | get_app_info (应用信息) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | get_app_info |
 | get_installed_apps (带元数据) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | list_apps + app_info |
 | has_app (应用是否安装) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | has_app |
 | get_app_main_ability | 不适用 | 已实现(hmdriver2) | 不适用 | get_app_main_ability |
-| open_deeplink (打开深链接) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | open_url |
-| get_current_focus (前台应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | current_app |
+| open_deeplink (打开深链接) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | open_url |
+| get_current_focus (前台应用) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | current_app |
 | is_launcher_package | 已实现 | 未实现(有方案) | 未实现(有方案) | 需 app_info 判断 |
 | get_default_launcher_component | 已实现 | 未实现(有方案) | 不适用 | 需 ability 列表判断 |
 | list_launcher_components | 已实现 | 未实现(有方案) | 不适用 | 同上 |
@@ -117,7 +119,7 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| get_device_profile (设备画像) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | device_info |
+| get_device_profile (设备画像) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3) | device_info |
 | get_android_os_info (系统信息) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | device_info 含 sdkVersion |
 | capture_device_profile (采集并存储) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 复用 core/storage |
 | get_device_profile_from_store | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 复用 core/storage |
@@ -135,8 +137,8 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| wake_and_unlock (唤醒解锁) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | unlock() |
-| lock_screen (锁屏) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | screen_off() |
+| wake_and_unlock (唤醒解锁) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | unlock() |
+| lock_screen (锁屏) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | screen_off() |
 | detect_lock_method | 已实现 | 未实现(有方案) | 未实现(有方案) | 需 dumpsys 解析 |
 | get_device_state (设备状态) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | get_screen_state |
 | get_display_state (屏幕状态) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | screen_on/screen_off 状态 |
@@ -148,7 +150,7 @@
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
 | clear_logcat (清除日志) | 已实现 | 已实现(HDC) | 未实现(有方案) | hdc shell hilog -r |
-| read_logcat (读取日志) | 已实现 | 已实现(HDC) | 未实现(有方案) | hdc shell hilog |
+| read_logcat (读取日志) | 已实现 | 已实现(HDC) | 已实现(pmd3) | hdc shell hilog |
 | dump_logcat (导出日志) | 已实现 | 已实现(HDC) | 未实现(有方案) | hilog 导出到文件 |
 
 ## 11. 断言 (Assertions)
@@ -203,8 +205,8 @@
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
 | CommandRunner (命令执行) | 已实现 | 已实现(HDC) | 未实现(有方案) | HdcCommandRunner |
-| push_file (推送文件) | 已实现 | 已实现(HDC) | 未实现(有方案) | hdc file send |
-| pull_file (拉取文件) | 已实现 | 已实现(HDC) | 未实现(有方案) | hdc file recv |
+| push_file (推送文件) | 已实现 | 已实现(HDC) | 已实现(pmd3) | hdc file send |
+| pull_file (拉取文件) | 已实现 | 已实现(HDC) | 已实现(pmd3) | hdc file recv |
 | wait_for_device | 已实现 | 已实现(HDC) | 未实现(有方案) | hdc wait |
 | hdc/adb_executable (路径解析) | 已实现 | 已实现(HDC) | 不适用 | 含 DevEco-Studio 路径 |
 
@@ -318,20 +320,28 @@
 
 ---
 
-## iOS 技术路线 (规划中)
+## iOS 技术路线 (实验性已落地，待真机验证)
 
-iOS 目前仅有 stub 文件，所有方法抛出 `NotImplementedError`。技术路线：
+iOS 驱动层 (`phone_pilot/ios/`) 已实现 `DeviceDriver` 协议全部 42 入口，引擎栈为
+**WebDriverAgent (XCUITest) + pymobiledevice3**，真机/模拟器双形态由 runner 层分流。
+设计见 `docs/design/ios-driver.md`，实施 plan 见 `docs/plan/ios-driver-plan.md`。
 
-- **输入/截图**: libimobiledevice + WebDriverAgent
-- **UI 树**: WebDriverAgent XCTest
-- **应用管理**: ideviceinstaller / pymobiledevice3
-- **日志**: idevicesyslog
-- iOS 实现不在本次迭代范围内，仅在文档中规划
+- **输入/截图/UI 树/导航**: WebDriverAgent (`已实现(WDA)`)
+- **设备发现/应用管理/文件/日志**: pymobiledevice3 (`已实现(pmd3)`)
+- **健壮性**: WDA session 保活重连 + iOS17+ 隧道探测诊断（不托管）
+- **能力缺口**: `clear_data` / `clear_background` / `dump_memory_profile` / 真机录屏
+  返回 `not_supported`（设计 ADR-5）
+- **当前状态**: 全部单测以 mock WDA/pmd3 覆盖（不依赖真机）；真机 + 模拟器 E2E
+  用例标 `skip`，需 macOS + Xcode + 已签名的 WebDriverAgent + 已建隧道方可跑通。
+- **未覆盖**: MCP `phone_*` 工具层与 script_api 上层尚未针对 iOS 端到端验证；
+  设备解析/路由 (`_helpers` / `driver_factory`) 已支持 iOS。
 
 ## 统计
+
+> iOS "已实现(实验)" 指驱动层协议入口以 mock 覆盖、待真机验证；不含尚未端到端验证的 MCP/script_api 上层。
 
 | 平台 | 已实现 | 部分实现 | 未实现(有方案) | 未实现 | 不适用 |
 |------|--------|----------|----------------|--------|--------|
 | Android | ~120 | 0 | 0 | ~5 | 0 |
 | Harmony | ~90 | 0 | ~20 | ~5 | ~8 |
-| iOS | 0 | 0 | ~80 | ~5 | ~8 |
+| iOS | ~35 (驱动层,实验) | 2 (录屏) | ~40 (MCP/上层) | ~3 | ~10 |

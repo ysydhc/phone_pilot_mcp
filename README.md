@@ -66,7 +66,7 @@ phone_pilot/
 │   └── llm/                 # LLM 全局页面分析（自愈兜底，可选）
 ├── android/                 # Android 平台实现（ADB + UIAutomator）
 ├── harmony/                 # HarmonyOS 平台实现（hmdriver2 + HDC，功能暂不完善，待开发）
-├── ios/                     # iOS 平台（计划中）
+├── ios/                     # iOS 平台（实验性：WDA + pymobiledevice3，待真机验证）
 ├── memory_analyze/          # 内存分析（meminfo / hprof / Activity 泄漏检测）
 ├── mcp/                     # MCP Server（phone_* 统一工具）
 ├── script_api/              # Python 脚本编写唯一入口（模块包）

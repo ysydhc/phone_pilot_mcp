@@ -55,5 +55,26 @@ class TestVisionImportGuard(unittest.TestCase):
             # Should return None gracefully
 
 
+class TestIosImportGuard(unittest.TestCase):
+    """Test that importing iOS deps when not installed gives a clear message."""
+
+    def test_wda_bridge_import_error_message(self):
+        """Verify the ImportError message suggests pip install phone-pilot[ios]."""
+        import phone_pilot.ios.wda_bridge as wda_bridge
+
+        # Reset the module state
+        wda_bridge._WdaClient = None
+        wda_bridge._cache.clear()
+        wda_bridge._failed_serials.clear()
+
+        with patch.dict(
+            "sys.modules", {"pymobiledevice3": None, "facebook_wda": None, "wda": None}
+        ):
+            wda_bridge._WdaClient = None
+            with self.assertRaises(ImportError) as ctx:
+                wda_bridge._ensure_wda_class()
+            self.assertIn("phone-pilot[ios]", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

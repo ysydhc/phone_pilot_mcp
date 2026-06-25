@@ -47,7 +47,9 @@ def create_driver(
         return HarmonyDriver(device_serial)
 
     if plat == "ios":
-        raise NotImplementedError("iOS support is planned but not yet implemented")
+        from phone_pilot.ios.driver import iOSDriver
+
+        return iOSDriver(device_serial)
 
     if plat == "auto":
         return _auto_detect_driver(device_serial)
@@ -74,6 +76,11 @@ def detect_device() -> tuple[str, str]:
     serial = _first_hdc_device()
     if serial:
         return serial, "harmony"
+
+    # --- try iOS (usbmux + booted simulators) ---
+    serial = _first_ios_device()
+    if serial:
+        return serial, "ios"
 
     raise RuntimeError(
         "No device found. Connect a device via USB or ensure ADB/HDC is running."
@@ -103,6 +110,11 @@ def _auto_detect_driver(serial: str) -> DeviceDriver:
 
         return HarmonyDriver(serial)
 
+    if _is_ios_device(serial):
+        from phone_pilot.ios.driver import iOSDriver
+
+        return iOSDriver(serial)
+
     # Last resort: try to connect as HarmonyOS (HDC serial format varies)
     # then fall back to Android
     try:
@@ -124,8 +136,29 @@ def _auto_detect_driver(serial: str) -> DeviceDriver:
 
     raise RuntimeError(
         f"Cannot determine platform for device {serial!r}. "
-        "Pass platform='android' or platform='harmony' explicitly."
+        "Pass platform='android', 'harmony', or 'ios' explicitly."
     )
+
+
+def _first_ios_device() -> Optional[str]:
+    """Return the first connected iOS UDID (real or booted simulator), or None."""
+    try:
+        from phone_pilot.ios.pmd.utils import list_ios_serials
+
+        serials = list_ios_serials()
+        return serials[0] if serials else None
+    except Exception:
+        return None
+
+
+def _is_ios_device(serial: str) -> bool:
+    """Check if the serial appears among connected iOS devices/simulators."""
+    try:
+        from phone_pilot.ios.pmd.utils import list_ios_serials
+
+        return serial in list_ios_serials()
+    except Exception:
+        return False
 
 
 def _first_adb_device() -> Optional[str]:
