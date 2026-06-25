@@ -94,15 +94,28 @@ class TestScreenrecord:
         popen.assert_called_once()
 
     def test_stop_already_exited_does_not_raise(self):
-        """Plan T13: process already exited → terminate() must not raise, still returns path."""
+        """Plan T13: process already exited → SIGINT must not raise, still returns path."""
         drv = iOSScreenDriver(SERIAL)
         fake_proc = MagicMock()
-        fake_proc.terminate.side_effect = ProcessLookupError()
+        # simctl recordVideo finalizes on SIGINT; if the process is gone it raises.
+        fake_proc.send_signal.side_effect = ProcessLookupError()
         drv._record_proc = fake_proc
         drv._record_path = "/tmp/rec.mp4"
         res = drv.stop_screenrecord()
         assert res["ok"] is True
         assert res["path"] == "/tmp/rec.mp4"
+
+    def test_stop_sends_sigint_to_finalize(self):
+        """Normal stop must SIGINT (not SIGTERM) so the MP4 moov atom is written."""
+        import signal
+
+        drv = iOSScreenDriver(SERIAL)
+        fake_proc = MagicMock()
+        drv._record_proc = fake_proc
+        drv._record_path = "/tmp/rec.mp4"
+        res = drv.stop_screenrecord()
+        assert res["ok"] is True
+        fake_proc.send_signal.assert_called_once_with(signal.SIGINT)
 
     def test_stop_without_active_recording(self):
         res = iOSScreenDriver(SERIAL).stop_screenrecord()

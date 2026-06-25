@@ -247,8 +247,13 @@ class iOSScreenDriver:
 
         try:
             pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
-            exe = pmd_utils.xcrun_executable()
-            cmd = [exe, "simctl", "io", self._serial, "recordVideo", "--force", path]
+            cmd = pmd_utils.simctl_prefix() + [
+                "io",
+                self._serial,
+                "recordVideo",
+                "--force",
+                path,
+            ]
             self._record_proc = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
@@ -258,17 +263,29 @@ class iOSScreenDriver:
         return {"ok": True, "path": path, "engine": "simctl"}
 
     def stop_screenrecord(self) -> dict:
-        """Stop simulator screen recording; tolerate an already-exited process."""
+        """Stop simulator screen recording; tolerate an already-exited process.
+
+        `simctl recordVideo` only finalizes (writes the moov atom) the MP4 on
+        SIGINT — SIGTERM/kill leaves a 0-byte/corrupt file. So we interrupt,
+        not terminate.
+        """
+        import signal
+
         if self._record_proc is None:
             return _err("no_active_recording")
         path = self._record_path
         proc = self._record_proc
         try:
-            proc.terminate()
+            proc.send_signal(signal.SIGINT)
             try:
-                proc.wait(timeout=5)
+                proc.wait(timeout=10)
             except Exception:
-                pass
+                # last resort if it ignored SIGINT
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except Exception:
+                    pass
         except (ProcessLookupError, OSError) as exc:
             logger.debug("recording process already exited: %s", exc)
         finally:
@@ -669,14 +686,30 @@ class iOSDriver:
         return {"ok": True, "remote": remote_path}
 
     def read_log(self, lines: int = 200, **kwargs) -> str:
-        """Read recent syslog output (best-effort). Form-factor split."""
+        """Read recent syslog output (best-effort). Form-factor split.
+
+        Supports the same kwargs as the Android driver so the script_api log
+        helpers (logcat_since / logcat_assert_sequence) work uniformly:
+          - ``since``: iOS timestamp "YYYY-MM-DD HH:MM:SS[.ffffff]" → log show --start
+          - ``tag_filter``: substring filter applied host-side per line
+        """
+        since = kwargs.get("since")
+        tag_filter = kwargs.get("tag_filter")
         try:
             if pmd_utils.detect_form_factor(self._device_serial) == "simulator":
-                proc = pmd_runner.run(
-                    pmd_utils.simctl_prefix()
-                    + ["spawn", self._device_serial, "log", "show", "--last", "30s"],
-                    timeout_s=20.0,
-                )
+                cmd = pmd_utils.simctl_prefix() + [
+                    "spawn",
+                    self._device_serial,
+                    "log",
+                    "show",
+                    "--style",
+                    "syslog",
+                ]
+                if since:
+                    cmd += ["--start", str(since)]
+                else:
+                    cmd += ["--last", "30s"]
+                proc = pmd_runner.run(cmd, timeout_s=25.0)
             else:
                 # pymobiledevice3 streams syslog; bound it with a short timeout.
                 proc = self._pmd(["syslog"], timeout_s=6.0)
@@ -684,10 +717,28 @@ class iOSDriver:
             logger.debug("read_log failed: %s", exc)
             return ""
         out = proc.stdout or ""
-        if lines and out:
-            tail = out.splitlines()[-int(lines) :]
-            return "\n".join(tail)
-        return out
+        if not out:
+            return ""
+        result_lines = out.splitlines()
+        # Drop the "Timestamp ... (process)[PID]" header simctl prints.
+        if result_lines and result_lines[0].lstrip().startswith("Timestamp"):
+            result_lines = result_lines[1:]
+        if tag_filter:
+            result_lines = [ln for ln in result_lines if str(tag_filter) in ln]
+        # `since` already bounds the window server-side; only tail when no `since`.
+        if not since and lines:
+            result_lines = result_lines[-int(lines) :]
+        return "\n".join(result_lines)
+
+    def logcat_time(self) -> Optional[str]:
+        """Return the current host time as an iOS log marker for ``read_log(since=)``.
+
+        iOS `log show --start` accepts local wall-clock "YYYY-MM-DD HH:MM:SS";
+        the simulator shares the host clock, so host time is the correct marker.
+        """
+        import datetime
+
+        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def clear_log(self) -> dict:
         """iOS syslog has no clear API. Returns not_supported."""

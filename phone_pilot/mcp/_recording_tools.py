@@ -31,10 +31,6 @@ def _phone_start_recording_sync(
 ) -> dict:
     """Sync body for phone_start_recording (run in thread to avoid blocking event loop)."""
     try:
-        from phone_pilot.android.adb.utils import ensure_adb_env
-
-        ensure_adb_env()
-
         # 快速路径：调用方已提供 device_serial 时跳过耗时的 adb devices
         if device_serial and str(device_serial).strip():
             resolved_serial = str(device_serial).strip()
@@ -48,6 +44,12 @@ def _phone_start_recording_sync(
             if err:
                 return err
 
+        # ADB 环境仅 Android 需要；iOS/Harmony 不触发，避免无谓副作用
+        if resolved_platform == "android":
+            from phone_pilot.android.adb.utils import ensure_adb_env
+
+            ensure_adb_env()
+
         with _state_lock:
             if resolved_serial in _recording_state:
                 return {"ok": False, "error": "already_recording"}
@@ -56,9 +58,15 @@ def _phone_start_recording_sync(
         local_path = Path(out_dir) / "recordings" / f"{name}_{ts}.mp4"
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
-        remote_filename = f"phone_pilot_rec_{ts}.mp4"
         driver = get_driver(resolved_serial, resolved_platform or "android")
-        result = driver.screen.start_screenrecord(path=remote_filename)
+
+        # iOS 直接录制到主机路径（无设备端文件、无需 pull）；Android 录到设备再 pull。
+        host_side = resolved_platform == "ios"
+        if host_side:
+            result = driver.screen.start_screenrecord(path=str(local_path))
+        else:
+            remote_filename = f"phone_pilot_rec_{ts}.mp4"
+            result = driver.screen.start_screenrecord(path=remote_filename)
 
         if not result.get("ok"):
             return {
@@ -66,11 +74,15 @@ def _phone_start_recording_sync(
                 "error": result.get("error", "start_screenrecord_failed"),
             }
 
-        remote_path = result.get("remote_path") or f"/sdcard/{remote_filename}"
+        if host_side:
+            remote_path = None
+        else:
+            remote_path = result.get("remote_path") or f"/sdcard/{remote_filename}"
         with _state_lock:
             _recording_state[resolved_serial] = {
                 "remote_path": remote_path,
                 "local_path": str(local_path),
+                "host_side": host_side,
             }
             _recording_driver_cache[resolved_serial] = driver
 
@@ -194,10 +206,6 @@ async def phone_recording_status(device_serial: str) -> dict:
 def _phone_stop_recording_sync(device_serial: Optional[str], platform: str) -> dict:
     """Sync body for phone_stop_recording (run in thread to avoid blocking event loop)."""
     try:
-        from phone_pilot.android.adb.utils import ensure_adb_env
-
-        ensure_adb_env()
-
         if device_serial and str(device_serial).strip():
             resolved_serial = str(device_serial).strip()
         else:
@@ -219,9 +227,17 @@ def _phone_stop_recording_sync(device_serial: Optional[str], platform: str) -> d
                 "detail": "no_cached_driver",
             }
 
+        # ADB 环境仅 Android 需要
+        if getattr(driver, "platform", "") == "android":
+            from phone_pilot.android.adb.utils import ensure_adb_env
+
+            ensure_adb_env()
+
         driver.screen.stop_screenrecord()
-        driver.pull_file(state["remote_path"], state["local_path"])
-        driver.remove_remote_file(state["remote_path"])
+        # iOS 直接录到主机路径（host_side），无需 pull/remove；Android 需拉回再删除
+        if not state.get("host_side"):
+            driver.pull_file(state["remote_path"], state["local_path"])
+            driver.remove_remote_file(state["remote_path"])
         with _state_lock:
             _recording_status.pop(resolved_serial, None)
 
