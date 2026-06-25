@@ -17,6 +17,7 @@ def run(
     *,
     timeout_s: Optional[float] = None,
     check: bool = False,
+    input_text: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
     """
     Run a pmd / simctl / idevice* command and return the CompletedProcess.
@@ -25,6 +26,7 @@ def run(
         cmd: Command and arguments as a list.
         timeout_s: Optional command timeout in seconds (maps to returncode 124).
         check: If True, raise CalledProcessError on non-zero exit (default False).
+        input_text: Optional stdin text (e.g. for `simctl pbcopy`).
 
     Returns:
         subprocess.CompletedProcess with text stdout/stderr captured.
@@ -37,7 +39,8 @@ def run(
             text=True,
             capture_output=True,
             timeout=timeout_s,
-            stdin=subprocess.DEVNULL,
+            input=input_text if input_text is not None else None,
+            stdin=None if input_text is not None else subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired as e:
         proc = subprocess.CompletedProcess(

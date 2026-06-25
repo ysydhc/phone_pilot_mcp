@@ -43,6 +43,30 @@ class FakeRunner:
 
 
 # ---------------------------------------------------------------------------
+# iOS: no port forwarding needed (simulator shares host loopback)
+# ---------------------------------------------------------------------------
+
+
+def test_ios_setup_is_noop() -> None:
+    runner = FakeRunner()
+    mgr = ReverseManager(SERIAL, platform="ios", runner=runner)
+    res = mgr.setup(8080)
+    assert res["ok"] is True
+    assert res.get("noop") is True
+    # iOS must NOT shell out to adb
+    assert runner.calls == []
+
+
+def test_ios_teardown_and_list_noop() -> None:
+    runner = FakeRunner()
+    mgr = ReverseManager(SERIAL, platform="ios", runner=runner)
+    assert mgr.teardown(8080)["ok"] is True
+    assert mgr.remove_all()["ok"] is True
+    assert mgr.list() == []
+    assert runner.calls == []
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 

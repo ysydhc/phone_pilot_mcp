@@ -1,32 +1,45 @@
 """
-ADB reverse tunnel lifecycle manager.
+Reverse tunnel lifecycle manager (port forwarding device → host mock server).
 
-封装 `adb reverse` 命令，将设备上的 tcp 端口转发回主机 mock server。
-Wraps `adb reverse` commands to forward device tcp ports back to the host mock server.
+封装端口转发，将设备访问的 tcp 端口导回主机 mock server。
+- Android: `adb reverse`。
+- iOS 模拟器: 与主机共享 localhost，App 直连 127.0.0.1 即命中主机，无需转发（no-op）。
+Wraps port forwarding so the device reaches the host mock server.
 """
 
 from __future__ import annotations
 
 import subprocess
-from typing import Callable
+from typing import Callable, Optional
 
 from phone_pilot.android.adb.runner import CommandRunner
 from phone_pilot.android.adb.utils import adb_prefix
 
 
 class ReverseManager:
-    """Manage adb reverse tunnel lifecycle for a single device serial."""
+    """Manage reverse-tunnel lifecycle for a single device serial.
+
+    For iOS simulators no tunnel is needed (shared host loopback), so all
+    operations are successful no-ops.
+    """
 
     def __init__(
         self,
         serial: str,
         *,
-        runner: Callable[..., subprocess.CompletedProcess] | None = None,
+        platform: str = "android",
+        runner: Optional[Callable[..., subprocess.CompletedProcess]] = None,
     ) -> None:
         self._serial = serial
+        self._platform = (platform or "android").strip().lower()
         self._runner: Callable[..., subprocess.CompletedProcess] = (
             runner if runner is not None else CommandRunner.run
         )
+
+    @property
+    def _noop(self) -> bool:
+        """iOS simulator shares host loopback → no port forwarding required."""
+        return self._platform == "ios"
 
     # ------------------------------------------------------------------
     # Public API
@@ -39,6 +52,8 @@ class ReverseManager:
         then creates the new mapping.
         Returns ``{"ok": True}`` on success or ``{"ok": False, "error": ...}``.
         """
+        if self._noop:
+            return {"ok": True, "noop": True, "platform": self._platform}
         try:
             tcp_spec = f"tcp:{port}"
             # Corner-case guard: silently remove any pre-existing mapping.
@@ -59,6 +74,8 @@ class ReverseManager:
 
         Returns ``{"ok": True}`` on success or ``{"ok": False, "error": ...}``.
         """
+        if self._noop:
+            return {"ok": True, "noop": True, "platform": self._platform}
         try:
             tcp_spec = f"tcp:{port}"
             self._runner(
@@ -73,6 +90,8 @@ class ReverseManager:
 
         Returns ``{"ok": True}`` on success or ``{"ok": False, "error": ...}``.
         """
+        if self._noop:
+            return {"ok": True, "noop": True, "platform": self._platform}
         try:
             self._runner(
                 adb_prefix(self._serial) + ["reverse", "--remove-all"],
@@ -83,6 +102,8 @@ class ReverseManager:
 
     def list(self) -> list[str]:
         """Return currently active reverse tunnels as a list of non-empty lines."""
+        if self._noop:
+            return []
         try:
             result = self._runner(
                 adb_prefix(self._serial) + ["reverse", "--list"],

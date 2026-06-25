@@ -88,6 +88,14 @@ def _phone_list_devices_sync() -> dict:
     except Exception:
         pass
 
+    # iOS devices (booted simulators) - best effort
+    try:
+        from phone_pilot.ios.system import list_ios_devices
+
+        result.extend(list_ios_devices())
+    except Exception:
+        pass
+
     return {"ok": True, "devices": result}
 
 

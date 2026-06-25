@@ -439,33 +439,46 @@ def _phone_install_app_sync(
     platform: str,
     apk_path: str,
 ) -> dict:
-    """Sync body for phone_install_app."""
-    apk = Path(apk_path).expanduser().resolve()
-    if not apk.exists():
-        return {"ok": False, "error": f"apk not found: {apk_path}"}
-    if apk.suffix.lower() not in (".apk", ".xapk", ".apks"):
-        return {
-            "ok": False,
-            "error": f"invalid file type: {apk.suffix} (expected .apk/.xapk/.apks)",
-        }
+    """Sync body for phone_install_app (Android .apk / iOS .app/.ipa)."""
+    pkg = Path(apk_path).expanduser().resolve()
+    if not pkg.exists():
+        return {"ok": False, "error": f"package not found: {apk_path}"}
     resolved, plat, err = _resolve_device_serial(
         device_serial if device_serial and str(device_serial).strip() else None,
         platform,
     )
     if err:
         return err
-    # 仅支持 Android / Android only
+    if plat == "ios":
+        if pkg.suffix.lower() not in (".app", ".ipa"):
+            return {
+                "ok": False,
+                "error": f"invalid iOS bundle: {pkg.suffix} (expected .app/.ipa)",
+                "platform": plat,
+            }
+        from phone_pilot.ios.system import install_app as ios_install
+
+        result = ios_install(resolved, str(pkg))
+        result.setdefault("apk_path", str(pkg))
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "install_app only supports Android",
+            "error": "install_app supports Android (.apk) and iOS (.app/.ipa)",
             "platform": plat,
+        }
+    if pkg.suffix.lower() not in (".apk", ".xapk", ".apks"):
+        return {
+            "ok": False,
+            "error": f"invalid file type: {pkg.suffix} (expected .apk/.xapk/.apks)",
         }
     try:
         from phone_pilot.android.touch.agent import install_apk
 
-        install_apk(resolved, apk)
-        return {"ok": True, "apk_path": str(apk), "device_serial": resolved}
+        install_apk(resolved, pkg)
+        return {"ok": True, "apk_path": str(pkg), "device_serial": resolved}
     except Exception as e:
         return {"ok": False, "error": str(e), "device_serial": resolved}
 

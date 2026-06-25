@@ -79,8 +79,8 @@ def _mock_start_sync(
     actual_ctrl_port = server.ctrl_port
     actual_data_port = server.data_port
 
-    # 4. 建 adb reverse 隧道
-    rev = ReverseManager(resolved_serial)
+    # 4. 建 reverse 隧道（iOS 模拟器共享主机 loopback，为 no-op）
+    rev = ReverseManager(resolved_serial, platform=_plat or "android")
     rev_result = rev.setup(actual_data_port)
     if not rev_result.get("ok"):
         server.stop()

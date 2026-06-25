@@ -40,10 +40,17 @@ async def phone_read_clipboard(
     resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
     if err:
         return err
+    if plat == "ios":
+        from phone_pilot.ios.system import get_clipboard
+
+        result = await asyncio.to_thread(get_clipboard, resolved)
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "phone_read_clipboard only supports Android",
+            "error": "phone_read_clipboard supports Android and iOS",
             "platform": plat,
         }
     result = await asyncio.to_thread(get_clipboard_text, resolved)
@@ -169,10 +176,19 @@ async def phone_execute_shell(
     resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
     if err:
         return err
+    if plat == "ios":
+        from phone_pilot.ios.system import execute_shell as ios_execute_shell
+
+        result = await asyncio.to_thread(
+            ios_execute_shell, resolved, command, timeout_s
+        )
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "phone_execute_shell only supports Android",
+            "error": "phone_execute_shell supports Android and iOS",
             "platform": plat,
         }
     result = await asyncio.to_thread(execute_shell, resolved, command, timeout_s)
@@ -200,6 +216,14 @@ def _phone_get_device_info_sync(device_serial: Optional[str], platform: str) -> 
         os_version = ""
         if plat == "android":
             model, os_version = get_device_model_and_version(resolved)
+        elif plat == "ios":
+            try:
+                info = driver.device_info()
+                if info.get("ok"):
+                    model = info.get("model", "")
+                    os_version = info.get("os_version", "")
+            except Exception:
+                pass
         return {
             "ok": True,
             "screen": screen,

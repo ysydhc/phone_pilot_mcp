@@ -15,9 +15,6 @@ from phone_pilot.mcp._helpers import get_driver, _with_device, _resolve_device_s
 
 def _phone_go_home_sync(device_serial: Optional[str], platform: str) -> dict:
     """Sync body for phone_go_home to run in thread (avoid blocking event loop)."""
-    from phone_pilot.android.adb.utils import ensure_adb_env
-
-    ensure_adb_env()
     if device_serial and str(device_serial).strip():
         resolved = str(device_serial).strip()
         plat = (platform or "auto").strip().lower()
@@ -26,6 +23,10 @@ def _phone_go_home_sync(device_serial: Optional[str], platform: str) -> dict:
         resolved, plat, err = _resolve_device_serial(device_serial, platform)
         if err:
             return err
+    if plat == "android":
+        from phone_pilot.android.adb.utils import ensure_adb_env
+
+        ensure_adb_env()
     try:
         driver = get_driver(resolved, plat)
         result = driver.go_home()

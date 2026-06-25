@@ -56,11 +56,12 @@ def _phone_force_stop_sync(device_serial: str, package: str, platform: str) -> d
     """Sync body for phone_force_stop to run in thread (avoid blocking event loop)."""
     if not package or not package.strip():
         return {"ok": False, "error": "package is required"}
-    from phone_pilot.android.adb.utils import ensure_adb_env
-
-    ensure_adb_env()
     plat = (platform or "android").strip().lower()
     plat = "android" if plat == "auto" else plat
+    if plat == "android":
+        from phone_pilot.android.adb.utils import ensure_adb_env
+
+        ensure_adb_env()
     try:
         driver = get_driver(device_serial.strip(), plat)
         result = driver.app.force_stop(package)
