@@ -750,8 +750,14 @@ async def wait_for_async(
     timeout_s: float = 10.0,
     interval_s: float = 0.5,
     stable_count: int = 2,
+    require_clickable: bool = False,
+    require_enabled: bool = False,
+    require_visible: bool = False,
 ) -> dict:
-    """Async wrapper for wait_for_impl."""
+    """Async wrapper for wait_for_impl.
+
+    参数与 wait_for_impl 对称，包括 require_clickable/require_enabled/require_visible。
+    """
     return await asyncio.to_thread(
         wait_for_impl,
         device_serial,
@@ -768,4 +774,7 @@ async def wait_for_async(
         timeout_s,
         interval_s,
         stable_count,
+        require_clickable,
+        require_enabled,
+        require_visible,
     )

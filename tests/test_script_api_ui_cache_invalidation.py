@@ -19,6 +19,10 @@ from phone_pilot.script_api.actions import (
     restart_app_pkg,
     reset_home_screen,
     clear_background,
+    tap_when_ready,
+    safe_tap,
+    launch_from_home,
+    unlock_device,
 )
 
 
@@ -153,3 +157,69 @@ def test_failed_tap_does_not_invalidate():
         tap_xy(ctx, 100, 200)
 
     mock_cache.invalidate_device_ui.assert_not_called()
+
+
+def test_tap_when_ready_invalidates_cache():
+    """tap_when_ready 成功点击后应失效缓存。"""
+    ctx = _make_ctx()
+    ctx.driver.ui.find_elements.return_value = [
+        {"center_x": 100, "center_y": 200, "clickable": True, "enabled": True}
+    ]
+
+    with patch(
+        "phone_pilot.script_api.actions.ui_snapshot_cache"
+    ) as mock_cache:
+        result = tap_when_ready(ctx, text="Login", timeout_s=1.0)
+
+    assert result["tapped"] is True
+    mock_cache.invalidate_device_ui.assert_called_once_with(
+        "test_inv_serial", platform="android"
+    )
+
+
+def test_safe_tap_invalidates_cache():
+    """safe_tap 成功点击后应失效缓存。"""
+    ctx = _make_ctx()
+    ctx.driver.ui.get_current_activity.return_value = {
+        "package": "com.test",
+        "activity": ".Main",
+    }
+
+    with patch(
+        "phone_pilot.script_api.actions.ui_snapshot_cache"
+    ) as mock_cache:
+        safe_tap(ctx, 100, 200, settle_s=0)
+
+    mock_cache.invalidate_device_ui.assert_called_once_with(
+        "test_inv_serial", platform="android"
+    )
+
+
+def test_launch_from_home_invalidates_cache():
+    """launch_from_home 成功后应失效缓存。"""
+    ctx = _make_ctx()
+    ctx.driver.launch_from_home.return_value = {"ok": True}
+
+    with patch(
+        "phone_pilot.script_api.actions.ui_snapshot_cache"
+    ) as mock_cache:
+        launch_from_home(ctx, "Settings")
+
+    mock_cache.invalidate_device_ui.assert_called_once_with(
+        "test_inv_serial", platform="android"
+    )
+
+
+def test_unlock_device_invalidates_cache():
+    """unlock_device 成功后应失效缓存。"""
+    ctx = _make_ctx()
+    ctx.driver.unlock.return_value = {"ok": True}
+
+    with patch(
+        "phone_pilot.script_api.actions.ui_snapshot_cache"
+    ) as mock_cache:
+        unlock_device(ctx)
+
+    mock_cache.invalidate_device_ui.assert_called_once_with(
+        "test_inv_serial", platform="android"
+    )

@@ -133,7 +133,9 @@ def launch_from_home(ctx: ScriptContext, query: str, **kwargs) -> dict:
     if not query:
         return {"ok": False, "error": "query is required"}
     kwargs.setdefault("out_dir", ctx.out_dir)
-    return ctx.driver.launch_from_home(query, **kwargs)
+    res = ctx.driver.launch_from_home(query, **kwargs)
+    _invalidate_ui_cache(ctx, res)
+    return res
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +527,7 @@ def tap_when_ready(
             cy = elem.get("center_y")
             if cx is not None and cy is not None:
                 _input_tap(ctx, int(cx), int(cy))
+                _invalidate_ui_cache(ctx)
                 if wait_after_s > 0:
                     time.sleep(wait_after_s)
                 return {
@@ -623,6 +626,7 @@ def safe_tap(
     """
     before = _current_focus(ctx)
     _input_tap(ctx, int(x), int(y))
+    _invalidate_ui_cache(ctx)
     if settle_s > 0:
         time.sleep(settle_s)
     after = _current_focus(ctx)
@@ -820,6 +824,7 @@ def safe_close(
         if attempt < max_attempts:
             try:
                 ctx.driver.go_back()
+                _invalidate_ui_cache(ctx)
             except Exception:
                 pass
             if settle_s > 0:
@@ -1129,7 +1134,9 @@ def unlock_device(ctx: ScriptContext, *, pin: Optional[str] = None) -> dict:
     Returns / 返回值:
         dict: driver.unlock 的结果 / Driver result
     """
-    return ctx.driver.unlock(pin=pin)
+    res = ctx.driver.unlock(pin=pin)
+    _invalidate_ui_cache(ctx, res)
+    return res
 
 
 # ---------------------------------------------------------------------------
