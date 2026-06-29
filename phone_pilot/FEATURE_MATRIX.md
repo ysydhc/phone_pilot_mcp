@@ -176,11 +176,20 @@
 | wait_for_page_stable | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | UI 签名比较 |
 | wait_for_impl (统一等待入口) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 上层封装 |
 | wait_for_async | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | async 封装 |
+| require_visible (visible readiness) | 已实现 | 未实现 | 未实现 | bounds 有效+尺寸>0；不判断遮挡 |
+| require_clickable / require_enabled | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 交互状态就绪判断 |
+
+> **visible 定义**：bounds 可解析且 width>0、height>0；若平台提供 visible/displayed 字段为 False 则判为不满足。不检测 z-order 遮挡。
 
 ## 13. 录制回放 (Recording & Playback)
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
+| phone_record_script_start/stop | 已实现 | 已实现 | 已实现 | MCP 操作录制→script_api 代码 |
+| phone_replay_trace | 已实现 | 已实现 | 已实现 | 回放已录制的 trace |
+| robust codegen (tap_when_ready) | 已实现 | 已实现 | 已实现 | phone_tap_text→tap_when_ready |
+| robust codegen (wait full params) | 已实现 | 已实现 | 已实现 | 保留 timeout/visible/enabled/clickable |
+| result_summary codegen | 已实现 | 已实现 | 已实现 | phone_tap_element 利用 center/label |
 | ~~android_record_taps_with_ui~~ | ~~已删除~~ | — | — | 无生产代码引用，已清理 |
 | android_record_start | 已实现 | 未实现 | 未实现 | getevent 录制 |
 | android_record_stop | 已实现 | 未实现 | 未实现 | getevent 停止 |
