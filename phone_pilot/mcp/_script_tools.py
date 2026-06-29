@@ -135,6 +135,7 @@ def _phone_wait_for_element_sync(
     platform: str,
     require_clickable: bool = False,
     require_enabled: bool = False,
+    require_visible: bool = False,
 ) -> dict:
     """Sync body for phone_wait_for_element."""
     resolved, plat, err = _resolve_device_serial(
@@ -150,6 +151,15 @@ def _phone_wait_for_element_sync(
             return False
         if require_enabled and not getattr(node, "enabled", False):
             return False
+        if require_visible:
+            # 检查 bounds 有效且尺寸 > 0（不判断遮挡）
+            b = (
+                node.bounds_tuple()
+                if hasattr(node, "bounds_tuple") and callable(node.bounds_tuple)
+                else None
+            )
+            if not b or (b[2] - b[0]) <= 0 or (b[3] - b[1]) <= 0:
+                return False
         return True
 
     def _node_payload(node, node_text, node_desc, node_rid) -> dict:
@@ -222,6 +232,7 @@ async def phone_wait_for_element(
     platform: str = "auto",
     require_clickable: bool = False,
     require_enabled: bool = False,
+    require_visible: bool = False,
 ) -> dict:
     """等待元素出现在页面上。
     Wait for an element to appear on the page.
@@ -234,6 +245,7 @@ async def phone_wait_for_element(
         platform: 平台类型 / Platform type
         require_clickable: 必须可点击才算找到 / Element must be clickable to count
         require_enabled: 必须 enabled 才算找到 / Element must be enabled to count
+        require_visible: 必须有有效非零 bounds 才算找到 / Element must have valid non-zero bounds
 
     Returns / 返回值:
         dict: {"ok": True, "found": True, "element": {...}} 如果找到
@@ -243,6 +255,7 @@ async def phone_wait_for_element(
     Notes / 说明:
         - require_clickable/require_enabled 解决"元素已出现但尚不可点"的时序问题。
           超时时 present_but_not_ready=True 表示元素在但状态未就绪。
+        - require_visible 检查 bounds 有效且尺寸 > 0；不判断遮挡。
     """
     return await asyncio.to_thread(
         _phone_wait_for_element_sync,
@@ -253,6 +266,7 @@ async def phone_wait_for_element(
         platform,
         require_clickable,
         require_enabled,
+        require_visible,
     )
 
 
