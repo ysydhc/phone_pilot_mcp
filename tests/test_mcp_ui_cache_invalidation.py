@@ -131,3 +131,28 @@ def test_hook_does_not_invalidate_for_query_tool():
         asyncio.run(phone_get_page_state(device_serial="q_serial"))
 
     mock_inv.assert_not_called()
+
+
+def test_hook_does_not_wrap_non_action_tool():
+    """非 action 工具注册时应跳过 wrapper（性能优化）。"""
+    fake_mcp = MagicMock()
+    # Track whether decorator was called with the original fn or a wrapper.
+    original_fn = None
+
+    def fake_tool(*args, **kwargs):
+        def decorator(fn):
+            nonlocal original_fn
+            original_fn = fn  # capture what was actually registered
+            return fn
+        return decorator
+
+    fake_mcp.tool = fake_tool
+    install_cache_invalidation_hook(fake_mcp)
+
+    async def phone_screenshot(device_serial: str = ""):
+        return {"ok": True, "device_serial": device_serial}
+
+    # phone_screenshot is NOT in _ACTION_INVALIDATES_UI
+    registered = fake_mcp.tool()(phone_screenshot)
+    # The registered function should be the original, not a wrapper.
+    assert registered is phone_screenshot

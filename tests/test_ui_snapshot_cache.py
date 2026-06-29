@@ -150,3 +150,26 @@ def test_invalidate_device_helper():
 
 def test_default_ttl_constant_exists():
     assert cache.DEFAULT_UI_CACHE_TTL_S == 0.5
+
+
+def test_max_cache_entries_enforced():
+    """超过 _MAX_CACHE_ENTRIES 时应淘汰过期/最旧条目。"""
+    cache.invalidate()
+    # Fill cache to capacity.
+    for i in range(cache._MAX_CACHE_ENTRIES):
+        cache.get_or_compute(("android", f"serial{i}", "ui_nodes"), lambda i=i: i)
+
+    assert len(cache._cache) <= cache._MAX_CACHE_ENTRIES
+
+    # Add one more — should trigger eviction.
+    cache.get_or_compute(("android", "new_serial", "ui_nodes"), lambda: "new")
+
+    # Cache size must not exceed the cap.
+    assert len(cache._cache) <= cache._MAX_CACHE_ENTRIES
+    # The new entry must be present.
+    assert ("android", "new_serial", "ui_nodes") in cache._cache
+
+
+def test_max_cache_entries_constant_exists():
+    assert cache._MAX_CACHE_ENTRIES > 0
+    assert isinstance(cache._MAX_CACHE_ENTRIES, int)

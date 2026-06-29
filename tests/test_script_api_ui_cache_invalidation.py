@@ -223,3 +223,29 @@ def test_unlock_device_invalidates_cache():
     mock_cache.invalidate_device_ui.assert_called_once_with(
         "test_inv_serial", platform="android"
     )
+
+
+def test_launch_from_home_failed_does_not_invalidate():
+    """launch_from_home 失败时不应失效缓存。"""
+    ctx = _make_ctx()
+    ctx.driver.launch_from_home.return_value = {"ok": False, "error": "not_found"}
+
+    with patch(
+        "phone_pilot.script_api.actions.ui_snapshot_cache"
+    ) as mock_cache:
+        launch_from_home(ctx, "NonExistent")
+
+    mock_cache.invalidate_device_ui.assert_not_called()
+
+
+def test_unlock_device_failed_does_not_invalidate():
+    """unlock_device 失败时不应失效缓存。"""
+    ctx = _make_ctx()
+    ctx.driver.unlock.return_value = {"ok": False, "error": "already_unlocked"}
+
+    with patch(
+        "phone_pilot.script_api.actions.ui_snapshot_cache"
+    ) as mock_cache:
+        unlock_device(ctx)
+
+    mock_cache.invalidate_device_ui.assert_not_called()
