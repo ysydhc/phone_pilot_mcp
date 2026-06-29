@@ -29,20 +29,77 @@ from phone_pilot.android.ui.automator import (
 )
 
 
+import re
+
+_BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+
+
+def _parse_bounds(bounds) -> tuple[int, int, int, int] | None:
+    """从 match dict 的 bounds 字段解析出 (x1, y1, x2, y2)。
+
+    支持两种格式：
+    - 字符串 "[x1,y1][x2,y2]"（UIAutomator 原始格式）
+    - 列表 [x1, y1, x2, y2]
+    """
+    if isinstance(bounds, (list, tuple)) and len(bounds) == 4:
+        try:
+            return tuple(int(v) for v in bounds)  # type: ignore[return-value]
+        except (ValueError, TypeError):
+            return None
+    if isinstance(bounds, str):
+        m = _BOUNDS_RE.match(bounds.strip())
+        if m:
+            return int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+    return None
+
+
+def _match_is_visible(match: Optional[dict]) -> bool:
+    """判断 match 是否满足 visible 条件。
+
+    第一版定义（不判断遮挡）：
+    1. 如果 match 有 visible/displayed/visible_to_user 字段且为 False → 不满足
+    2. bounds 必须存在且可解析
+    3. width > 0 且 height > 0
+    """
+    if not isinstance(match, dict):
+        return False
+
+    # 1. 显式可见性字段
+    for key in ("visible", "displayed", "visible_to_user"):
+        val = match.get(key)
+        if val is False:
+            return False
+
+    # 2-3. bounds 有效性
+    b = _parse_bounds(match.get("bounds"))
+    if b is None:
+        return False
+    x1, y1, x2, y2 = b
+    if (x2 - x1) <= 0 or (y2 - y1) <= 0:
+        return False
+
+    return True
+
+
 def _match_meets_state(
     match: Optional[dict],
     require_clickable: bool,
     require_enabled: bool,
+    require_visible: bool = False,
 ) -> bool:
     """Check that a match dict satisfies the required interactive state.
 
     When a state is required but the match has no such field (e.g. OCR/image
     matches carry no clickable/enabled info), treat it as NOT satisfied — we
     cannot confirm the element is actually interactive.
+
+    require_visible: 检查 bounds 有效且尺寸 > 0（不判断遮挡）。
     """
-    if not require_clickable and not require_enabled:
+    if not require_clickable and not require_enabled and not require_visible:
         return True
     if not isinstance(match, dict):
+        return False
+    if require_visible and not _match_is_visible(match):
         return False
     if require_clickable and not match.get("clickable"):
         return False
@@ -64,6 +121,7 @@ def wait_for_element_appear(
     interval_s: float = 0.5,
     require_clickable: bool = False,
     require_enabled: bool = False,
+    require_visible: bool = False,
 ) -> dict:
     """
     Wait for element to appear on screen.
@@ -82,6 +140,7 @@ def wait_for_element_appear(
     - interval_s: Check interval in seconds / 检查间隔（秒）
     - require_clickable: Element must be clickable to count / 必须可点击才算满足
     - require_enabled: Element must be enabled to count / 必须 enabled 才算满足
+    - require_visible: Element must have valid non-zero bounds to count / 必须有有效非零 bounds 才算满足
 
     Returns / 返回:
     - ok: bool
@@ -95,6 +154,8 @@ def wait_for_element_appear(
       对 OCR/图片匹配结果（无 clickable/enabled 字段）会判为不满足。
       Solves the "element present but not yet tappable" timing issue. OCR/image
       matches (no clickable/enabled field) are treated as not satisfied.
+    - require_visible 检查 bounds 有效且尺寸 > 0；不判断遮挡。
+      Checks valid non-zero bounds; does NOT detect occlusion.
     """
     start_time = time.time()
     attempts = 0
@@ -118,7 +179,9 @@ def wait_for_element_appear(
 
         if result.get("exists"):
             match = result.get("match")
-            if _match_meets_state(match, require_clickable, require_enabled):
+            if _match_meets_state(
+                match, require_clickable, require_enabled, require_visible
+            ):
                 return {
                     "ok": True,
                     "satisfied": True,
@@ -531,6 +594,7 @@ def wait_for_impl(
     # Element state requirements (element_appear)
     require_clickable: bool = False,
     require_enabled: bool = False,
+    require_visible: bool = False,
 ) -> dict:
     """
     Wait for specific condition to be satisfied.
@@ -605,6 +669,7 @@ def wait_for_impl(
             interval_s=interval_s,
             require_clickable=require_clickable,
             require_enabled=require_enabled,
+            require_visible=require_visible,
         )
 
     elif condition == "element_disappear":
