@@ -91,8 +91,10 @@ mcp = FastMCP("phone_pilot")
 # ---------------------------------------------------------------------------
 
 from phone_pilot.mcp._recorder import install_recording_hook  # noqa: E402
+from phone_pilot.mcp._cache_hook import install_cache_invalidation_hook  # noqa: E402
 
 install_recording_hook(mcp)
+install_cache_invalidation_hook(mcp)
 
 # ---------------------------------------------------------------------------
 # Re-export helpers for backward compatibility (used by __init__.py)
