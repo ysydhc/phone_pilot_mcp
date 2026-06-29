@@ -43,55 +43,109 @@ def _py(val: Any) -> str:
     return repr(val)
 
 
-# Each generator receives the call's argument dict and returns one line of
-# script_api source (without trailing newline), or None to skip.
+# ---------------------------------------------------------------------------
+# Robust codegen functions — 生成更稳健的 script_api 调用
+# ---------------------------------------------------------------------------
+
+
+def _gen_tap_text(entry: dict) -> str | None:
+    """phone_tap_text -> tap_when_ready（等待元素就绪再点击，避免误触）。"""
+    a = entry.get("args", {}) or {}
+    text = a.get("text", "")
+    if not text:
+        return None
+    return (
+        f"tap_when_ready(ctx, text={_py(text)}, timeout_s=10.0, "
+        "require_clickable=True, require_enabled=True)"
+    )
+
+
+def _gen_wait_for_element(entry: dict) -> str | None:
+    """phone_wait_for_element -> wait_for_element_appear（保留全部状态参数）。"""
+    a = entry.get("args", {}) or {}
+    timeout = a.get("timeout_s", 10.0)
+    parts: list[str] = []
+
+    if a.get("text"):
+        parts.append(f"query={_py(a['text'])}")
+    elif a.get("resource_id"):
+        parts.append(f"selector={{'resource_id': {_py(a.get('resource_id', ''))}}}")
+    else:
+        return None
+
+    parts.append(f"timeout_s={float(timeout)}")
+
+    if a.get("require_visible"):
+        parts.append("require_visible=True")
+    if a.get("require_enabled"):
+        parts.append("require_enabled=True")
+    if a.get("require_clickable"):
+        parts.append("require_clickable=True")
+
+    return "wait_for_element_appear(ctx.device_serial, " + ", ".join(parts) + ")"
+
+
+def _gen_tap_element(entry: dict) -> str | None:
+    """phone_tap_element -> tap_xy + 注释（需 result_summary 提供坐标）。"""
+    summary = entry.get("result_summary") or {}
+    center = summary.get("center")
+    if not center or len(center) < 2:
+        return None
+
+    label = summary.get("label", "")
+    type_ = summary.get("type", "")
+    comment_parts: list[str] = []
+    if label:
+        comment_parts.append(str(label))
+    if type_:
+        comment_parts.append(str(type_))
+
+    comment = f"  # recorded element: {'/'.join(comment_parts)}" if comment_parts else ""
+    return f"tap_xy(ctx, {int(center[0])}, {int(center[1])}){comment}"
+
+
+# Each generator receives the full trace entry (with args + result_summary)
+# and returns one line of script_api source (without trailing newline),
+# or None to skip.
 CODEGEN: dict[str, Callable[[dict], str | None]] = {
-    "phone_tap": lambda a: f"tap_xy(ctx, {int(a.get('x', 0))}, {int(a.get('y', 0))})",
-    "phone_tap_text": lambda a: f"find_text(ctx, {_py(a.get('text', ''))}).tap()",
-    "phone_input_text": lambda a: (
-        f"type_text(ctx, {_py(a.get('text', ''))}"
-        + (", enter=True)" if a.get("enter") else ")")
+    "phone_tap": lambda e: f"tap_xy(ctx, {int(e.get('args', {}).get('x', 0))}, {int(e.get('args', {}).get('y', 0))})",
+    "phone_tap_text": _gen_tap_text,
+    "phone_tap_element": _gen_tap_element,
+    "phone_input_text": lambda e: (
+        f"type_text(ctx, {_py(e.get('args', {}).get('text', ''))}"
+        + (", enter=True)" if e.get("args", {}).get("enter") else ")")
     ),
-    "phone_keyevent": lambda a: (
-        f"keyevent(ctx, {_py(a.get('keycode') or a.get('key', ''))})"
+    "phone_keyevent": lambda e: (
+        f"keyevent(ctx, {_py(e.get('args', {}).get('keycode') or e.get('args', {}).get('key', ''))})"
     ),
-    "phone_swipe": lambda a: (
-        f"swipe(ctx, {int(a.get('x1', 0))}, {int(a.get('y1', 0))}, "
-        f"{int(a.get('x2', 0))}, {int(a.get('y2', 0))})"
+    "phone_swipe": lambda e: (
+        f"swipe(ctx, {int(e.get('args', {}).get('x1', 0))}, {int(e.get('args', {}).get('y1', 0))}, "
+        f"{int(e.get('args', {}).get('x2', 0))}, {int(e.get('args', {}).get('y2', 0))})"
     ),
-    "phone_long_press": lambda a: (
-        f"ctx.driver.input.long_press({int(a.get('x', 0))}, {int(a.get('y', 0))})"
+    "phone_long_press": lambda e: (
+        f"ctx.driver.input.long_press({int(e.get('args', {}).get('x', 0))}, {int(e.get('args', {}).get('y', 0))})"
     ),
-    "phone_launch_app": lambda a: f"restart_app_pkg(ctx, {_py(a.get('package', ''))})",
-    "phone_force_stop": lambda a: (
-        f"ctx.driver.app.force_stop({_py(a.get('package', ''))})"
+    "phone_launch_app": lambda e: f"restart_app_pkg(ctx, {_py(e.get('args', {}).get('package', ''))})",
+    "phone_force_stop": lambda e: (
+        f"ctx.driver.app.force_stop({_py(e.get('args', {}).get('package', ''))})"
     ),
-    "phone_go_back": lambda a: "ctx.driver.go_back()",
-    "phone_go_home": lambda a: "reset_home_screen(ctx)",
-    "phone_clear_background": lambda a: "clear_background(ctx)",
-    "phone_unlock": lambda a: (
-        f"unlock_device(ctx, pin={_py(a['pin'])})"
-        if a.get("pin")
+    "phone_go_back": lambda e: "ctx.driver.go_back()",
+    "phone_go_home": lambda e: "reset_home_screen(ctx)",
+    "phone_clear_background": lambda e: "clear_background(ctx)",
+    "phone_unlock": lambda e: (
+        f"unlock_device(ctx, pin={_py(e.get('args', {}).get('pin'))})"
+        if e.get("args", {}).get("pin")
         else "unlock_device(ctx)"
     ),
-    "phone_open_deeplink": lambda a: (
-        f"ctx.driver.open_deeplink({_py(a.get('uri', ''))})"
+    "phone_open_deeplink": lambda e: (
+        f"ctx.driver.open_deeplink({_py(e.get('args', {}).get('uri', ''))})"
     ),
-    "phone_launch_from_home": lambda a: (
-        f"launch_from_home(ctx, {_py(a.get('query', ''))})"
+    "phone_launch_from_home": lambda e: (
+        f"launch_from_home(ctx, {_py(e.get('args', {}).get('query', ''))})"
     ),
-    "phone_screenshot": lambda a: f"screenshot(ctx, {_py(a.get('name') or 'shot')})",
-    "phone_scroll_to_find": lambda a: f"scroll_to_find(ctx, {_py(a.get('text', ''))})",
-    "phone_wait_for_element": lambda a: (
-        "wait_for_element_appear(ctx.device_serial, "
-        + (
-            f"query={_py(a['text'])}"
-            if a.get("text")
-            else f"selector={{'resource_id': {_py(a.get('resource_id', ''))}}}"
-        )
-        + (", require_clickable=True" if a.get("require_clickable") else "")
-        + ")"
-    ),
+    "phone_screenshot": lambda e: f"screenshot(ctx, {_py(e.get('args', {}).get('name') or 'shot')})",
+    "phone_scroll_to_find": lambda e: f"scroll_to_find(ctx, {_py(e.get('args', {}).get('text', ''))})",
+    "phone_wait_for_element": _gen_wait_for_element,
 }
 
 # The set of tools worth recording (those with a generator above).
@@ -157,21 +211,31 @@ def get_trace() -> list[dict[str, Any]]:
         return list(_trace)
 
 
-def record_call(tool_name: str, args: dict[str, Any], ok: bool) -> None:
-    """Append a trace entry if recording is active and the tool is recordable."""
+def record_call(
+    tool_name: str,
+    args: dict[str, Any],
+    ok: bool,
+    result_summary: dict | None = None,
+) -> None:
+    """Append a trace entry if recording is active and the tool is recordable.
+
+    result_summary 可选，用于记录工具返回值中的关键信息（如 phone_tap_element
+    的 center/label），使生成的脚本能还原更稳健的调用。
+    """
     if tool_name not in RECORDABLE:
         return
     with _lock:
         if not _active:
             return
-        _trace.append(
-            {
-                "tool": tool_name,
-                "args": {k: v for k, v in args.items() if k != "device_serial"},
-                "ok": bool(ok),
-                "ts": time.time(),
-            }
-        )
+        entry: dict[str, Any] = {
+            "tool": tool_name,
+            "args": {k: v for k, v in args.items() if k != "device_serial"},
+            "ok": bool(ok),
+            "ts": time.time(),
+        }
+        if result_summary:
+            entry["result_summary"] = result_summary
+        _trace.append(entry)
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +257,7 @@ def generate_script(trace: list[dict[str, Any]] | None = None) -> str:
             body_lines.append(f"    # TODO: {tool}({args}) — no script_api equivalent")
             continue
         try:
-            line = gen(args)
+            line = gen(entry)
         except Exception:
             line = None
         if line:
@@ -201,6 +265,8 @@ def generate_script(trace: list[dict[str, Any]] | None = None) -> str:
                 "" if entry.get("ok", True) else "  # NOTE: failed during recording"
             )
             body_lines.append(f"    {line}{comment}")
+        else:
+            body_lines.append(f"    # TODO: {tool}({args}) — codegen returned None")
 
     if not body_lines:
         body_lines.append("    pass  # no recorded steps")
@@ -268,10 +334,22 @@ def install_recording_hook(mcp_server: Any) -> None:
     mcp_server.tool = patched_tool
 
 
+def _summarize_result(tool_name: str, result: Any) -> dict:
+    """从工具返回值中提取关键信息用于 codegen。
+
+    只提取轻量字段（center/label/type/text 等），不存完整 elements 或截图。
+    """
+    if not isinstance(result, dict):
+        return {}
+    allowed = ("center", "label", "type", "text", "center_x", "center_y", "matched_count")
+    return {k: result[k] for k in allowed if k in result}
+
+
 def _safe_record(tool_name: str, kwargs: dict, result: Any) -> None:
     """Record a call without ever letting recording errors break a tool."""
     try:
         ok = bool(result.get("ok", True)) if isinstance(result, dict) else True
-        record_call(tool_name, dict(kwargs), ok)
+        summary = _summarize_result(tool_name, result)
+        record_call(tool_name, dict(kwargs), ok, result_summary=summary)
     except Exception:
         pass
