@@ -90,6 +90,10 @@ def install_cache_invalidation_hook(mcp_server: Any) -> None:
 
         def wrapping_decorator(fn):
             tool_name = getattr(fn, "__name__", "")
+            # Only wrap action tools; non-action tools register unchanged
+            # to avoid per-call overhead of _safe_invalidate_ui.
+            if tool_name not in _ACTION_INVALIDATES_UI:
+                return decorator(fn)
 
             if inspect.iscoroutinefunction(fn):
 

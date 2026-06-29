@@ -27,6 +27,7 @@ from typing import Any, Callable, Hashable, TypeVar
 T = TypeVar("T")
 
 DEFAULT_UI_CACHE_TTL_S: float = 0.5
+_MAX_CACHE_ENTRIES: int = 128
 
 _lock = threading.Lock()
 _cache: dict[tuple[Hashable, ...], "CacheEntry"] = {}
@@ -67,8 +68,26 @@ def get_or_compute(
     value = compute()
 
     with _lock:
+        # Evict expired entries and enforce max size to prevent unbounded growth.
+        if len(_cache) >= _MAX_CACHE_ENTRIES:
+            _evict_expired_or_oldest()
         _cache[key] = CacheEntry(value=value, created_at=time.monotonic())
     return value  # type: ignore[return-value]
+
+
+def _evict_expired_or_oldest() -> None:
+    """清理过期条目；如仍超限，淘汰最旧的。调用方需持锁。"""
+    now = time.monotonic()
+    # First pass: drop expired entries.
+    expired = [
+        k for k, v in _cache.items() if (now - v.created_at) > DEFAULT_UI_CACHE_TTL_S
+    ]
+    for k in expired:
+        _cache.pop(k, None)
+    # If still at capacity, drop the oldest entry.
+    while len(_cache) >= _MAX_CACHE_ENTRIES and _cache:
+        oldest_key = min(_cache, key=lambda k: _cache[k].created_at)
+        _cache.pop(oldest_key, None)
 
 
 def invalidate(
