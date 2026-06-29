@@ -12,6 +12,7 @@ from typing import Optional
 
 from phone_pilot.core.ui import UIElement
 from phone_pilot.core.log import _log as _runner_log
+from phone_pilot.core import ui_snapshot_cache
 
 from .context import ScriptContext
 from ._helpers import (
@@ -23,6 +24,29 @@ from ._helpers import (
     _get_current_focus,
     _ensure_out_dir,
 )
+
+
+# ---------------------------------------------------------------------------
+# UI cache invalidation — 动作类操作成功后失效 UI 快照缓存
+# ---------------------------------------------------------------------------
+
+
+def _invalidate_ui_cache(ctx: ScriptContext, result: dict | None = None) -> None:
+    """动作成功后失效当前设备的 UI 快照缓存。
+
+    仅当 result 为空或 result.ok 为 True 时失效；失败动作不清缓存，
+    避免误清后下次读取被迫重新 dump 但设备状态其实没变。
+    """
+    if result is not None and isinstance(result, dict) and not result.get("ok", True):
+        return
+    serial = getattr(ctx, "device_serial", None)
+    if not serial:
+        return
+    platform = getattr(ctx.driver, "platform", None) or getattr(ctx, "platform", None)
+    try:
+        ui_snapshot_cache.invalidate_device_ui(serial, platform=platform)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +66,9 @@ def clear_background(ctx: ScriptContext) -> dict:
     Returns / 返回值:
         dict: driver 返回的结果 / Driver result
     """
-    return ctx.driver.clear_background()
+    res = ctx.driver.clear_background()
+    _invalidate_ui_cache(ctx, res)
+    return res
 
 
 def reset_home_screen(ctx: ScriptContext, *, home_presses: int = 2) -> dict:
@@ -63,6 +89,7 @@ def reset_home_screen(ctx: ScriptContext, *, home_presses: int = 2) -> dict:
         ctx.driver.go_home()
         time.sleep(0.6)
     time.sleep(0.5)
+    _invalidate_ui_cache(ctx)
     return {"ok": True, "platform": ctx.driver.platform}
 
 
@@ -85,6 +112,7 @@ def restart_app_pkg(ctx: ScriptContext, package: str) -> dict:
     stop_res = ctx.driver.app.force_stop(pkg)
     launch_res = ctx.driver.app.launch_app(pkg)
     ok = bool(stop_res.get("ok")) and bool(launch_res.get("ok"))
+    _invalidate_ui_cache(ctx, {"ok": ok})
     return {"ok": ok, "package": pkg, "force_stop": stop_res, "launch": launch_res}
 
 
@@ -250,6 +278,7 @@ def swipe(
     if None in (x1, y1, x2, y2):
         return {"ok": False, "error": "swipe_coordinates_unavailable"}
     res = _input_swipe(ctx, int(x1), int(y1), int(x2), int(y2), duration_ms=duration_ms)
+    _invalidate_ui_cache(ctx, res)
     if wait_s and wait_s > 0:
         time.sleep(float(wait_s))
     # 主动模式：滑动后等待 1s 再截图，保证页面 UI 稳定
@@ -386,7 +415,9 @@ def type_text(ctx: ScriptContext, text: str, *, enter: bool = False) -> dict:
     Returns / 返回值:
         dict: driver.input.input_text 的结果 / Driver result
     """
-    return _input_text(ctx, str(text or ""), enter=bool(enter))
+    res = _input_text(ctx, str(text or ""), enter=bool(enter))
+    _invalidate_ui_cache(ctx, res)
+    return res
 
 
 def keyevent(ctx: ScriptContext, keycode: str) -> dict:
@@ -402,7 +433,9 @@ def keyevent(ctx: ScriptContext, keycode: str) -> dict:
     Returns / 返回值:
         dict: driver.input.keyevent 的结果 / Driver result
     """
-    return _input_keyevent(ctx, str(keycode or ""))
+    res = _input_keyevent(ctx, str(keycode or ""))
+    _invalidate_ui_cache(ctx, res)
+    return res
 
 
 def tap_xy(ctx: ScriptContext, x: int, y: int) -> dict:
@@ -418,7 +451,9 @@ def tap_xy(ctx: ScriptContext, x: int, y: int) -> dict:
     Returns / 返回值:
         dict: driver.input.tap 的结果 / Driver result
     """
-    return _input_tap(ctx, int(x), int(y))
+    res = _input_tap(ctx, int(x), int(y))
+    _invalidate_ui_cache(ctx, res)
+    return res
 
 
 def tap_when_ready(
