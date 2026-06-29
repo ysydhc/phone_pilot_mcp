@@ -93,7 +93,6 @@ def test_get_page_state_is_not_action():
 def test_hook_wraps_action_tool_and_invalidates():
     """验证 hook 能包装异步 action 工具并在成功后失效缓存。"""
     fake_mcp = MagicMock()
-    original_decorator_call_count = 0
 
     # 模拟 mcp.tool() 返回一个 decorator
     def fake_tool(*args, **kwargs):
