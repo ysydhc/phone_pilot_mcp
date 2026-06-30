@@ -227,12 +227,13 @@ async def phone_recordings_get(
     Get recording details by key.
     根据键获取录制详情。
     """
+    from pathlib import Path
     from phone_pilot.core.storage import load_recording_by_key
 
     return await asyncio.to_thread(
         load_recording_by_key,
+        Path(out_dir),
         recording_key,
-        out_dir,
     )
 
 
@@ -253,11 +254,13 @@ async def phone_replay_recording(
         out_dir: Recordings directory / 录制目录
         speed: Playback speed multiplier / 播放速度倍数
     """
+    from pathlib import Path
     from phone_pilot.core.storage import load_recording_by_key
     from phone_pilot.android.recording.touch import push_script
     from phone_pilot.android.touch.monkey import MonkeyRunner
 
-    rec = load_recording_by_key(recording_key, out_dir)
+    out_root = Path(out_dir)
+    rec = load_recording_by_key(out_root, recording_key)
     if not rec.get("ok"):
         return rec
 

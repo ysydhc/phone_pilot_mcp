@@ -443,9 +443,10 @@ def scroll_to_find(
         ctx, text, exact=exact, use_ocr=use_ocr, retry_attempts=1, _silent_fail=True
     )
     if elem:
+        c = elem.center() or (None, None)
         ctx._observe(
             "scroll_to_find",
-            f"'{text}' 当前页面已存在 @ ({elem.center_x}, {elem.center_y})",
+            f"'{text}' 当前页面已存在 @ ({c[0]}, {c[1]})",
             element=elem,
         )
         return elem
@@ -496,9 +497,10 @@ def scroll_to_find(
                 _silent_fail=True,
             )
             if elem:
+                c = elem.center() or (None, None)
                 ctx._observe(
                     "scroll_to_find",
-                    f"'{text}' 滚动 {total_swipes} 次后找到 @ ({elem.center_x}, {elem.center_y})",
+                    f"'{text}' 滚动 {total_swipes} 次后找到 @ ({c[0]}, {c[1]})",
                     element=elem,
                 )
                 return elem
