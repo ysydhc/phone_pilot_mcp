@@ -230,11 +230,20 @@ async def phone_recordings_get(
     from pathlib import Path
     from phone_pilot.core.storage import load_recording_by_key
 
-    return await asyncio.to_thread(
+    rec = await asyncio.to_thread(
         load_recording_by_key,
         Path(out_dir),
         recording_key,
     )
+    if rec is None:
+        return {
+            "ok": False,
+            "error": "recording_not_found",
+            "recording_key": recording_key,
+        }
+    if isinstance(rec, dict):
+        rec.setdefault("ok", True)
+    return rec
 
 
 @mcp.tool()
@@ -261,6 +270,13 @@ async def phone_replay_recording(
 
     out_root = Path(out_dir)
     rec = load_recording_by_key(out_root, recording_key)
+    if rec is None:
+        return {
+            "ok": False,
+            "error": "recording_not_found",
+            "recording_key": recording_key,
+            "out_dir": str(out_root),
+        }
     if not rec.get("ok"):
         return rec
 
