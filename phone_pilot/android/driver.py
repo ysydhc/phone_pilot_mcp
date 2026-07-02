@@ -767,6 +767,32 @@ class AndroidDriver:
 
         return device_logcat_time(self._device_serial)
 
+    def shell(self, cmd: str) -> dict:
+        """Execute arbitrary command on device via adb shell.
+        通过 adb shell 在设备上执行任意命令。
+
+        Args:
+            cmd: 命令字符串 / Command string
+
+        Returns:
+            dict: {"ok": bool, "stdout": str, "stderr": str, "returncode": int}
+        """
+        from phone_pilot.android.adb.runner import CommandRunner
+        from phone_pilot.android.adb.utils import adb_prefix
+
+        proc = CommandRunner.run(
+            adb_prefix(self._device_serial) + ["shell", cmd],
+            check=False,
+            delay_s=0.0,
+            log_output=False,
+        )
+        return {
+            "ok": proc.returncode == 0,
+            "stdout": (proc.stdout or "").strip(),
+            "stderr": (proc.stderr or "").strip(),
+            "returncode": proc.returncode,
+        }
+
     def clear_log(self) -> dict:
         """Clear logcat buffer."""
         from phone_pilot.android.adb.logcat import clear_logcat

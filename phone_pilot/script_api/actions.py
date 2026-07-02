@@ -440,6 +440,30 @@ def keyevent(ctx: ScriptContext, keycode: str) -> dict:
     return res
 
 
+def shell(ctx: ScriptContext, cmd: str) -> dict:
+    """Execute arbitrary command on device via driver shell proxy.
+    通过 driver shell 代理在设备上执行任意命令。
+
+    解决脚本沙箱内无法直接调用 subprocess 的问题。
+    底层通过 adb shell / hdc shell 执行，返回标准化结果。
+
+    用例 / Usage::
+        result = shell(ctx, "pm list packages com.example")
+        if result["ok"]:
+            print(result["stdout"])
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        cmd: 命令字符串 / Command string
+
+    Returns / 返回值:
+        dict: {"ok": bool, "stdout": str, "stderr": str, "returncode": int}
+    """
+    res = ctx.driver.shell(cmd)
+    ctx._observe("shell", f"[{cmd}] rc={res.get('returncode', '?')}")
+    return res
+
+
 def tap_xy(ctx: ScriptContext, x: int, y: int) -> dict:
     """按坐标点击 / Tap at coordinates.
 

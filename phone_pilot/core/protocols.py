@@ -311,3 +311,19 @@ class DeviceDriver(Protocol):
         Returns: {"ok": bool, "lines": int, ...}
         """
         ...
+
+    def shell(self, cmd: str) -> dict:
+        """Execute arbitrary command on the device via adb shell / hdc shell.
+        通过 adb shell / hdc shell 在设备上执行任意命令。
+
+        用途 / Use cases:
+            - 脚本沙箱内无法直接调用 subprocess，需通过 driver 代理执行
+            - 设备信息查询、文件系统操作、进程管理等
+
+        Args:
+            cmd: 命令字符串（如 "pm list packages"）/ Command string
+
+        Returns:
+            dict: {"ok": bool, "stdout": str, "stderr": str, "returncode": int}
+        """
+        ...
