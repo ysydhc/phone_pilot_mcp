@@ -129,6 +129,8 @@ from .mock import (
     mock_server_start,
     mock_server_stop,
     mock_set_rule,
+    mock_delete_rule,
+    mock_switch_rule,
     mock_load_seed,
     mock_assert_switched,
 )
@@ -245,6 +247,8 @@ __all__ = [
     "mock_server_start",
     "mock_server_stop",
     "mock_set_rule",
+    "mock_delete_rule",
+    "mock_switch_rule",
     "mock_load_seed",
     "mock_assert_switched",
 ]

@@ -182,6 +182,67 @@ def mock_set_rule(
         return {"ok": False, "error": str(exc)}
 
 
+def mock_delete_rule(ctx: ScriptContext, rule_id: str) -> dict[str, Any]:
+    """删除一条 mock 规则（经控制面客户端）。
+
+    Delete a mock rule via the control-plane client.
+
+    Parameters
+    ----------
+    ctx: 脚本上下文 / Script execution context
+    rule_id: 规则 ID（如 ``GET:/path``）/ Rule ID
+
+    Returns
+    -------
+    dict
+        ``{"ok": True}`` or ``{"ok": False, "error": str}``.
+    """
+    try:
+        handle: _MockHandle | None = getattr(ctx, "_mock_server", None)
+        if handle is None:
+            return {"ok": False, "error": "mock_server_not_running"}
+        return handle.client.delete_rule(rule_id)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def mock_switch_rule(
+    ctx: ScriptContext,
+    method: str,
+    path: str,
+    body: dict[str, Any] | str | None,
+    *,
+    status: int = 200,
+) -> dict[str, Any]:
+    """切换一条 mock 规则：先删除旧规则，再设置新规则。
+
+    Switch a mock rule: delete the old one, then set the new one.
+    This is a convenience wrapper for the common "no-fill → fill" pattern.
+
+    Parameters
+    ----------
+    ctx: 脚本上下文 / Script execution context
+    method: HTTP 方法 / HTTP method
+    path: 匹配路径 / Match path
+    body: 响应体 / Response body
+    status: HTTP 状态码 / HTTP status code
+
+    Returns
+    -------
+    dict
+        ``{"ok": True, "rule_id": str}`` or ``{"ok": False, "error": str}``.
+    """
+    rule_id = f"{method}:{path}"
+    # Best-effort delete; ignore failure if rule didn't exist
+    try:
+        handle: _MockHandle | None = getattr(ctx, "_mock_server", None)
+        if handle is not None:
+            handle.client.delete_rule(rule_id)
+    except Exception:
+        pass
+    return mock_set_rule(ctx, method, path, body, status=status)
+
+
 def mock_load_seed(ctx: ScriptContext, seed: dict[str, Any]) -> dict[str, Any]:
     """批量加载规则集（经控制面客户端）。
 
