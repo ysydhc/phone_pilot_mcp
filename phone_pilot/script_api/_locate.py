@@ -450,6 +450,8 @@ def _ui_element_from_box(
     _apply_uia_fields(elem, uia if isinstance(uia, dict) else {})
     elem._ops = _ui_ops(ctx)
     elem._locator = locator
+    # 记录 dump 时间戳，用于 tap() 时判断坐标是否过时
+    elem.meta.setdefault("_dump_ts", time.time())
     return elem
 
 

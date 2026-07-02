@@ -1229,6 +1229,8 @@ def raw_uia(
                     _ops=elem._ops,
                     text=getattr(node, "text", None),
                 )
+            # 记录 dump 时间戳，用于 tap() 时判断坐标是否过时
+            elem.meta.setdefault("_dump_ts", time.time())
             return elem
     return None
 

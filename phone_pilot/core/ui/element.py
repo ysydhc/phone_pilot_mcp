@@ -326,6 +326,9 @@ class UIElement:
         默认点击元素中心。pc_x/pc_y 为 0–1 时按比例偏移（如 0.5 为中心）。
         Taps element center by default. pc_x/pc_y 0–1 = offset from top-left.
 
+        当元素坐标可能过时（页面刚加载/动画中），会自动 refresh。
+        Auto-refreshes stale coordinates when page may have changed.
+
         Parameters / 参数:
             pc_x, pc_y: 点击点相对元素的比例（None=中心）/ Tap point ratio (None=center)
             times: 点击次数 / Tap count
@@ -335,6 +338,21 @@ class UIElement:
         Returns / 返回值:
             dict: {"ok": bool, "x": int, "y": int, "times": int, "results": [...]}
         """
+        # ---- 坐标刷新机制 ----
+        # 如果 dump 时间戳过旧（>0.5s），自动刷新坐标
+        dump_ts = self.meta.get("_dump_ts")
+        if dump_ts is not None and (time.time() - dump_ts) > 0.5:
+            refreshed = self.refresh()
+            if isinstance(refreshed, UIElement):
+                self._sync_from(refreshed)
+        # wait >= 0.5 时，先 sleep 再刷新坐标
+        if wait >= 0.5:
+            time.sleep(float(wait))
+            refreshed = self.refresh()
+            if isinstance(refreshed, UIElement):
+                self._sync_from(refreshed)
+            wait = 0  # 已经 sleep 过，不再重复
+
         tap_xy = self._op("tap_xy")
         if not tap_xy:
             return {"ok": False, "error": "tap_unavailable"}

@@ -296,6 +296,7 @@ def find_text(
     retry_interval_ms: int = 1000,
     retry_attempts: int = 3,
     box: Optional[Box] = None,
+    stable: bool = True,
     _silent_fail: bool = False,
 ) -> Optional[UIElement]:
     """在屏幕上查找文本元素。
@@ -338,6 +339,13 @@ def find_text(
     norm_query = _normalize_text(raw_text, case_sensitive=bool(ocr_case_sensitive))
     ocr_langs = _expand_ocr_langs(ctx, ocr_lang)
     roi = _roi_from_box(ctx, box) if box else None
+
+    if stable:
+        # 等待页面稳定，避免刚加载完成时访问性节点坐标不稳定
+        time.sleep(0.3)
+        # 清除旧的 UI 缓存，强制下次 dump 为最新
+        if hasattr(ctx, "_ui_cache"):
+            ctx._ui_cache = None
 
     def _try_ocr_first() -> Optional[UIElement]:
         effective_ocr_exact = exact or ocr_exact
