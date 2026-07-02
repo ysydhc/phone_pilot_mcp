@@ -505,8 +505,22 @@ class AndroidDriver:
         return self._input.keyevent("KEYCODE_HOME")
 
     def go_back(self) -> dict:
-        """Press back button."""
-        return self._input.keyevent("KEYCODE_BACK")
+        """Press back button.
+        Tries KEYCODE_BACK first; if that fails (e.g. fullscreen ad intercepts),
+        falls back to numeric keyevent 4. Catches exceptions to avoid crashing
+        the automation script.
+        """
+        try:
+            res = self._input.keyevent("KEYCODE_BACK")
+            if isinstance(res, dict) and res.get("ok"):
+                return res
+        except Exception:
+            pass
+        # Fallback: numeric keycode (some devices/ads handle this differently)
+        try:
+            return self._input.keyevent("4")
+        except Exception as e:
+            return {"ok": False, "error": f"go_back_failed: {e}"}
 
     def unlock(self, pin: Optional[str] = None) -> dict:
         """Wake + unlock device screen."""
