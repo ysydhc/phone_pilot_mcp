@@ -73,6 +73,7 @@ def logcat_find(
     regex: bool = False,
     merge_multiline: bool = False,
     clear_before: bool = False,
+    tag: Optional[str] = None,
 ) -> dict:
     """在设备日志中查找 pattern。
     Find pattern in device log (logcat).
@@ -97,7 +98,7 @@ def logcat_find(
         except Exception:
             pass
         time.sleep(0.5)
-    content = ctx.driver.read_log(lines=int(lines))
+    content = ctx.driver.read_log(lines=int(lines), tag_filter=tag)
     ok = bool(content)
 
     if merge_multiline:
@@ -113,9 +114,15 @@ def logcat_find(
     return {"ok": ok, "count": len(hits), "pattern": pattern, "hits": hits}
 
 
-def logcat_mark(ctx: ScriptContext) -> Optional[str]:
+_LOG_TS_RE = re.compile(r"^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})")
+
+
+def logcat_mark(ctx: ScriptContext, *, tag: Optional[str] = None) -> Optional[str]:
     """记录当前设备时间，作为后续 logcat_since 的起点。
     Capture the current device time as a marker for later logcat_since.
+
+    如果指定 tag，优先读取该 tag 的最近日志并取其时间戳，更精确。
+    If tag is given, reads the latest log for that tag and uses its timestamp.
 
     典型用法 / Typical usage::
 
@@ -123,10 +130,21 @@ def logcat_mark(ctx: ScriptContext) -> Optional[str]:
         tap_play_button()
         logcat_since(ctx, mark, pattern="onAdImpression")
 
+    Parameters / 参数:
+        tag: 可选 tag 过滤，获取该 tag 最近日志的时间戳 / Optional tag for precise mark
+
     Returns / 返回值:
         logcat 格式时间戳字符串 "MM-DD HH:MM:SS.mmm"，失败返回 None。
     """
     try:
+        if tag:
+            content = ctx.driver.read_log(lines=5, tag_filter=tag)
+            if content:
+                lines = content.strip().splitlines()
+                if lines:
+                    m = _LOG_TS_RE.match(lines[-1])
+                    if m:
+                        return m.group(1)
         return ctx.driver.logcat_time()
     except Exception:
         return None
@@ -139,6 +157,7 @@ def logcat_since(
     pattern: Optional[str] = None,
     regex: bool = False,
     merge_multiline: bool = False,
+    tag: Optional[str] = None,
 ) -> dict:
     """只读取某个设备时间点之后的日志，可选地查找 pattern。
     Read only logs at/after a device timestamp; optionally search for pattern.
@@ -159,7 +178,7 @@ def logcat_since(
         - lines: since 之后的全部行 / all lines after `since`
         - hits: 匹配 pattern 的行（pattern=None 时等于 lines）/ matched lines
     """
-    content = ctx.driver.read_log(since=since)
+    content = ctx.driver.read_log(since=since, tag_filter=tag)
     ok = bool(content)
 
     if merge_multiline:
@@ -325,6 +344,7 @@ def logcat_wait_for(
     lines: int = 5000,
     clear_before: bool = False,
     merge_multiline: bool = True,
+    tag: Optional[str] = None,
 ) -> dict:
     """轮询设备日志，等待指定模式出现。
     Poll device log until pattern(s) appear.
@@ -362,7 +382,7 @@ def logcat_wait_for(
     while time.monotonic() < deadline:
         time.sleep(max(0.5, float(interval_s)))
 
-        content = ctx.driver.read_log(lines=int(lines))
+        content = ctx.driver.read_log(lines=int(lines), tag_filter=tag)
         if not content:
             continue
 
