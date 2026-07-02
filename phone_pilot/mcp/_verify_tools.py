@@ -48,12 +48,20 @@ async def phone_run_script(
     The script must define a `main(ctx: ScriptContext) -> dict | None` function.
     脚本需定义 `main(ctx: ScriptContext) -> dict | None` 函数。
 
+    .. note::
+        phone_pilot is an automation test tool, NOT a build tool.
+        It does NOT automatically compile or install APKs.
+        If you modify app code, build and install the APK manually before running the script.
+        phone_pilot 是自动化测试工具，不是构建工具。
+        不会自动编译或安装 APK。如果修改了应用代码，
+        请先手动构建并安装 APK，然后再执行脚本。
+
     Args:
         path: Python script file path. 脚本文件路径。
         device_serial: Device serial (empty = auto-detect). 设备序列号。
         platform: Platform ("android"|"harmony"|"auto"). 平台。
         timeout_s: Execution timeout in seconds. 执行超时秒数。
-        repo_path: Git repo path for code change tracking. 被测项目 git 仓库路径。
+        repo_path: Git repo path for code change tracking. 被测项目 git 仓库路径（仅记录 diff，不触发构建）。
         change_description: Optional change description from agent. Agent 变更说明。
 
     Returns:
