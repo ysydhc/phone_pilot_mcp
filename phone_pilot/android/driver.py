@@ -35,6 +35,17 @@ from phone_pilot.android.ui.automator import (
     parse_uiautomator_nodes,
 )
 
+from typing import Any
+
+
+def _ensure_str(val: Any) -> str:
+    """Ensure a value is a string, decoding bytes if necessary."""
+    if isinstance(val, bytes):
+        return val.decode("utf-8", errors="replace")
+    if isinstance(val, str):
+        return val
+    return str(val)
+
 
 class AndroidInputDriver:
     """Android implementation of InputDriver using ADB."""
@@ -202,14 +213,18 @@ class AndroidUIDriver:
         return [_android_node_to_universal(n, UnivNode) for n in android_nodes]
 
     def collect_all_texts(self) -> list[str]:
-        """Collect all visible texts from UI tree."""
+        """Collect all visible texts from UI tree.
+        Always returns List[str] — bytes are decoded to str.
+        """
         from phone_pilot.android.ui.query import collect_node_texts as _collect
 
         xml = self.dump_ui_hierarchy()
         if not xml:
             return []
         nodes = parse_uiautomator_nodes(xml)
-        return _collect(nodes)
+        raw = _collect(nodes)
+        # Defensive: ensure every entry is str, decoding bytes if needed
+        return [_ensure_str(t) for t in raw]
 
     def find_elements(self, selector: dict) -> list[dict]:
         """
