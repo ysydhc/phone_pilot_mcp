@@ -12,6 +12,7 @@ This module intentionally keeps all ADB/Android interaction "plumbing" in one pl
 from __future__ import annotations
 
 import re
+import shlex
 import time
 import zipfile
 from typing import Optional
@@ -2083,10 +2084,10 @@ def open_deeplink(
         "-a",
         "android.intent.action.VIEW",
         "-d",
-        u,
+        shlex.quote(u),
     ]
     if package:
-        cmd += ["-p", package]
+        cmd += ["-p", shlex.quote(package)]
     proc = CommandRunner.run(
         cmd, check=False, delay_s=float(wait_s) if wait_s and wait_s > 0 else 0.0
     )
