@@ -427,3 +427,113 @@ def logcat_wait_for(
     if any_of_list and not any_of_hit:
         missing.append(f"any_of({', '.join(any_of_list)})")
     return {"ok": False, "hits": found, "missing": missing}
+
+
+def assert_event(
+    ctx: ScriptContext,
+    event: str,
+    kv: Optional[dict[str, str]] = None,
+    *,
+    tag: Optional[str] = None,
+    event_field: str = "event",
+    timeout_s: float = 25,
+    interval_s: float = 1,
+) -> dict:
+    """结构化日志断言：等待一行同时满足 event_field=event 且含全部 k=v（整词边界）。
+    Assert a log line matching event_field=event AND all k=v pairs (whole-word).
+
+    整词边界语义（ADR-5）：每对 ``k=v`` 编译为
+    ``(?:^|\\s)`` + ``re.escape("k=v")`` + ``(?=\\s|$)`` —— 显式空白/行界边界，
+    不用 ``\\b``（``\\b`` 以 ``\\w`` 定义边界，``type=video`` 会误中
+    ``video-x`` / ``video.mp4``）。key/value 均按字面匹配（无正则通配），
+    代价是值本身含空格时无法匹配（结构化日志约定值不含空格）。
+    Whole-word semantics (ADR-5): each ``k=v`` pair is compiled with explicit
+    whitespace/line boundaries instead of ``\\b`` (which treats ``-``/``.`` as
+    word boundaries and would falsely match ``video-x`` / ``video.mp4``).
+    Both key and value are matched literally; values containing spaces cannot
+    be matched (structured-log convention: values are space-free).
+
+    进入即 ``logcat_mark`` 打标，只断言调用之后的日志；mark 失败（None）时
+    **立即**返回 ``mark_failed``，绝不静默降级去读日志（ADR-13）。
+    Marks the device time on entry and only inspects logs after it; if the
+    mark fails (None) it returns ``mark_failed`` immediately and NEVER
+    silently falls back to reading recent lines (ADR-13).
+
+    已知限制（ADR-14）：``logcat_time`` 毫秒恒为 ``.000`` 且 ``logcat -T``
+    是包含语义，mark 同一秒内的旧日志会被重读（同秒泄漏）。1 秒内重复触发
+    同名事件时，调用方需自带唯一化字段（如 seq）区分。
+    Known limitation (ADR-14): the mark has whole-second precision and
+    ``logcat -T`` is inclusive, so old lines within the same second as the
+    mark leak into the window. Callers re-triggering the same event within
+    1 second must include a uniquifying field (e.g. seq).
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        event: 期望的事件名（event_field=event 整词命中）/ Expected event name
+        kv: 额外的 k=v 断言对，空/None 时只匹配事件项 / Extra k=v pairs
+        tag: 可选 logcat tag 过滤（设备端）/ Optional device-side tag filter
+        event_field: 结构化事件字段名（默认 "event"）/ Structured event field name
+        timeout_s: 最长等待秒数；0 表示只读取判定一次、不轮询 /
+            Max wait seconds; 0 means a single read, no polling
+        interval_s: 轮询间隔秒数 / Poll interval seconds
+
+    Returns / 返回值:
+        dict: {
+            "ok": bool,        # 是否命中 / matched
+            "line": str|None,  # 首条命中行（时序最早证据）/ first matching line
+            "elapsed_s": float,
+            "error": str,      # "" | "mark_failed" | "event_timeout"
+            "reason": str,     # 同 error / same as error
+            "tail": list[str], # 失败时区间内最后 20 行（排障现场）/ last 20 lines
+        }
+    """
+
+    def _word_re(k: str, v: str) -> re.Pattern[str]:
+        return re.compile(r"(?:^|\s)" + re.escape(f"{k}={v}") + r"(?=\s|$)")
+
+    patterns = [_word_re(event_field, event)]
+    patterns += [_word_re(k, v) for k, v in (kv or {}).items()]
+
+    since = logcat_mark(ctx, tag=tag)
+    if since is None:
+        # ADR-13: mark 失败必须显式报错，绝不静默降级读最近 N 行。
+        return {
+            "ok": False,
+            "line": None,
+            "elapsed_s": 0.0,
+            "error": "mark_failed",
+            "reason": "mark_failed",
+            "tail": [],
+        }
+
+    start = time.monotonic()
+    deadline = start + max(0.0, float(timeout_s))
+    tail: list[str] = []
+    while True:
+        content = ctx.driver.read_log(since=since, tag_filter=tag)
+        lines = _merge_logcat_lines(content)
+        tail = lines[-20:]
+        for line in lines:
+            if all(p.search(line) for p in patterns):
+                return {
+                    "ok": True,
+                    "line": line,
+                    "elapsed_s": round(time.monotonic() - start, 3),
+                    "error": "",
+                    "reason": "",
+                    "tail": [],
+                }
+        if time.monotonic() >= deadline:
+            return {
+                "ok": False,
+                "line": None,
+                "elapsed_s": round(time.monotonic() - start, 3),
+                "error": "event_timeout",
+                "reason": "event_timeout",
+                "tail": tail,
+            }
+        _auto_log_print(
+            f"  ... 等待事件 {event_field}={event}"
+            f" ({max(0, deadline - time.monotonic()):.0f}s)"
+        )
+        time.sleep(max(0.2, float(interval_s)))
