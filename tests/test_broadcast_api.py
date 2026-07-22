@@ -1,11 +1,11 @@
-"""Tests for send_broadcast."""
+"""Tests for send_broadcast / ensure_app_alive."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from phone_pilot.script_api.broadcast import send_broadcast
+from phone_pilot.script_api.broadcast import ensure_app_alive, send_broadcast
 
 MARK = "07-22 10:00:00.000"
 HDR = "07-22 10:00:01.000  1234  1234 D AdTest: "
@@ -129,3 +129,104 @@ def test_redact_keys_masks_value():
         ctx, "com.x.TEST", extras={"token": "sekret"}, redact_keys=["token"]
     )
     assert "sekret" not in str(r)
+
+
+def test_alive_no_ready_event_returns_fast():
+    # B8: 已存活 + 未给 ready_event → 不拉起
+    ctx = _ctx()
+    ctx.driver.shell.return_value = {
+        "ok": True,
+        "stdout": "12345",
+        "stderr": "",
+        "returncode": 0,
+    }
+    r = ensure_app_alive(ctx, "com.x")
+    assert r["ok"] is True and r["pid"] == 12345 and r["launched"] is False
+    ctx.driver.open_deeplink.assert_not_called()
+
+
+def test_alive_with_ready_event_skips_wait():
+    # B25 / R1: 已存活+给 ready_event+非 force_restart → 跳过等待, ready_seen=None
+    ctx = _ctx()
+    ctx.driver.shell.return_value = {
+        "ok": True,
+        "stdout": "12345",
+        "stderr": "",
+        "returncode": 0,
+    }
+    r = ensure_app_alive(
+        ctx, "com.x", scheme_url="s://x", ready_event="event=APP_READY"
+    )
+    assert r["ok"] is True and r["ready_seen"] is None
+    ctx.driver.read_log.assert_not_called()
+
+
+def test_dead_no_scheme():
+    # B26
+    ctx = _ctx()
+    ctx.driver.shell.return_value = {
+        "ok": False,
+        "stdout": "",
+        "stderr": "",
+        "returncode": 1,
+    }
+    r = ensure_app_alive(ctx, "com.x")
+    assert r["ok"] is False and r["reason"] == "dead_no_launch_method"
+
+
+def test_pidof_fallback_to_ps():
+    # B6: pidof 失败 → ps 降级
+    ctx = _ctx()
+    ctx.driver.shell.side_effect = [
+        {"ok": False, "stdout": "", "stderr": "pidof: not found", "returncode": 127},
+        {"ok": True, "stdout": "root 999 1 0 S com.x", "stderr": "", "returncode": 0},
+    ]
+    r = ensure_app_alive(ctx, "com.x")
+    assert r["ok"] is True and r["pid"] == 999
+
+
+def test_pidof_multi_pid_takes_first():
+    # B7
+    ctx = _ctx()
+    ctx.driver.shell.return_value = {
+        "ok": True,
+        "stdout": "111 222",
+        "stderr": "",
+        "returncode": 0,
+    }
+    r = ensure_app_alive(ctx, "com.x")
+    assert r["pid"] == 111
+
+
+def test_cold_launch_then_ready_seen():
+    ctx = _ctx(log_lines=["event=APP_READY page=main"])
+    ctx.driver.shell.side_effect = [
+        {"ok": False, "stdout": "", "stderr": "", "returncode": 1},  # pidof: dead
+        {"ok": False, "stdout": "", "stderr": "", "returncode": 1},  # ps: dead
+        {"ok": True, "stdout": "12345", "stderr": "", "returncode": 0},  # 最终 pid 复查
+    ]
+    ctx.driver.open_deeplink.return_value = {"ok": True}
+    r = ensure_app_alive(
+        ctx,
+        "com.x",
+        scheme_url="admtest://open",
+        ready_event="event=APP_READY",
+        timeout_s=0,
+    )
+    assert r["ok"] is True and r["launched"] is True and r["ready_seen"] is True
+
+
+def test_ready_timeout_dead_vs_alive():
+    # B27 / ADR-7: ready 超时后存活复查细分
+    ctx = _ctx(log_lines=[])
+    ctx.driver.shell.side_effect = [
+        {"ok": False, "stdout": "", "stderr": "", "returncode": 1},  # pidof: dead
+        {"ok": False, "stdout": "", "stderr": "", "returncode": 1},  # ps: dead
+        {"ok": False, "stdout": "", "stderr": "", "returncode": 1},  # 复查 pidof: dead
+        {"ok": False, "stdout": "", "stderr": "", "returncode": 1},  # 复查 ps: dead
+    ]
+    ctx.driver.open_deeplink.return_value = {"ok": True}
+    r = ensure_app_alive(
+        ctx, "com.x", scheme_url="s://x", ready_event="event=APP_READY", timeout_s=0
+    )
+    assert r["ok"] is False and r["reason"] == "ready_timeout_app_dead"
