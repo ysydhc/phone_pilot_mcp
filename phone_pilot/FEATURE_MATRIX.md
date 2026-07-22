@@ -2,7 +2,7 @@
 
 > 本文档追踪 phone_pilot 在三个平台上的功能实现状态。  
 > 每实现一个功能后必须更新本文档。  
-> 最后更新: 2026-06-25
+> 最后更新: 2026-07-22
 
 ## 状态说明
 
@@ -326,6 +326,18 @@
 | mock_set_rule / mock_load_seed | 已实现 | 已实现 | 已实现 | 经控制面, 平台无关 |
 | mock_assert_switched (切换检测) | 已实现 | 已实现 | 已实现 | request_log 有流量即判定 (ADR-6) |
 | phone_mock_* (9 个 MCP 工具) | 已实现 | 未实现(有方案) | 未实现(有方案) | EXTENDED_CATEGORIES["mock"], 按需激活 |
+
+## 23. 广播命令总线与用例编排 (Broadcast & TestCase) — 新增
+
+> 设计: docs/design/broadcast-testcase.md。script_api 层能力,无对应 MCP 工具(ADR-10)。
+
+| 功能点 | Android | Harmony | iOS | 备注 |
+|--------|---------|---------|-----|------|
+| send_broadcast (am broadcast + ACK) | 已实现 | 未实现(有方案) | 不适用 | ACK 用 mark→since 区间等待; Harmony 可对标 aa 命令 |
+| ensure_app_alive (pidof/ps + scheme) | 已实现 | 未实现(有方案) | 未实现(有方案) | pidof→ps 降级支持 API<23 |
+| assert_event (整词结构化日志断言) | 已实现 | 未实现(有方案) | 未实现(有方案) | 边界正则 `(?:^\|\s)k=v(?=\s\|$)` |
+| TestCase / run_cases (用例编排) | 已实现 | 已实现 | 已实现 | 纯 Python, 平台无关 |
+| open_deeplink 注入修复 | 已实现 | 不适用 | 不适用 | uri/package shlex.quote |
 
 ---
 

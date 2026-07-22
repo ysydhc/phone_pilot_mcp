@@ -55,7 +55,22 @@ from .logcat import (
     logcat_mark,
     logcat_since,
     logcat_assert_sequence,
+    assert_event,
     _merge_logcat_lines,
+)
+
+# ---- 广播命令总线 / Broadcast command bus ----
+from .broadcast import (
+    send_broadcast,
+    ensure_app_alive,
+)
+
+# ---- 用例编排 / TestCase orchestration ----
+from .testcase import (
+    TestCase,
+    EnvError,
+    SkipCase,
+    run_cases,
 )
 
 # ---- 重新导出：等待条件（android/ui/wait.py）----
@@ -180,6 +195,15 @@ __all__ = [
     "logcat_mark",
     "logcat_since",
     "logcat_assert_sequence",
+    "assert_event",
+    # 广播命令总线
+    "send_broadcast",
+    "ensure_app_alive",
+    # 用例编排
+    "TestCase",
+    "EnvError",
+    "SkipCase",
+    "run_cases",
     # 等待条件
     "wait_for_element_appear",
     "wait_for_element_disappear",
