@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from phone_pilot.android.driver import AndroidDriver
 
@@ -11,7 +11,9 @@ def test_go_back_success():
     """go_back succeeds normally."""
     driver = AndroidDriver("fake_serial")
     with patch.object(
-        driver._input, "keyevent", return_value={"ok": True, "returncode": 0, "key": "KEYCODE_BACK"}
+        driver._input,
+        "keyevent",
+        return_value={"ok": True, "returncode": 0, "key": "KEYCODE_BACK"},
     ):
         result = driver.go_back()
 

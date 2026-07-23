@@ -98,6 +98,7 @@ def test_hook_wraps_action_tool_and_invalidates():
     def fake_tool(*args, **kwargs):
         def decorator(fn):
             return fn  # 直接返回函数，不真正注册
+
         return decorator
 
     fake_mcp.tool = fake_tool
@@ -119,7 +120,7 @@ def test_hook_wraps_action_tool_and_invalidates():
 def test_hook_does_not_invalidate_for_query_tool():
     """验证 query 类工具不被失效缓存。"""
     fake_mcp = MagicMock()
-    fake_mcp.tool = lambda *a, **kw: (lambda fn: fn)
+    fake_mcp.tool = lambda *a, **kw: lambda fn: fn
 
     install_cache_invalidation_hook(fake_mcp)
 
@@ -144,6 +145,7 @@ def test_hook_does_not_wrap_non_action_tool():
             nonlocal original_fn
             original_fn = fn  # capture what was actually registered
             return fn
+
         return decorator
 
     fake_mcp.tool = fake_tool

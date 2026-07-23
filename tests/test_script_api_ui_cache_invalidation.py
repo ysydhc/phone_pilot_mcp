@@ -52,9 +52,7 @@ def test_tap_xy_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.input.tap.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         tap_xy(ctx, 100, 200)
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -66,9 +64,7 @@ def test_swipe_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.input.swipe.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         swipe(ctx, x1=100, y1=800, x2=100, y2=200)
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -80,9 +76,7 @@ def test_type_text_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.input.input_text.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         type_text(ctx, "hello")
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -94,9 +88,7 @@ def test_keyevent_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.input.keyevent.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         keyevent(ctx, "KEYCODE_BACK")
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -109,9 +101,7 @@ def test_restart_app_pkg_invalidates_cache():
     ctx.driver.app.force_stop.return_value = {"ok": True}
     ctx.driver.app.launch_app.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         restart_app_pkg(ctx, "com.example.app")
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -123,9 +113,7 @@ def test_reset_home_screen_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.go_home.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         reset_home_screen(ctx)
 
     mock_cache.invalidate_device_ui.assert_called_with(
@@ -137,9 +125,7 @@ def test_clear_background_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.clear_background.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         clear_background(ctx)
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -151,9 +137,7 @@ def test_failed_tap_does_not_invalidate():
     ctx = _make_ctx()
     ctx.driver.input.tap.return_value = {"ok": False, "error": "device_offline"}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         tap_xy(ctx, 100, 200)
 
     mock_cache.invalidate_device_ui.assert_not_called()
@@ -166,9 +150,7 @@ def test_tap_when_ready_invalidates_cache():
         {"center_x": 100, "center_y": 200, "clickable": True, "enabled": True}
     ]
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         result = tap_when_ready(ctx, text="Login", timeout_s=1.0)
 
     assert result["tapped"] is True
@@ -185,9 +167,7 @@ def test_safe_tap_invalidates_cache():
         "activity": ".Main",
     }
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         safe_tap(ctx, 100, 200, settle_s=0)
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -200,9 +180,7 @@ def test_launch_from_home_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.launch_from_home.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         launch_from_home(ctx, "Settings")
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -215,9 +193,7 @@ def test_unlock_device_invalidates_cache():
     ctx = _make_ctx()
     ctx.driver.unlock.return_value = {"ok": True}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         unlock_device(ctx)
 
     mock_cache.invalidate_device_ui.assert_called_once_with(
@@ -230,9 +206,7 @@ def test_launch_from_home_failed_does_not_invalidate():
     ctx = _make_ctx()
     ctx.driver.launch_from_home.return_value = {"ok": False, "error": "not_found"}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         launch_from_home(ctx, "NonExistent")
 
     mock_cache.invalidate_device_ui.assert_not_called()
@@ -243,9 +217,7 @@ def test_unlock_device_failed_does_not_invalidate():
     ctx = _make_ctx()
     ctx.driver.unlock.return_value = {"ok": False, "error": "already_unlocked"}
 
-    with patch(
-        "phone_pilot.script_api.actions.ui_snapshot_cache"
-    ) as mock_cache:
+    with patch("phone_pilot.script_api.actions.ui_snapshot_cache") as mock_cache:
         unlock_device(ctx)
 
     mock_cache.invalidate_device_ui.assert_not_called()

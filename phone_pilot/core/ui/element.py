@@ -326,32 +326,25 @@ class UIElement:
         默认点击元素中心。pc_x/pc_y 为 0–1 时按比例偏移（如 0.5 为中心）。
         Taps element center by default. pc_x/pc_y 0–1 = offset from top-left.
 
-        当元素坐标可能过时（页面刚加载/动画中），会自动 refresh。
-        Auto-refreshes stale coordinates when page may have changed.
+        如果元素坐标可能过时（距上次 dump 超过 0.5s），会自动 refresh 坐标。
+        Auto-refreshes stale coordinates (>0.5s since last dump) before tapping.
 
         Parameters / 参数:
             pc_x, pc_y: 点击点相对元素的比例（None=中心）/ Tap point ratio (None=center)
             times: 点击次数 / Tap count
             interval: 多次点击间隔毫秒 / Interval between taps (ms)
-            wait: 点击后等待秒数 / Wait after tap (seconds)
+            wait: 点击**后**等待秒数（tap → sleep(wait)）/ Wait **after** tap (seconds)
 
         Returns / 返回值:
             dict: {"ok": bool, "x": int, "y": int, "times": int, "results": [...]}
         """
-        # ---- 坐标刷新机制 ----
-        # 如果 dump 时间戳过旧（>0.5s），自动刷新坐标
+        # ---- 坐标刷新（不依赖 wait 参数）----
+        # 距上次 dump 超过 0.5s 时自动刷新坐标
         dump_ts = self.meta.get("_dump_ts")
         if dump_ts is not None and (time.time() - dump_ts) > 0.5:
             refreshed = self.refresh()
             if isinstance(refreshed, UIElement):
                 self._sync_from(refreshed)
-        # wait >= 0.5 时，先 sleep 再刷新坐标
-        if wait >= 0.5:
-            time.sleep(float(wait))
-            refreshed = self.refresh()
-            if isinstance(refreshed, UIElement):
-                self._sync_from(refreshed)
-            wait = 0  # 已经 sleep 过，不再重复
 
         tap_xy = self._op("tap_xy")
         if not tap_xy:
@@ -370,6 +363,7 @@ class UIElement:
             if interval and i < (count - 1):
                 time.sleep(max(0, int(interval)) / 1000.0)
         ok = all(bool(r.get("ok")) for r in results)
+        # wait = tap 后等待秒数（语义 A：tap → sleep(wait)）
         if wait > 0:
             time.sleep(float(wait))
         # 主动模式：点击/双击后等待 1s 再截图（由 observe_after_input 内 sleep）

@@ -100,7 +100,9 @@ def test_require_visible_zero_size_not_satisfied():
         )
 
     assert result["satisfied"] is False
-    assert "present_but_not_ready" in result.get("message", "") or "timeout" in result.get("message", "")
+    assert "present_but_not_ready" in result.get(
+        "message", ""
+    ) or "timeout" in result.get("message", "")
 
 
 def test_require_visible_with_clickable_and_enabled():

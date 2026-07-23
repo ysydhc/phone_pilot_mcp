@@ -107,11 +107,7 @@ def test_require_visible_default_false_allows_zero_size():
 
 
 def test_require_visible_with_clickable_and_enabled():
-    nodes = [
-        _make_node(
-            bounds=(100, 200, 300, 400), clickable=True, enabled=True
-        )
-    ]
+    nodes = [_make_node(bounds=(100, 200, 300, 400), clickable=True, enabled=True)]
     with _patch_resolve(), _patch_driver(nodes):
         result = _phone_wait_for_element_sync(
             device_serial=None,

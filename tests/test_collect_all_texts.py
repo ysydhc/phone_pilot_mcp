@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from phone_pilot.android.driver import AndroidUIDriver, _ensure_str
 
@@ -25,7 +25,9 @@ def test_ensure_str_converts_int():
 def test_collect_all_texts_filters_out_bytes():
     """collect_all_texts returns List[str] even when raw has bytes."""
     driver = AndroidUIDriver("fake_serial")
-    with patch.object(driver, "dump_ui_hierarchy", return_value="<hierarchy></hierarchy>"):
+    with patch.object(
+        driver, "dump_ui_hierarchy", return_value="<hierarchy></hierarchy>"
+    ):
         with patch(
             "phone_pilot.android.driver.parse_uiautomator_nodes",
             return_value=[],

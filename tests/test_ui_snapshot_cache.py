@@ -22,7 +22,9 @@ def test_get_or_compute_hits_within_ttl():
 
     cache.invalidate()
     first = cache.get_or_compute(("android", "serial1", "ui_nodes"), compute, ttl_s=0.5)
-    second = cache.get_or_compute(("android", "serial1", "ui_nodes"), compute, ttl_s=0.5)
+    second = cache.get_or_compute(
+        ("android", "serial1", "ui_nodes"), compute, ttl_s=0.5
+    )
 
     assert first is second
     assert calls == 1
@@ -77,12 +79,8 @@ def test_different_platform_isolated():
 
 def test_invalidate_by_platform_and_serial():
     cache.invalidate()
-    cache.get_or_compute(
-        ("android", "serial1", "ui_nodes"), lambda: "v1", ttl_s=0.5
-    )
-    cache.get_or_compute(
-        ("android", "serial2", "ui_nodes"), lambda: "v2", ttl_s=0.5
-    )
+    cache.get_or_compute(("android", "serial1", "ui_nodes"), lambda: "v1", ttl_s=0.5)
+    cache.get_or_compute(("android", "serial2", "ui_nodes"), lambda: "v2", ttl_s=0.5)
 
     cache.invalidate(platform="android", device_serial="serial1")
 
@@ -128,9 +126,7 @@ def test_invalidate_all_clears_everything():
 
 def test_invalidate_device_helper():
     cache.invalidate()
-    cache.get_or_compute(
-        ("android", "serialX", "ui_nodes"), lambda: "v", ttl_s=0.5
-    )
+    cache.get_or_compute(("android", "serialX", "ui_nodes"), lambda: "v", ttl_s=0.5)
 
     cache.invalidate_device_ui("serialX", platform="android")
 

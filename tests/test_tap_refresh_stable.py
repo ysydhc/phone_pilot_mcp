@@ -19,6 +19,7 @@ from phone_pilot.script_api.context import ScriptContext
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_ctx() -> ScriptContext:
     ctx = MagicMock(spec=ScriptContext)
     ctx.auto_screenshot = False
@@ -31,9 +32,11 @@ def _make_ctx() -> ScriptContext:
 # C: find_text stable param
 # ---------------------------------------------------------------------------
 
+
 def test_find_text_stable_param_defaults_to_true():
     """find_text 默认 stable=True。"""
     import inspect
+
     sig = inspect.signature(find_text)
     assert sig.parameters["stable"].default is True
 
@@ -51,7 +54,10 @@ def test_find_text_stable_waits_before_search():
 
     with patch("phone_pilot.script_api.find.time.sleep", side_effect=_mock_sleep):
         # 模拟底层库返回有效结果
-        with patch("phone_pilot.script_api.find._uia_find_text_boxes", return_value=[{"text": "test"}]):
+        with patch(
+            "phone_pilot.script_api.find._uia_find_text_boxes",
+            return_value=[{"text": "test"}],
+        ):
             result = find_text(ctx, "test", stable=True, retry_attempts=1)
 
     assert 0.3 in sleep_calls, f"Expected 0.3s stable wait, got {sleep_calls}"
@@ -70,7 +76,10 @@ def test_find_text_stable_false_skips_wait():
         sleep_calls.append(seconds)
 
     with patch("phone_pilot.script_api.find.time.sleep", side_effect=_mock_sleep):
-        with patch("phone_pilot.script_api.find._uia_find_text_boxes", return_value=[{"text": "test"}]):
+        with patch(
+            "phone_pilot.script_api.find._uia_find_text_boxes",
+            return_value=[{"text": "test"}],
+        ):
             result = find_text(ctx, "test", stable=False, retry_attempts=1)
 
     assert 0.3 not in sleep_calls, f"stable=False 不应等待 0.3s, got {sleep_calls}"
@@ -80,6 +89,7 @@ def test_find_text_stable_false_skips_wait():
 # ---------------------------------------------------------------------------
 # B: TextElement.tap() coordinate refresh
 # ---------------------------------------------------------------------------
+
 
 def test_tap_refreshes_when_dump_is_stale():
     """当 dump 时间戳过旧时，tap() 应自动 refresh 坐标。"""
@@ -140,23 +150,23 @@ def test_tap_refresh_failure_uses_original_coords():
     assert args[0][1] == 45
 
 
-def test_tap_with_wait_refreshes_after_sleep():
-    """wait > 0.5 时，sleep 后应再次 refresh。"""
+def test_tap_with_wait_sleeps_after_tap():
+    """wait > 0 时，tap 后应 sleep(wait)。"""
     elem = TextElement(x=10, y=20, width=100, height=50, text="test")
     elem._ops = {"tap_xy": MagicMock(return_value={"ok": True})}
-    elem.meta = {"_dump_ts": time.time() - 0.2}  # 很新
+    elem.meta = {"_dump_ts": time.time()}  # 很新，不会触发 refresh
 
-    refreshed = TextElement(x=20, y=30, width=100, height=50, text="test")
-    refreshed._ops = elem._ops
+    sleep_calls = []
 
-    with patch.object(elem, "refresh", return_value=refreshed) as mock_refresh:
-        with patch("time.sleep"):
+    def _mock_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    with patch.object(elem, "refresh", return_value=None) as mock_refresh:
+        with patch("phone_pilot.core.ui.element.time.sleep", side_effect=_mock_sleep):
             res = elem.tap(wait=1.0)
 
-    # wait=1.0 > 0.5，应该在 sleep 后 refresh
-    assert mock_refresh.called
     assert res["ok"] is True
-    # 应该用新坐标
-    args = elem._ops["tap_xy"].call_args
-    assert args[0][0] == 70  # (20+50, 30+25)
-    assert args[0][1] == 55
+    # wait=1.0 应该在 tap 后 sleep 1.0s
+    assert 1.0 in sleep_calls
+    # dump 很新，不应 refresh
+    assert not mock_refresh.called

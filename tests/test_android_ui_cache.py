@@ -44,7 +44,9 @@ def test_dump_ui_hierarchy_recomputes_after_invalidate():
         driver = AndroidDriver("test_serial_cache_2")
 
         driver.ui.dump_ui_hierarchy()
-        ui_snapshot_cache.invalidate_device_ui("test_serial_cache_2", platform="android")
+        ui_snapshot_cache.invalidate_device_ui(
+            "test_serial_cache_2", platform="android"
+        )
         driver.ui.dump_ui_hierarchy()
 
         assert mock_dump.call_count == 2
