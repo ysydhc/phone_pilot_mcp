@@ -603,6 +603,29 @@ class HarmonyDriver:
 
         return clear_background_processes(self._device_serial)
 
+    def shell(self, cmd: str) -> dict:
+        """通过 hdc shell 在设备上执行任意命令。
+        Execute arbitrary command on device via hdc shell.
+
+        Returns:
+            dict: {"ok": bool, "stdout": str, "stderr": str, "returncode": int}
+        """
+        from phone_pilot.harmony.hdc.runner import HdcCommandRunner
+        from phone_pilot.harmony.hdc.utils import hdc_prefix
+
+        proc = HdcCommandRunner.run(
+            hdc_prefix(self._device_serial) + ["shell", cmd],
+            check=False,
+            delay_s=0.0,
+            log_output=False,
+        )
+        return {
+            "ok": proc.returncode == 0,
+            "stdout": (proc.stdout or "").strip(),
+            "stderr": (proc.stderr or "").strip(),
+            "returncode": proc.returncode,
+        }
+
     # ---- file transfer ----
 
     def push_file(self, local_path: str, remote_path: str) -> dict:

@@ -214,6 +214,7 @@
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
 | CommandRunner (命令执行) | 已实现 | 已实现(HDC) | 未实现(有方案) | HdcCommandRunner |
+| shell (任意设备命令, DeviceDriver) | 已实现 | 已实现(HDC) | 不适用 | iOS 非越狱无设备端 shell, 返回 not_supported |
 | push_file (推送文件) | 已实现 | 已实现(HDC) | 已实现(pmd3) | hdc file send |
 | pull_file (拉取文件) | 已实现 | 已实现(HDC) | 已实现(pmd3) | hdc file recv |
 | wait_for_device | 已实现 | 已实现(HDC) | 未实现(有方案) | hdc wait |

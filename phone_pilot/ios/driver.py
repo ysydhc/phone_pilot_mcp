@@ -593,6 +593,11 @@ class iOSDriver:
         """Best-effort clear background apps. v1: not_supported."""
         return _err("not_supported")
 
+    def shell(self, cmd: str) -> dict:
+        """iOS 无宿主可执行的设备端 shell（非越狱）。v1: not_supported.
+        iOS has no device-side shell without jailbreak. v1: not_supported."""
+        return _err("not_supported", cmd=cmd)
+
     def device_info(self) -> dict:
         """Return device profile dict. Form-factor split (simctl / pmd lockdown)."""
         import json as _json
