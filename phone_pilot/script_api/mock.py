@@ -163,10 +163,22 @@ def mock_set_rule(
     body: dict[str, Any] | str | None,
     *,
     status: int = 200,
+    headers: dict[str, str] | None = None,
+    delay_ms: int = 0,
 ) -> dict[str, Any]:
     """添加或覆盖一条 mock 规则（经控制面客户端）。
 
     Add or overwrite a mock rule via the control-plane client.
+
+    Parameters
+    ----------
+    ctx: 脚本上下文 / Script execution context
+    method: HTTP 方法 / HTTP method
+    path: 匹配路径 / Match path
+    body: 响应体 / Response body
+    status: HTTP 状态码 / HTTP status code
+    headers: 自定义响应头 / Custom response headers
+    delay_ms: 响应延迟毫秒 / Response delay in milliseconds
 
     Returns
     -------
@@ -177,9 +189,15 @@ def mock_set_rule(
         handle: _MockHandle | None = getattr(ctx, "_mock_server", None)
         if handle is None:
             return {"ok": False, "error": "mock_server_not_running"}
-        return handle.client.set_rule(method, path, body, status=status)
+        return handle.client.set_rule(
+            method, path, body, status=status, headers=headers, delay_ms=delay_ms
+        )
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# Alias for naming consistency with mock_server_start / mock_server_stop
+mock_server_set_rule = mock_set_rule
 
 
 def mock_delete_rule(ctx: ScriptContext, rule_id: str) -> dict[str, Any]:
@@ -213,6 +231,8 @@ def mock_switch_rule(
     body: dict[str, Any] | str | None,
     *,
     status: int = 200,
+    headers: dict[str, str] | None = None,
+    delay_ms: int = 0,
 ) -> dict[str, Any]:
     """切换一条 mock 规则：先删除旧规则，再设置新规则。
 
@@ -226,6 +246,8 @@ def mock_switch_rule(
     path: 匹配路径 / Match path
     body: 响应体 / Response body
     status: HTTP 状态码 / HTTP status code
+    headers: 自定义响应头 / Custom response headers
+    delay_ms: 响应延迟毫秒 / Response delay in milliseconds
 
     Returns
     -------
@@ -240,7 +262,9 @@ def mock_switch_rule(
             handle.client.delete_rule(rule_id)
     except Exception:
         pass
-    return mock_set_rule(ctx, method, path, body, status=status)
+    return mock_set_rule(
+        ctx, method, path, body, status=status, headers=headers, delay_ms=delay_ms
+    )
 
 
 def mock_load_seed(ctx: ScriptContext, seed: dict[str, Any]) -> dict[str, Any]:
