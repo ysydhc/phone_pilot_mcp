@@ -374,7 +374,7 @@ def ensure_app_alive(
 
     # 2. force_restart → 先杀进程（一例一重置）/ kill first when force_restart
     if force_restart:
-        ctx.driver.force_stop(package)
+        ctx.driver.app.force_stop(package)
 
     # 3. 存活探测（ADR-4）；已存活且非 force_restart → 不拉起且跳过等待（R1）
     #    probe; alive without force_restart → no relaunch, skip ready wait (R1)
