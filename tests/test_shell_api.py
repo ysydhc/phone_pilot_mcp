@@ -18,7 +18,11 @@ def _make_ctx() -> ScriptContext:
 def test_shell_executes_command_on_device():
     """shell() 将命令透传给 driver.shell()。"""
     ctx = _make_ctx()
-    ctx.driver.shell.return_value = {"ok": True, "stdout": "package:com.example\n", "returncode": 0}
+    ctx.driver.shell.return_value = {
+        "ok": True,
+        "stdout": "package:com.example\n",
+        "returncode": 0,
+    }
 
     result = shell(ctx, "pm list packages com.example")
 

@@ -100,7 +100,9 @@ def _gen_tap_element(entry: dict) -> str | None:
     if type_:
         comment_parts.append(str(type_))
 
-    comment = f"  # recorded element: {'/'.join(comment_parts)}" if comment_parts else ""
+    comment = (
+        f"  # recorded element: {'/'.join(comment_parts)}" if comment_parts else ""
+    )
     return f"tap_xy(ctx, {int(center[0])}, {int(center[1])}){comment}"
 
 
@@ -108,7 +110,9 @@ def _gen_tap_element(entry: dict) -> str | None:
 # and returns one line of script_api source (without trailing newline),
 # or None to skip.
 CODEGEN: dict[str, Callable[[dict], str | None]] = {
-    "phone_tap": lambda e: f"tap_xy(ctx, {int(e.get('args', {}).get('x', 0))}, {int(e.get('args', {}).get('y', 0))})",
+    "phone_tap": lambda e: (
+        f"tap_xy(ctx, {int(e.get('args', {}).get('x', 0))}, {int(e.get('args', {}).get('y', 0))})"
+    ),
     "phone_tap_text": _gen_tap_text,
     "phone_tap_element": _gen_tap_element,
     "phone_input_text": lambda e: (
@@ -125,7 +129,9 @@ CODEGEN: dict[str, Callable[[dict], str | None]] = {
     "phone_long_press": lambda e: (
         f"ctx.driver.input.long_press({int(e.get('args', {}).get('x', 0))}, {int(e.get('args', {}).get('y', 0))})"
     ),
-    "phone_launch_app": lambda e: f"restart_app_pkg(ctx, {_py(e.get('args', {}).get('package', ''))})",
+    "phone_launch_app": lambda e: (
+        f"restart_app_pkg(ctx, {_py(e.get('args', {}).get('package', ''))})"
+    ),
     "phone_force_stop": lambda e: (
         f"ctx.driver.app.force_stop({_py(e.get('args', {}).get('package', ''))})"
     ),
@@ -143,8 +149,12 @@ CODEGEN: dict[str, Callable[[dict], str | None]] = {
     "phone_launch_from_home": lambda e: (
         f"launch_from_home(ctx, {_py(e.get('args', {}).get('query', ''))})"
     ),
-    "phone_screenshot": lambda e: f"screenshot(ctx, {_py(e.get('args', {}).get('name') or 'shot')})",
-    "phone_scroll_to_find": lambda e: f"scroll_to_find(ctx, {_py(e.get('args', {}).get('text', ''))})",
+    "phone_screenshot": lambda e: (
+        f"screenshot(ctx, {_py(e.get('args', {}).get('name') or 'shot')})"
+    ),
+    "phone_scroll_to_find": lambda e: (
+        f"scroll_to_find(ctx, {_py(e.get('args', {}).get('text', ''))})"
+    ),
     "phone_wait_for_element": _gen_wait_for_element,
 }
 
@@ -341,7 +351,15 @@ def _summarize_result(tool_name: str, result: Any) -> dict:
     """
     if not isinstance(result, dict):
         return {}
-    allowed = ("center", "label", "type", "text", "center_x", "center_y", "matched_count")
+    allowed = (
+        "center",
+        "label",
+        "type",
+        "text",
+        "center_x",
+        "center_y",
+        "matched_count",
+    )
     return {k: result[k] for k in allowed if k in result}
 
 

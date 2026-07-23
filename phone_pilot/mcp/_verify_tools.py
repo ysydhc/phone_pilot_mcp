@@ -40,6 +40,7 @@ async def phone_run_script(
     timeout_s: float = 120.0,
     repo_path: str = "",
     change_description: str = "",
+    install_apk: str = "",
 ) -> dict:
     """
     Execute a Python workflow script that uses script_api + chain.
@@ -50,22 +51,24 @@ async def phone_run_script(
 
     .. note::
         phone_pilot is an automation test tool, NOT a build tool.
-        It does NOT automatically compile or install APKs.
-        If you modify app code, build and install the APK manually before running the script.
+        It does NOT automatically compile APKs — use ``install_apk`` to install
+        a pre-built APK, or build externally before running the script.
         phone_pilot 是自动化测试工具，不是构建工具。
-        不会自动编译或安装 APK。如果修改了应用代码，
-        请先手动构建并安装 APK，然后再执行脚本。
+        不会自动编译 APK。使用 ``install_apk`` 安装预构建的 APK，
+        或在外部构建后再执行脚本。
 
     Args:
         path: Python script file path. 脚本文件路径。
         device_serial: Device serial (empty = auto-detect). 设备序列号。
         platform: Platform ("android"|"harmony"|"auto"). 平台。
         timeout_s: Execution timeout in seconds. 执行超时秒数。
-        repo_path: Git repo path for code change tracking. 被测项目 git 仓库路径（仅记录 diff，不触发构建）。
+        repo_path: Git repo path for git diff tracking. 被测项目 git 仓库路径（仅记录 diff，不触发构建）。
         change_description: Optional change description from agent. Agent 变更说明。
+        install_apk: Optional APK path to install before running the script.
+            运行脚本前先安装此 APK。空则跳过。
 
     Returns:
-        {ok, result, stdout, elapsed_ms, code_changes?, error?}
+        {ok, result, stdout, elapsed_ms, git_diff?, apk_installed?, error?}
     """
     import importlib.util
     import io
@@ -83,6 +86,20 @@ async def phone_run_script(
     serial, plat, err = resolved
     if err:
         return {"ok": False, "error": err}
+
+    # Install APK if requested
+    apk_installed: dict | None = None
+    if install_apk:
+        from phone_pilot.mcp._script_tools import _phone_install_app_sync
+
+        install_result = _phone_install_app_sync(serial, plat, install_apk)
+        if not install_result.get("ok"):
+            return {
+                "ok": False,
+                "error": f"install_apk failed: {install_result.get('error', 'unknown')}",
+                "install_result": install_result,
+            }
+        apk_installed = {"ok": True, "apk_path": str(install_apk)}
 
     ctx = ScriptContext(
         device_serial=serial or "",
@@ -117,12 +134,12 @@ async def phone_run_script(
     finally:
         elapsed_ms = (_time.monotonic() - t0) * 1000
 
-    # Code changes tracking
-    code_changes = None
+    # Git diff tracking (renamed from code_changes for clarity)
+    git_diff = None
     if repo_path:
         from phone_pilot.core.code_changes import capture_code_changes
 
-        code_changes = capture_code_changes(
+        git_diff = capture_code_changes(
             repo_path=repo_path,
             description=change_description,
         )
@@ -135,8 +152,12 @@ async def phone_run_script(
     }
     if error_msg:
         response["error"] = error_msg
-    if code_changes:
-        response["code_changes"] = code_changes
+    if git_diff:
+        response["git_diff"] = git_diff
+        # Backward-compat alias
+        response["code_changes"] = git_diff
+    if apk_installed:
+        response["apk_installed"] = apk_installed
 
     return response
 
