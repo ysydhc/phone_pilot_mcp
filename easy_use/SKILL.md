@@ -24,6 +24,8 @@ Agent 通过 `phone_*` MCP 工具逐步操作手机，适合探索、调试、�
 2. 操作成功 → Agent 分析操作路径，生成自动化脚本
 3. 用户可通过 `phone_run_script` 或 `python script.py` 反复执行
 
+> 提示：也可用 `phone_record_script_start` / `phone_record_script_stop`（script_record 类别）直接把一段操作会话录制成 script_api 脚本，再手动打磨（坐标点击转文本点击、加断言/重试）。
+
 ---
 
 ## MCP 工具速查
@@ -66,6 +68,8 @@ phone_discover_tools(category="ui_find")     # UI 查找（find_element/OCR/滚�
 phone_discover_tools(category="device")      # 设备详情（屏幕尺寸/设备画像）
 phone_discover_tools(category="input")       # 高级输入（长按/按键事件）
 phone_discover_tools(category="advanced")    # 高级功能（验证/内存/文件/剪贴板/网络/Shell/资源）
+phone_discover_tools(category="script_record")  # 录制 MCP 操作生成脚本 / 回放 trace
+phone_discover_tools(category="mock")        # 本地网络打桩 mock server
 
 # 3. 按关键词搜索
 phone_discover_tools(keyword="memory")       # 搜索并加载匹配的工具
@@ -128,13 +132,15 @@ phone_discover_tools(keyword="memory")       # 搜索并加载匹配的工具
 | `phone_checkpoint_save` | 保存屏幕状态检查点 |
 | `phone_checkpoint_diff` | 对比检查点差异 |
 
-#### logcat — 日志捕获
+#### logcat — 日志捕获与断言
 
 | 工具 | 说明 |
 |------|------|
 | `phone_start_logcat` | 开始后台捕获 logcat |
 | `phone_stop_logcat` | 停止 logcat 捕获 |
 | `phone_search_logcat` | 搜索 logcat 日志 |
+| `phone_logcat_since` | 读取某个时间点之后的日志（`logcat -T`） |
+| `phone_logcat_assert_sequence` | 验证多个模式按顺序出现（子序列匹配） |
 
 #### advanced — 高级功能
 
@@ -153,6 +159,37 @@ phone_discover_tools(keyword="memory")       # 搜索并加载匹配的工具
 | `phone_recordings_list` / `phone_recordings_get` | 录屏文件管理 |
 | `phone_replay_recording` | 回放录屏 |
 | `phone_push_and_run_monkey` | Monkey 测试 |
+
+#### script_record — 录制生成脚本
+
+将一段 MCP 操作会话直接录制成可运行的 script_api 脚本，或回放已捕获的 trace。
+
+| 工具 | 说明 |
+|------|------|
+| `phone_record_script_start` | 开始录制（此后每个白名单动作工具的调用被捕获） |
+| `phone_record_script_status` | 查询录制状态与已捕获的动作数 |
+| `phone_record_script_stop` | 停止录制，返回自动生成的 script_api 脚本源码 |
+| `phone_replay_trace` | 回放已捕获的动作 trace |
+
+> 注意：只捕获**动作类**工具（tap/swipe/input/launch/…），纯查询类（如 `phone_get_page_state`）不入录。
+
+#### mock — 本地网络打桩
+
+宿主机侧 HTTP mock server，用于给 App 的网络请求打桩（控制面/数据面分离，仅数据面经 `adb reverse` 暴露给设备）。
+
+| 工具 | 说明 |
+|------|------|
+| `phone_mock_start` | 启动 mock server（自动建立 adb reverse 隧道） |
+| `phone_mock_stop` | 停止 mock server 并拆除隧道 |
+| `phone_mock_set_rule` | 添加/覆盖一条规则（method + path） |
+| `phone_mock_delete_rule` | 删除一条规则 |
+| `phone_mock_load_seed` | 批量加载规则集 |
+| `phone_mock_get_rules` | 查看当前所有规则 |
+| `phone_mock_get_requests` | 查看已收到的请求日志（含未命中的 404） |
+| `phone_mock_status` | 查询 server 状态与已收请求数 |
+| `phone_mock_assert_switched` | 断言 App 已把网络请求切到 mock（收到 ≥ N 个请求） |
+
+> 典型用法：`start → set_rule → 触发 App 请求 → assert_switched → get_requests`。请求日志是判断 App 是否已切换的信号。
 
 ---
 
@@ -184,6 +221,12 @@ phone_discover_tools(keyword="memory")       # 搜索并加载匹配的工具
 | `phone_memory_check_leak(package=P)` | `mem_check_leak(ctx, package=P)` |
 | `phone_open_deeplink(uri=U)` | `keyevent(ctx, "KEYCODE_HOME")` 后 shell 调用，或用 `chain` |
 | `phone_unlock()` | `unlock_device(ctx)` |
+| `phone_wait_for_element(text=T, require_clickable=True)` + `phone_tap_*` | `tap_when_ready(ctx, text=T)`（等待+点击一体） |
+| `phone_logcat_since(mark=M)` | `logcat_since(ctx, M)` |
+| `phone_logcat_assert_sequence(patterns=[...])` | `logcat_assert_sequence(ctx, *patterns)` |
+| `phone_mock_start()` | `mock_server_start(ctx)` |
+| `phone_mock_set_rule(...)` | `mock_set_rule(ctx, method, path, body)` |
+| `phone_mock_assert_switched()` | `mock_assert_switched(ctx)` |
 | 等待 N 秒 | `chain(ctx).wait(N).done()` 或 `import time; time.sleep(N)` |
 
 ---
@@ -232,6 +275,8 @@ if __name__ == "__main__":
 6. **关键步骤加截图**：`screenshot(ctx, "step_name")` 留下证据
 7. **录屏包裹核心流程**：`ctx.start_record("name")` ... `ctx.stop_record()`
 8. **返回值约定**：`main()` 返回 `0` 表示成功，非 `0` 表示失败
+9. **用健壮交互替代固定 sleep**：时序不稳/易误触的步骤用 `tap_when_ready(ctx, text=...)`（等到可点再点）、`safe_tap(...)`（误触自动回退）、`safe_close(...)`（完整关闭流程），少用裸 `time.sleep` + `tap_xy`
+10. **多用例用 `run_cases` 编排**：区分被测缺陷（fail）与环境问题（`EnvError`，可重试），环境不满足抛 `SkipCase`
 
 ### 从 MCP 操作转化为脚本的步骤
 
@@ -317,6 +362,35 @@ elem.screenshot_crop(name="xx")  # 裁剪元素区域截图
 | `screenshot(ctx, name)` | 截图保存 |
 | `screenshot_annotated(ctx, name)` | 截图+元素标注 |
 
+### 健壮交互（推荐，解决时序与误触）
+
+固定 `sleep` 时序不稳、元素刚出现就点导致误触、误点广告跳出 app 等问题，用以下函数替代裸 `tap`：
+
+| 函数 | 说明 |
+|------|------|
+| `tap_when_ready(ctx, text=/resource_id=, timeout_s=10, require_clickable=True)` | 轮询等到元素**可点击**再点；点击坐标与匹配来自同一次查询（无漂移）；超时**不点击** |
+| `safe_tap(ctx, x, y, expect_activity=/expect_package=)` | 点击后校验前台状态；若跳出 app 或页面不符 → 自动 `go_back` 并复验恢复 |
+| `safe_close(ctx, resource_id=/text=, fallback_coord=, max_attempts=3)` | 完整关闭流程：等按钮就绪 → 点击 → 验证消失 → 失败回退重试；可回退到固定坐标 |
+
+### 等待条件
+
+| 函数 | 说明 |
+|------|------|
+| `wait_for_element_appear(ctx, text=/resource_id=, timeout_s=, require_clickable=, require_enabled=)` | 等待元素出现（可要求可交互态） |
+| `wait_for_element_disappear(ctx, ...)` | 等待元素消失 |
+| `wait_for_activity(ctx, activity, timeout_s=)` | 等待到达目标 Activity（已在则立即成功） |
+| `wait_for_activity_change(ctx, from_activity=None, to_activity=None)` | 确认发生了**真实跳转**（基线+离开），不同于 `wait_for_activity` |
+| `wait_for_page_stable(ctx, timeout_s=)` | 等待页面稳定（连续多帧无变化） |
+
+### UIAutomator 逃生通道（不常用）
+
+无文本/无 ID 的极端场景兜底，日常应优先用 `find_text`：
+
+| 函数 | 说明 |
+|------|------|
+| `dump_ui(ctx)` | dump 当前 UI 树 |
+| `raw_uia(ctx, selector, by=)` | 直接用 UIAutomator selector 定位 |
+
 ### App 控制
 
 | 函数 | 说明 |
@@ -342,6 +416,76 @@ elem.screenshot_crop(name="xx")  # 裁剪元素区域截图
 |------|------|
 | `logcat_find(ctx, pattern, regex=False)` | 搜索 logcat |
 | `logcat_wait_for(ctx, *patterns, timeout_s=30)` | 等待日志出现 |
+| `logcat_mark(ctx, tag=)` | 记录设备当前时间点（配合 `logcat_since`） |
+| `logcat_since(ctx, mark, tag_filter=)` | 读取某时间点之后的日志（`logcat -T`） |
+| `logcat_assert_sequence(ctx, *patterns, timeout_s=)` | 验证多模式按顺序出现（子序列匹配） |
+| `assert_event(ctx, event, ...)` | 断言某业务事件日志出现 |
+
+### 广播命令总线（Android）
+
+给被测 App 发 `am broadcast` 触发内部命令，并可等待 ACK 日志闭环；含注入加固（action/extras 白名单校验）。
+
+| 函数 | 说明 |
+|------|------|
+| `send_broadcast(ctx, action, extras=, package=, wait_ack=, ack_timeout_s=8, ack_tag=)` | 发广播；`wait_ack` 非空时发送前打标、发送后区间轮询 ACK 子串。返回 `{ok, ack_seen, line, reason, cmd}` |
+| `ensure_app_alive(ctx, package, scheme_url=, ready_event=, timeout_s=15, force_restart=False)` | 确保进程存活：`pidof`→`ps` 两级探测，必要时 scheme 冷启动并等就绪日志。返回 `{ok, pid, launched, ready_seen, reason}` |
+
+> Android 8+ 会静默丢弃隐式广播，务必传 `package=` 或 `component=` 做定向。
+
+### 用例编排框架
+
+`setup → act → check → teardown` 的用例基类，`run_cases` 批量执行；区分「用例失败(fail)」与「环境失败(env_error，可重试)」。
+
+```python
+from phone_pilot.script_api import TestCase, run_cases, EnvError, SkipCase
+
+class LoginCase(TestCase):
+    name = "登录流程"
+    def setup(self, ctx):
+        # 环境准备；不满足抛 EnvError（触发清场重试）或 SkipCase（跳过）
+        if not find_text(ctx, "登录入口"):
+            raise EnvError("app_not_ready")
+    def act(self, ctx):
+        find_text(ctx, "登录").tap(wait=2)
+    def check(self, ctx):
+        # 返回 None/True → pass；False/含 ok=False 的 dict → fail
+        return find_text(ctx, "首页") is not None
+    def teardown(self, ctx):
+        restart_app_pkg(ctx, PACKAGE)  # setup 必须能自足重建环境
+
+result = run_cases(ctx, [LoginCase()], retry_env_errors=1, max_total_s=300)
+# result = {"ok", "total", "pass", "fail", "env_error", "error", "skip", "results": [...]}
+```
+
+| 组件 | 说明 |
+|------|------|
+| `TestCase` | 用例基类，覆写 `setup/act/check/teardown`，`setup_retries` 控制 setup 重试次数 |
+| `EnvError` | 环境级失败异常（可重试），从 setup/act 抛出触发清场重试 |
+| `SkipCase` | 前置条件缺失，跳过用例 |
+| `run_cases(ctx, cases, retry_env_errors=1, max_total_s=None)` | 批量执行；env_error 整例重跑，超预算的剩余用例记 skip |
+
+### 网络 Mock（宿主机侧打桩）
+
+给 App 网络请求打桩：`mock_server_start` 启动 server 并建立 `adb reverse` 隧道，`run_script` 结束时自动拆除。
+
+```python
+mock_server_start(ctx)                                    # 启动 + reverse 隧道
+mock_set_rule(ctx, "GET", "/api/config", {"enabled": True})  # 写规则
+# ... 触发 App 请求 ...
+mock_assert_switched(ctx, min_hits=1, timeout_s=10)       # 断言 App 已切到 mock
+```
+
+| 函数 | 说明 |
+|------|------|
+| `mock_server_start(ctx, data_port=0, ctrl_port=0, seed=None)` | 启动 mock server + adb reverse |
+| `mock_server_stop(ctx)` | 停止并拆隧道（幂等，run_script 自动调用） |
+| `mock_set_rule(ctx, method, path, body, status=200, headers=, delay_ms=0)` | 添加/覆盖规则 |
+| `mock_switch_rule(ctx, method, path, body, ...)` | 切换规则（先删旧再设新，常用于"无数据→有数据") |
+| `mock_delete_rule(ctx, rule_id)` | 删除规则（`rule_id` 形如 `GET:/path`) |
+| `mock_load_seed(ctx, seed)` | 批量加载规则集 |
+| `mock_assert_switched(ctx, min_hits=1, timeout_s=10)` | 断言 App 已把请求切到 mock；超时返回诊断提示 |
+
+> 仅支持明文 HTTP（TLS 被绕过），App debug 包需允许对 `127.0.0.1` 的 cleartext 流量。
 
 ### 执行器
 
