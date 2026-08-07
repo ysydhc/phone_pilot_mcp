@@ -183,19 +183,20 @@ class AndroidUIDriver:
         """Bind UI driver to a device serial."""
         self._device_serial = device_serial
 
-    def dump_ui_hierarchy(self) -> str:
+    def dump_ui_hierarchy(self, *, compressed: bool = True) -> str:
         """Dump current UI hierarchy as XML.
 
         使用 ui_snapshot_cache 做短 TTL 缓存（默认 500ms），避免同一逻辑步骤内
         多次 dump_ui_nodes / find_elements / collect_all_texts 重复触发底层 dump。
         动作类操作成功后应通过 ui_snapshot_cache.invalidate_device_ui 失效。
+        缓存 key 按 compressed 维度隔离，避免压缩/非压缩两种模式的缓存互相读串。
         """
         from phone_pilot.core import ui_snapshot_cache
 
-        key = ("android", self._device_serial, "ui_xml")
+        key = ("android", self._device_serial, "ui_xml", compressed)
 
         def _compute() -> str:
-            result = dump_ui_xml(self._device_serial)
+            result = dump_ui_xml(self._device_serial, compressed=compressed)
             if not result.get("ok"):
                 raise RuntimeError(f"Failed to dump UI: {result.get('error')}")
             return result.get("xml", "")

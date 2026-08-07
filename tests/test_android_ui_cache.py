@@ -83,3 +83,19 @@ def test_dump_ui_nodes_uses_cached_hierarchy():
         # dump_ui_nodes calls dump_ui_hierarchy internally; with cache,
         # the underlying dump_ui_xml should only be called once.
         assert mock_dump.call_count == 1
+
+
+def test_dump_ui_hierarchy_compressed_dimension_isolated():
+    """compressed=True 和 compressed=False 的缓存不应互相污染。"""
+    ui_snapshot_cache.invalidate()
+
+    with patch(
+        "phone_pilot.android.driver.dump_ui_xml",
+        return_value=_fake_dump_result("<hierarchy/>"),
+    ) as mock_dump:
+        driver = AndroidDriver("test_serial_cache_4")
+
+        driver.ui.dump_ui_hierarchy(compressed=True)
+        driver.ui.dump_ui_hierarchy(compressed=False)
+
+        assert mock_dump.call_count == 2
