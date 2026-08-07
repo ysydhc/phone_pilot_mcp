@@ -52,6 +52,7 @@ from .actions import (
 from .logcat import (
     logcat_find,
     logcat_wait_for,
+    logcat_wait_for_tagged,
     logcat_mark,
     logcat_since,
     logcat_assert_sequence,
@@ -195,6 +196,7 @@ __all__ = [
     # 日志
     "logcat_find",
     "logcat_wait_for",
+    "logcat_wait_for_tagged",
     "logcat_mark",
     "logcat_since",
     "logcat_assert_sequence",

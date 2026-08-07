@@ -429,6 +429,69 @@ def logcat_wait_for(
     return {"ok": False, "hits": found, "missing": missing}
 
 
+def logcat_wait_for_tagged(
+    ctx: ScriptContext, pattern: str, *, tag: str, timeout_s: float = 25
+) -> dict:
+    """按 tag 精确等待 pattern：轮询 + 超时后一次兜底扫描，附带诊断片段。
+    Wait for pattern under a tag: poll then a single fallback scan on timeout.
+
+    兜底扫描固定使用子串语义（regex=False），与轮询阶段 logcat_wait_for()
+    的匹配语义保持一致，避免 pattern 含正则特殊字符时两阶段结果不一致
+    （见设计文档 §4.6 ADR）。
+    The fallback scan always uses substring semantics (regex=False), matching
+    the polling phase's semantics, so patterns containing regex special
+    characters don't produce inconsistent results between the two phases
+    (see design doc §4.6 ADR).
+
+    进入即 logcat_mark 打标；mark 失败（None）时立即返回 mark_failed，
+    绝不静默降级（ADR-13）。
+    Marks the device time on entry; if the mark fails (None) it returns
+    mark_failed immediately and never silently degrades (ADR-13).
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        pattern: 查找字符串（子串语义）/ Search string (substring semantics)
+        tag: logcat tag 过滤（设备端）/ logcat tag filter (device-side)
+        timeout_s: 最长等待秒数 / Max wait seconds
+
+    Returns / 返回值:
+        dict: {"ok": bool, "matched_line": str | None, "elapsed_s": float,
+               "tail": list[str], "tag_has_logs": bool}
+    """
+    since = logcat_mark(ctx, tag=tag)
+    if since is None:
+        return {
+            "ok": False,
+            "matched_line": None,
+            "elapsed_s": 0.0,
+            "tail": [],
+            "error": "mark_failed",
+        }
+
+    start = time.monotonic()
+    poll_result = logcat_wait_for(ctx, pattern, tag=tag, timeout_s=timeout_s)
+    if poll_result.get("ok"):
+        lines = poll_result.get("hits", {}).get(pattern, [])
+        return {
+            "ok": True,
+            "matched_line": lines[0] if lines else None,
+            "elapsed_s": round(time.monotonic() - start, 3),
+            "tail": [],
+            "tag_has_logs": True,
+        }
+
+    fallback = logcat_since(ctx, since, pattern=pattern, tag=tag, regex=False)
+    all_lines = fallback.get("lines", [])
+    hits = fallback.get("hits", [])
+    return {
+        "ok": bool(hits),
+        "matched_line": hits[0] if hits else None,
+        "elapsed_s": round(time.monotonic() - start, 3),
+        "tail": all_lines[-20:],
+        "tag_has_logs": bool(all_lines),
+    }
+
+
 def assert_event(
     ctx: ScriptContext,
     event: str,
