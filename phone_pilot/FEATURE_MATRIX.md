@@ -2,7 +2,7 @@
 
 > 本文档追踪 phone_pilot 在三个平台上的功能实现状态。  
 > 每实现一个功能后必须更新本文档。  
-> 最后更新: 2026-07-22
+> 最后更新: 2026-08-07
 
 ## 状态说明
 
@@ -58,9 +58,11 @@
 | pick_scrollable_bounds (滚动容器) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 从 UI 树提取 scrollable 节点 |
 | infer_scroll_directions (推断滚动方向) | 已实现 | 未实现(有方案) | 未实现(有方案) | 待实现 |
 | UINode 统一数据类 | 已实现 | 已实现 | 已实现 | core/ui_node.py, 两平台共用 |
-| dump_ui_nodes (统一节点列表) | 已实现 | 已实现 | 已实现(WDA) | UIDriver protocol, 返回 list[UINode] |
+| dump_ui_nodes (统一节点列表) | 已实现 | 已实现 | 已实现(WDA) | UIDriver protocol, 返回 list[UINode]；Android 新增 `compressed` 参数（默认 True，向后兼容），Harmony/iOS 暂未支持该参数，待评估 |
+| find_elements (选择器查找元素) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | UIDriver protocol, 返回 list[dict]（含 center_x/center_y）；Android 新增 `compressed`/`auto_uncompressed_fallback` 参数，结果新增 `bounds_rect`/`visible`/`visible_ratio` 富化字段（core/geometry.compute_visibility）；Harmony/iOS 尚未接入以上新增参数与字段，待评估 |
 | collect_all_texts (收集 UI 文本) | 已实现 | 已实现 | 已实现(WDA) | UIDriver protocol |
 | dump_memory_profile (内存快照) | 已实现 | 不适用 | 不适用 | DeviceDriver protocol, Android hprof |
+| scroll_to (滚动到目标可见比例) | 已实现 | 未实现(有方案) | 未实现(有方案) | script_api.scroll_to()，基于 find_elements 的 bounds_rect + compute_visibility 迭代滑动到目标可见比例；可参考已有 UIElement.scroll / scroll_to_find 方案移植 Harmony/iOS |
 
 ## 4. UI 查找与交互 (UI Finder)
 

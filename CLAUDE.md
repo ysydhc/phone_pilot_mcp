@@ -102,6 +102,9 @@ MCP tools (for agents) and script_api (for Python scripts) are two surfaces over
 | `phone_search_logcat(pattern)` | `logcat_find(ctx, pattern)` / `logcat_since` / `logcat_assert_sequence` |
 | `phone_run_script(path)` | `run_script(main, ctx=...)` (the harness scripts call) |
 | `phone_mock_start` / `phone_mock_set_rule` / `phone_mock_assert_switched` | `mock_server_start(ctx)` / `mock_set_rule(ctx, ...)` / `mock_assert_switched(ctx)` |
+| `phone_get_screen_size()` (dict) | `get_screen_size(ctx)` (dict) — both wrap the same driver call; the underlying `driver/Protocol` layer (`ctx.driver.screen.get_screen_size()`) still returns a `tuple[int, int]` |
+
+**Public-surface return-shape convention**: any entry point aimed at agents/script authors (public `script_api` functions + MCP tools) that returns a structured, multi-field result must use a `dict`. The `driver`/`Protocol` contract layer underneath may keep legacy `tuple`/lightweight value types for historical reasons (e.g. `get_screen_size()`), but whenever the two layers' shapes differ, the wrapping function's docstring must say so explicitly (see `get_screen_size(ctx)` in `script_api/_helpers.py` for an example).
 
 ### Network mocking (`phone_pilot/mock/`)
 
