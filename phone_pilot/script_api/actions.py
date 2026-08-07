@@ -617,6 +617,7 @@ def safe_tap(
     on_mistap: str = "go_back",
     max_recover: int = 1,
     settle_s: float = 0.6,
+    escalate_to: Optional[str] = None,
 ) -> dict:
     """带误触保护的点击：点击后校验前台状态，跳出目标或跳错页时自动回退。
     Tap with mis-tap protection: verify foreground state after tapping and
@@ -628,6 +629,14 @@ def safe_tap(
     误触时执行 on_mistap（默认 go_back），并复验是否回到点击前的 package。
     Solves the "mis-tap jumps out to another app" problem.
 
+    若 `max_recover` 次 go_back 后仍未恢复，且 `escalate_to="restart_app"`，则
+    直接重启点击前的 app（`restart_app_pkg`）作为最后手段；此时会丢失该 app
+    的页面状态（`state_lost=True`），调用方需自行重新导航。
+    If still not recovered after `max_recover` go_back attempts and
+    `escalate_to="restart_app"`, restart the pre-tap app as a last resort;
+    this loses the app's page state (`state_lost=True`) and the caller must
+    re-navigate.
+
     Parameters / 参数:
         ctx: 脚本执行上下文 / Script execution context
         x, y: 点击坐标 / Tap coordinates
@@ -637,6 +646,12 @@ def safe_tap(
         on_mistap: 误触时的动作 "go_back" | "none" / Recovery action on mis-tap
         max_recover: 最大回退尝试次数 / Max recovery attempts
         settle_s: 点击后等待界面稳定的秒数 / Settle time after tap before checking
+        escalate_to: go_back 用尽仍未恢复时的升级动作，目前仅支持
+                     "restart_app"（重启点击前的 app）；None 表示不升级。
+                     Escalation action when go_back attempts are exhausted
+                     and recovery still failed; currently only "restart_app"
+                     is supported. None disables escalation (default, and
+                     matches pre-existing behavior exactly).
 
     Returns / 返回值:
         dict: {
@@ -646,6 +661,10 @@ def safe_tap(
             "before": {package, activity},
             "after": {package, activity}, # 最终状态
             "recover_action": str|None,
+            "escalated": bool,            # 是否触发了 escalate_to 升级动作
+            "escalate_action": str|None,  # 实际触发的升级动作
+            "state_lost": bool,           # 升级动作是否可能丢失了页面状态
+            "focus_unavailable": bool,    # 最终 after 是否无法判定（package/activity 均为空）
         }
     """
     before = _current_focus(ctx)
@@ -687,6 +706,10 @@ def safe_tap(
             "before": before,
             "after": after,
             "recover_action": None,
+            "escalated": False,
+            "escalate_action": None,
+            "state_lost": False,
+            "focus_unavailable": not after.get("package") and not after.get("activity"),
         }
 
     _runner_log(
@@ -712,6 +735,24 @@ def safe_tap(
             f"  [safe_tap] 回退{'成功' if recovered else '失败'}: 当前 {after['package']}"
         )
 
+    focus_unavailable = not after.get("package") and not after.get("activity")
+
+    escalated = False
+    state_lost = False
+    if not recovered and escalate_to == "restart_app":
+        _runner_log(
+            f"  [safe_tap] 回退未恢复，升级为重启 app: {before['package']}"
+        )
+        restart_result = restart_app_pkg(ctx, before["package"])
+        escalated = True
+        state_lost = True
+        after = _current_focus(ctx)
+        focus_unavailable = not after.get("package") and not after.get("activity")
+        recovered = bool(restart_result.get("ok")) and (
+            not focus_unavailable
+            and (not before["package"] or after["package"] == before["package"])
+        )
+
     return {
         "ok": True,
         "tapped": True,
@@ -720,6 +761,10 @@ def safe_tap(
         "before": before,
         "after": after,
         "recover_action": on_mistap if on_mistap != "none" else None,
+        "escalated": escalated,
+        "escalate_action": escalate_to if escalated else None,
+        "state_lost": state_lost,
+        "focus_unavailable": focus_unavailable,
     }
 
 
