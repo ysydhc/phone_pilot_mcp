@@ -37,6 +37,16 @@ from phone_pilot.android.ui.automator import (
 
 from typing import Any
 
+# `auto_uncompressed_fallback` 支持：容器类名启发式清单 + 按 serial 存储的冷却状态，
+# 避免压缩 dump 命中为空时对每一次调用都重复触发一次非压缩兜底 dump（代价更高）。
+_CONTAINER_CLASS_HEURISTIC = (
+    "FrameLayout",
+    "ViewGroup",
+    "LinearLayout",
+)
+_fallback_cooldown_until: dict[str, float] = {}
+_FALLBACK_COOLDOWN_S = 2.0
+
 
 def _ensure_str(val: Any) -> str:
     """Ensure a value is a string, decoding bytes if necessary."""
@@ -182,6 +192,10 @@ class AndroidUIDriver:
     def __init__(self, device_serial: str):
         """Bind UI driver to a device serial."""
         self._device_serial = device_serial
+        # 最近一次 auto_uncompressed_fallback 兜底 dump 的错误（若有）。
+        # find_elements 的返回类型是 list[dict]，无法在返回值里区分"没找到"
+        # 和"兜底 dump 本身失败"，因此把错误信息记录在这里供上层查询。
+        self._last_fallback_error: Optional[str] = None
 
     def dump_ui_hierarchy(self, *, compressed: bool = True) -> str:
         """Dump current UI hierarchy as XML.
@@ -227,31 +241,12 @@ class AndroidUIDriver:
         # Defensive: ensure every entry is str, decoding bytes if needed
         return [_ensure_str(t) for t in raw]
 
-    def find_elements(self, selector: dict, *, compressed: bool = True) -> list[dict]:
+    def _match_nodes(self, nodes, selector: dict) -> list[dict]:
+        """对已解析的节点列表按 selector 逐字段匹配，返回命中节点的 dict 列表。
+
+        供 `_find_elements_once` 的主匹配路径与 auto_uncompressed_fallback
+        兜底路径共用，避免逐字段匹配逻辑重复。
         """
-        Find UI elements matching selector.
-
-        Selector keys:
-        - text: Exact text match
-        - text_contains: Partial text match
-        - desc: Content description match
-        - desc_contains: Partial content description match
-        - resource_id: Resource ID match
-        - class_name: Class name match
-        - clickable: Boolean
-        - enabled: Boolean
-
-        Args:
-            selector: 选择器字典，见上。
-            compressed: 是否使用压缩 dump（默认 True，向后兼容）。压缩模式会剔除
-                无 accessibility 意义的纯容器节点（如无 text/desc/clickable 的
-                FrameLayout）；如果怀疑目标是这类容器，显式传 compressed=False。
-        """
-        # Dump and parse UI
-        xml = self.dump_ui_hierarchy(compressed=compressed)
-        nodes = parse_uiautomator_nodes(xml)
-
-        # Apply filters
         results = []
         for node in nodes:
             match = True
@@ -308,6 +303,15 @@ class AndroidUIDriver:
 
             if match:
                 results.append(node.to_dict())
+        return results
+
+    def _find_elements_once(self, selector: dict, *, compressed: bool) -> list[dict]:
+        """执行一次 dump + 解析 + 逐字段匹配（含翻译兜底），不含自动降级重试逻辑。"""
+        # Dump and parse UI
+        xml = self.dump_ui_hierarchy(compressed=compressed)
+        nodes = parse_uiautomator_nodes(xml)
+
+        results = self._match_nodes(nodes, selector)
 
         # Translation fallback for text/desc selectors
         if not results and isinstance(selector, dict):
@@ -379,6 +383,72 @@ class AndroidUIDriver:
                         break
 
         return results
+
+    def find_elements(
+        self,
+        selector: dict,
+        *,
+        compressed: bool = True,
+        auto_uncompressed_fallback: bool = False,
+    ) -> list[dict]:
+        """
+        Find UI elements matching selector.
+
+        Selector keys:
+        - text: Exact text match
+        - text_contains: Partial text match
+        - desc: Content description match
+        - desc_contains: Partial content description match
+        - resource_id: Resource ID match
+        - class_name: Class name match
+        - clickable: Boolean
+        - enabled: Boolean
+
+        Args:
+            selector: 选择器字典，见上。
+            compressed: 是否使用压缩 dump（默认 True，向后兼容）。压缩模式会剔除
+                无 accessibility 意义的纯容器节点（如无 text/desc/clickable 的
+                FrameLayout）；如果怀疑目标是这类容器，显式传 compressed=False。
+            auto_uncompressed_fallback: 可选开关（默认 False，向后兼容）。开启后，
+                当 compressed=True 的查询结果为空、且 selector 的 class_name 命中
+                容器类名启发式（FrameLayout/ViewGroup/LinearLayout 子串）时，自动
+                触发一次 compressed=False 的兜底查询；命中的兜底结果每个元素会带
+                `from_uncompressed: True` 标记。为避免每次空结果都触发一次代价更高
+                的非压缩 dump，同一 device_serial 在 `_FALLBACK_COOLDOWN_S` 秒内只
+                会触发一次兜底。兜底 dump 本身失败时不会静默当作"没找到"——错误信息
+                记录在 `self._last_fallback_error`，供调用方查询区分。
+        """
+        results = self._find_elements_once(selector, compressed=compressed)
+        if results or not auto_uncompressed_fallback or compressed is False:
+            return results
+
+        class_name = str(selector.get("class_name") or "")
+        if not any(h in class_name for h in _CONTAINER_CLASS_HEURISTIC):
+            return results
+
+        import time as _time
+
+        now = _time.monotonic()
+        if _fallback_cooldown_until.get(self._device_serial, 0) > now:
+            return results
+        _fallback_cooldown_until[self._device_serial] = now + _FALLBACK_COOLDOWN_S
+
+        # 命中启发式说明压缩 dump 可能剔除了目标容器节点；连带失效压缩缓存，
+        # 避免后续查询在 TTL 窗口内复用同一份"看不到目标"的压缩快照。
+        from phone_pilot.core import ui_snapshot_cache
+
+        ui_snapshot_cache.invalidate_device_ui(self._device_serial, platform="android")
+
+        fallback_xml_result = dump_ui_xml(self._device_serial, compressed=False)
+        if not fallback_xml_result.get("ok"):
+            self._last_fallback_error = fallback_xml_result.get("error")
+            return results
+        self._last_fallback_error = None
+        fallback_nodes = parse_uiautomator_nodes(fallback_xml_result.get("xml", ""))
+        fallback_results = self._match_nodes(fallback_nodes, selector)
+        for r in fallback_results:
+            r["from_uncompressed"] = True
+        return fallback_results
 
     def get_current_activity(self) -> dict:
         """Get current foreground activity info."""
