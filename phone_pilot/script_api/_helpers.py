@@ -35,6 +35,16 @@ def _get_screen_size(ctx: ScriptContext) -> Optional[tuple[int, int]]:
         return None
 
 
+def get_screen_size(ctx: ScriptContext) -> dict:
+    """获取屏幕尺寸，统一返回 dict（{"width": int, "height": int}）。
+
+    与 MCP 工具 phone_get_screen_size 的返回形状保持一致；driver/Protocol
+    层的 tuple 契约不受影响（见设计文档 §4.5 ADR）。异常原样冒泡，不吞异常。
+    """
+    width, height = ctx.driver.screen.get_screen_size()
+    return {"width": width, "height": height}
+
+
 def _input_swipe(
     ctx: ScriptContext, x1: int, y1: int, x2: int, y2: int, *, duration_ms: int
 ) -> dict:

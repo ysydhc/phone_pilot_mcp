@@ -100,6 +100,7 @@ from phone_pilot.core.healing_experience import HealingExperienceStore, HealingR
 
 # ---- 重新导出：私有辅助函数（chain.py / 测试文件通过 api._xxx 访问）----
 from ._helpers import (
+    get_screen_size,
     _get_screen_size,
     _input_swipe,
     _input_tap,
@@ -231,11 +232,11 @@ __all__ = [
     "dump_hprof_snapshot",
     "device_capture",
     "unlock_device",
+    "get_screen_size",
     # 私有辅助（供 chain.py / 测试通过 api._xxx 访问）
     "_build_element_ops",
     "_merge_logcat_lines",
     "_finalize_run",
-    "_get_screen_size",
     "_input_swipe",
     "_input_tap",
     "_input_keyevent",
