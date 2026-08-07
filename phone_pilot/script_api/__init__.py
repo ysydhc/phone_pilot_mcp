@@ -88,6 +88,7 @@ from .runner import (
     chain,
     retry,
     scroll_to_find,
+    scroll_to,
     run_script,
     _finalize_run,
 )
@@ -162,6 +163,7 @@ __all__ = [
     # 重试 & 滚动
     "retry",
     "scroll_to_find",
+    "scroll_to",
     # 入口
     "run_script",
     # App 控制

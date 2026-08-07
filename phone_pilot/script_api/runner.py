@@ -511,6 +511,285 @@ def scroll_to_find(
 
 
 # ---------------------------------------------------------------------------
+# scroll_to — 把 selector 命中的元素滚动到目标可见比例
+# ---------------------------------------------------------------------------
+
+
+def _scroll_to_find_elements(ctx: ScriptContext, selector: dict, *, compressed: bool):
+    """兼容 find_elements 的 compressed 形参：Android 支持，Harmony/iOS 不支持。"""
+    try:
+        return ctx.driver.ui.find_elements(selector, compressed=compressed)
+    except TypeError:
+        return ctx.driver.ui.find_elements(selector)
+
+
+def _scroll_to_dump_nodes(ctx: ScriptContext):
+    """兼容 dump_ui_nodes 的 compressed 形参，同上。非压缩优先，避免精简树里
+    把目标 scrollable 容器节点本身裁掉。"""
+    try:
+        return ctx.driver.ui.dump_ui_nodes(compressed=False)
+    except TypeError:
+        return ctx.driver.ui.dump_ui_nodes()
+
+
+def _scroll_to_bounds_contains(
+    container: tuple[int, int, int, int], elem_bounds: tuple[int, int, int, int]
+) -> bool:
+    """判断 scrollable 容器 bounds 是否"包含"目标元素 bounds。
+
+    容器的 bounds 是它在屏幕上的视口位置（横向不随滚动变化），但元素滚出视口后
+    其 bounds 纵向可以超出容器视口（UIAutomator 仍会上报离屏但仍挂载的节点）。
+    因此横向按严格包含判断（同一列表列），纵向放宽到一个容器高度的余量，既能
+    容忍"滚出视口"的正常情况，也能过滤掉页面上完全无关的其它 scrollable 容器。
+    """
+    cx1, cy1, cx2, cy2 = container
+    ex1, ey1, ex2, ey2 = elem_bounds
+    if ex2 <= ex1 or ey2 <= ey1:
+        return False
+    if ex1 < cx1 - 2 or ex2 > cx2 + 2:
+        return False
+    margin = max(1, cy2 - cy1)
+    if ey2 < cy1 - margin or ey1 > cy2 + margin:
+        return False
+    return True
+
+
+def _scroll_to_find_container(
+    ctx: ScriptContext, elem_bounds: Optional[tuple[int, int, int, int]]
+) -> Optional[tuple[int, int, int, int]]:
+    """遍历所有 scrollable=True 的节点，找出真正包含目标元素 bounds 的那个。
+
+    与 android/ui/automator.py 的 pick_scrollable_bounds() 不同：那个函数只挑
+    "面积最大"的 scrollable 节点，不判断是否包含目标元素；这里需要的是安全阀
+    语义（只有确认容器包含目标元素才滚动），所以自己实现包含判断，多个候选时
+    取面积最小（最贴合目标的）的那个。
+    """
+    if not elem_bounds:
+        return None
+    try:
+        nodes = _scroll_to_dump_nodes(ctx)
+    except Exception:
+        return None
+
+    best: Optional[tuple[int, int, int, int]] = None
+    best_area = -1
+    for node in nodes or []:
+        if getattr(node, "scrollable", False) is not True:
+            continue
+        bounds_fn = getattr(node, "bounds_tuple", None)
+        container_bounds = bounds_fn() if callable(bounds_fn) else None
+        if not container_bounds:
+            continue
+        if not _scroll_to_bounds_contains(container_bounds, elem_bounds):
+            continue
+        cx1, cy1, cx2, cy2 = container_bounds
+        area = max(0, cx2 - cx1) * max(0, cy2 - cy1)
+        if best is None or area < best_area:
+            best, best_area = container_bounds, area
+    return best
+
+
+def _scroll_to_direction_for(
+    elem_bounds: Optional[tuple[int, int, int, int]],
+    screen_size: Optional[tuple[int, int]],
+) -> str:
+    """根据元素相对屏幕视口的越界方向决定滑动方向（up=手指从下往上划，让下方内容进入视口）。"""
+    if not elem_bounds or not screen_size:
+        return "up"
+    _, y1, _, y2 = elem_bounds
+    sh = screen_size[1]
+    off_bottom = max(0, y2 - sh)
+    off_top = max(0, -y1)
+    return "up" if off_bottom >= off_top else "down"
+
+
+def _scroll_to_do_swipe(
+    ctx: ScriptContext,
+    container_bounds: tuple[int, int, int, int],
+    direction: str,
+    screen_size: Optional[tuple[int, int]],
+) -> int:
+    """在 scrollable 容器视口内计算一次滑动的起止点并执行，返回本次滑动的像素距离。
+
+    起止点取容器视口向内收缩 25%（避免蹭到系统手势边缘/滚动条），单次滑动距离
+    上限为屏幕高度的 80%（避免超远距离滑动导致跳过太多内容或触发惯性甩动）。
+    """
+    cx1, cy1, cx2, cy2 = container_bounds
+    w, h = max(1, cx2 - cx1), max(1, cy2 - cy1)
+    pad_x, pad_y = int(round(w * 0.25)), int(round(h * 0.25))
+    sx1, sx2 = cx1 + pad_x, cx2 - pad_x
+    sy1, sy2 = cy1 + pad_y, cy2 - pad_y
+    if sx2 <= sx1:
+        sx1, sx2 = cx1, cx2
+    if sy2 <= sy1:
+        sy1, sy2 = cy1, cy2
+
+    cx = int(round((sx1 + sx2) / 2))
+    cy = int(round((sy1 + sy2) / 2))
+    sh = (screen_size[1] if screen_size else h) or h
+    max_dist = max(1, int(sh * 0.8))
+    dist = max(1, min(sy2 - sy1, max_dist))
+    half = max(1, dist // 2)
+
+    if direction == "up":
+        y_start, y_end = cy + half, cy - half
+    else:
+        y_start, y_end = cy - half, cy + half
+    y_start = max(sy1, min(sy2, y_start))
+    y_end = max(sy1, min(sy2, y_end))
+
+    _input_swipe(ctx, cx, y_start, cx, y_end, duration_ms=300)
+    return abs(y_start - y_end)
+
+
+def scroll_to(
+    ctx: ScriptContext,
+    selector: dict,
+    *,
+    target_ratio: float = 0.9,
+    max_attempts: int = 4,
+    force_scroll: bool = False,
+    compressed: bool = False,
+    restore_on_fail: bool = True,
+) -> dict:
+    """把 selector 命中的元素滚动到目标可见比例（官方滚动 API）。
+    Scroll the element matched by selector into view up to a target visibility ratio.
+
+    与 scroll_to_find() 的区别：scroll_to_find 是"按方向盲滚 + 用 find_text 反复
+    探测"，适合"不知道元素在哪、只想找到"的场景；scroll_to 则要求先能定位到目标
+    元素（可以是屏幕外的），再计算它与目标 scrollable 容器的关系，精确地把它滚动
+    到指定可见比例，适合"已经知道目标元素、但它当前不完全可见"的场景。
+
+    归属 script_api（而非 driver.ui）：滚动到目标比例需要多轮"滑动 → 重新查询坐标
+    → 判定"迭代，这是脚本执行层面的编排逻辑，不是单次驱动调用。
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文。
+        selector: find_elements() 选择器（text/resource_id/desc/class_name 等）。
+        target_ratio: 目标可见比例（0~1），默认 0.9。
+        max_attempts: 最大滑动重试次数，默认 4。
+        force_scroll: 即使已满足 target_ratio 也强制滑动一次（用于"确保离开边缘
+            吸附区域"等场景），默认 False。
+        compressed: 传给 find_elements 的压缩 dump 开关，默认 False（滚动场景更
+            容易命中被压缩裁掉的容器型节点，默认关闭压缩更稳妥）。
+        restore_on_fail: 失败退出（达到 max_attempts 或触发累计滑动上限）时是否
+            尝试滑回起点，默认 True。简化实现：只对首次判定失败时用到的 scrollable
+            容器做一次反向滑动，不保证精确复位到像素级起点。
+
+    Returns / 返回值:
+        dict: ``{"ok": bool, "final_ratio": float, "attempts": int,
+                 "skipped_no_scrollable": bool (可选),
+                 "warning": str (可选), "error": str (可选)}``
+    """
+    from phone_pilot.core.geometry import compute_visibility
+
+    screen_size = _get_screen_size(ctx)
+    cumulative_limit = (screen_size[1] if screen_size else 1920) * 3
+    cumulative_distance = 0
+
+    baseline_container: Optional[tuple[int, int, int, int]] = None
+    baseline_direction: Optional[str] = None
+
+    def _restore_baseline() -> None:
+        if not baseline_container or not baseline_direction:
+            return
+        reverse = "down" if baseline_direction == "up" else "up"
+        try:
+            _scroll_to_do_swipe(ctx, baseline_container, reverse, screen_size)
+        except Exception:
+            pass
+
+    matches = _scroll_to_find_elements(ctx, selector, compressed=compressed)
+    if not matches:
+        return {
+            "ok": False,
+            "error": "element_not_found",
+            "final_ratio": 0.0,
+            "attempts": 0,
+        }
+    elem = matches[0]
+
+    # selector 命中的正好是 scrollable 容器自身：没有意义再去找"容器包含它自己"，
+    # 直接返回并带 warning。
+    if elem.get("scrollable"):
+        bounds = tuple(elem["bounds_rect"]) if elem.get("bounds_rect") else None
+        _, ratio = compute_visibility(bounds, screen_size)
+        return {
+            "ok": True,
+            "final_ratio": ratio or 0.0,
+            "attempts": 0,
+            "warning": "selector_matched_scrollable_container_itself",
+        }
+
+    attempts = 0
+    while True:
+        bounds = tuple(elem["bounds_rect"]) if elem.get("bounds_rect") else None
+        _, ratio = compute_visibility(bounds, screen_size)
+        ratio = ratio or 0.0
+        satisfied = ratio >= target_ratio
+
+        if satisfied and not force_scroll:
+            return {"ok": True, "final_ratio": ratio, "attempts": attempts}
+
+        # 安全阀：找不到"确认包含目标元素"的 scrollable 容器就不做无意义的滑动重试。
+        container = _scroll_to_find_container(ctx, bounds)
+        if container is None:
+            return {
+                "ok": satisfied,
+                "final_ratio": ratio,
+                "attempts": attempts,
+                "skipped_no_scrollable": True,
+            }
+
+        direction = _scroll_to_direction_for(bounds, screen_size)
+        if baseline_container is None:
+            baseline_container, baseline_direction = container, direction
+
+        if satisfied and force_scroll:
+            _scroll_to_do_swipe(ctx, container, direction, screen_size)
+            attempts += 1
+            matches = _scroll_to_find_elements(ctx, selector, compressed=compressed)
+            new_elem = matches[0] if matches else elem
+            new_bounds = (
+                tuple(new_elem["bounds_rect"]) if new_elem.get("bounds_rect") else None
+            )
+            _, new_ratio = compute_visibility(new_bounds, screen_size)
+            return {
+                "ok": True,
+                "final_ratio": new_ratio if new_ratio is not None else ratio,
+                "attempts": attempts,
+            }
+
+        if attempts >= max_attempts:
+            if restore_on_fail:
+                _restore_baseline()
+            return {"ok": False, "final_ratio": ratio, "attempts": attempts}
+
+        offset = _scroll_to_do_swipe(ctx, container, direction, screen_size)
+        cumulative_distance += abs(offset)
+        attempts += 1
+        if cumulative_distance > cumulative_limit:
+            if restore_on_fail:
+                _restore_baseline()
+            return {
+                "ok": False,
+                "final_ratio": ratio,
+                "attempts": attempts,
+                "error": "cumulative_scroll_limit_exceeded",
+            }
+
+        matches = _scroll_to_find_elements(ctx, selector, compressed=compressed)
+        if not matches:
+            return {
+                "ok": False,
+                "error": "element_not_found",
+                "final_ratio": 0.0,
+                "attempts": attempts,
+            }
+        elem = matches[0]
+
+
+# ---------------------------------------------------------------------------
 # run_script — 标准脚本入口
 # ---------------------------------------------------------------------------
 
