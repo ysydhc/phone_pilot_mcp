@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, asdict
 from typing import Optional, Sequence
 
-_BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+_BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 
 
 @dataclass

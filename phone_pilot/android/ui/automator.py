@@ -82,7 +82,7 @@ def keep_screen_alive(device_serial: str) -> None:
     _last_keepalive_ts[device_serial] = now
 
 
-_BOUNDS_RE = re.compile(r"^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$")
+_BOUNDS_RE = re.compile(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$")
 
 
 @dataclass

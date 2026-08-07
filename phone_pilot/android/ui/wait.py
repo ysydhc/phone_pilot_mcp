@@ -31,7 +31,7 @@ from phone_pilot.android.ui.automator import (
 
 import re
 
-_BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+_BOUNDS_RE = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
 
 
 def _parse_bounds(bounds) -> tuple[int, int, int, int] | None:
