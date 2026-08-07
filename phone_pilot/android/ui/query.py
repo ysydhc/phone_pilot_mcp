@@ -174,6 +174,8 @@ def element_query_impl(
     attributes: Optional[list[str]] = None,
     case_sensitive: bool = False,
     limit: int = 50,
+    *,
+    compressed: bool = True,
 ) -> dict:
     """
     Query elements with rich selectors.
@@ -194,6 +196,7 @@ def element_query_impl(
     - attributes: List of attributes to return (None = all) / 要返回的属性列表（None = 全部）
     - case_sensitive: Case sensitive matching / 大小写敏感匹配
     - limit: Max elements to return / 最大返回元素数
+    - compressed: 是否使用压缩 dump（默认 True，向后兼容）/ Whether to use compressed dump (default True)
 
     Returns / 返回:
     - ok: bool
@@ -230,7 +233,7 @@ def element_query_impl(
         }
 
     # Dump UI hierarchy
-    dump_result = dump_ui_xml(device_serial, compressed=True)
+    dump_result = dump_ui_xml(device_serial, compressed=compressed)
     if not dump_result.get("ok"):
         return {
             "ok": False,
@@ -296,6 +299,8 @@ def element_exists_impl(
     ocr_fallback: bool = True,
     ocr_lang: str = "eng+chi_sim",
     threshold: float = 0.80,
+    *,
+    compressed: bool = True,
 ) -> dict:
     """
     Check if element exists (without clicking).
@@ -316,6 +321,7 @@ def element_exists_impl(
     - ocr_fallback: Enable OCR fallback / 启用 OCR 回退
     - ocr_lang: OCR language / OCR 语言
     - threshold: Image matching threshold / 图片匹配阈值
+    - compressed: 是否使用压缩 dump（默认 True，向后兼容）/ Whether to use compressed dump (default True)
 
     Returns / 返回:
     - ok: bool
@@ -355,7 +361,9 @@ def element_exists_impl(
 
     # Method 1: Try UIAutomator with selector
     if selector and isinstance(selector, dict):
-        result = element_query_impl(device_serial, selector, limit=1)
+        result = element_query_impl(
+            device_serial, selector, limit=1, compressed=compressed
+        )
         if result.get("ok") and result.get("count", 0) > 0:
             return {
                 "ok": True,
@@ -367,7 +375,7 @@ def element_exists_impl(
 
     # Method 2: Try UIAutomator with query
     if query:
-        dump_result = dump_ui_xml(device_serial, compressed=True)
+        dump_result = dump_ui_xml(device_serial, compressed=compressed)
         if dump_result.get("ok"):
             xml = dump_result.get("xml", "")
             nodes = parse_uiautomator_nodes(xml)

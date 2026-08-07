@@ -203,11 +203,11 @@ class AndroidUIDriver:
 
         return ui_snapshot_cache.get_or_compute(key, _compute)
 
-    def dump_ui_nodes(self):
+    def dump_ui_nodes(self, *, compressed: bool = True):
         """Dump UI nodes as universal UINode list."""
         from phone_pilot.core.ui_node import UINode as UnivNode
 
-        xml = self.dump_ui_hierarchy()
+        xml = self.dump_ui_hierarchy(compressed=compressed)
         if not xml:
             return []
         android_nodes = parse_uiautomator_nodes(xml)
@@ -227,7 +227,7 @@ class AndroidUIDriver:
         # Defensive: ensure every entry is str, decoding bytes if needed
         return [_ensure_str(t) for t in raw]
 
-    def find_elements(self, selector: dict) -> list[dict]:
+    def find_elements(self, selector: dict, *, compressed: bool = True) -> list[dict]:
         """
         Find UI elements matching selector.
 
@@ -240,9 +240,15 @@ class AndroidUIDriver:
         - class_name: Class name match
         - clickable: Boolean
         - enabled: Boolean
+
+        Args:
+            selector: 选择器字典，见上。
+            compressed: 是否使用压缩 dump（默认 True，向后兼容）。压缩模式会剔除
+                无 accessibility 意义的纯容器节点（如无 text/desc/clickable 的
+                FrameLayout）；如果怀疑目标是这类容器，显式传 compressed=False。
         """
         # Dump and parse UI
-        xml = self.dump_ui_hierarchy()
+        xml = self.dump_ui_hierarchy(compressed=compressed)
         nodes = parse_uiautomator_nodes(xml)
 
         # Apply filters
