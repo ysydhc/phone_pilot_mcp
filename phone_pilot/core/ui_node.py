@@ -76,6 +76,8 @@ class UINode:
         c = self.center()
         if c:
             d["center_x"], d["center_y"] = c
+        b = self.bounds_tuple()
+        d["bounds_rect"] = list(b) if b else None
         return d
 
 

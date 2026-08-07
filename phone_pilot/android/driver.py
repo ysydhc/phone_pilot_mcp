@@ -305,6 +305,43 @@ class AndroidUIDriver:
                 results.append(node.to_dict())
         return results
 
+    def _enrich_with_visibility(self, results: list[dict]) -> list[dict]:
+        """给结果列表统一追加 visible/visible_ratio（基于 bounds_rect + 屏幕尺寸）。
+
+        屏幕尺寸只查询一次（不随节点数线性增长），供 find_elements 的主路径与
+        auto_uncompressed_fallback 兜底路径共用同一次富化调用。
+        """
+        if not results:
+            return results
+        from phone_pilot.core.geometry import compute_visibility
+
+        try:
+            screen_size = self.get_screen_size()
+        except Exception:
+            screen_size = None
+
+        for r in results:
+            bounds_rect = r.get("bounds_rect")
+            bounds_tuple = tuple(bounds_rect) if bounds_rect else None
+            visible, ratio = compute_visibility(bounds_tuple, screen_size)
+            r["visible"] = visible
+            r["visible_ratio"] = ratio
+            if screen_size is None:
+                r["visible_reason"] = "screen_size_unavailable"
+        return results
+
+    def get_screen_size(self) -> tuple[int, int]:
+        """获取屏幕尺寸，供 `_enrich_with_visibility` 计算 visible/visible_ratio 使用。
+
+        `AndroidUIDriver` 本身不持有 `AndroidScreenDriver`，因此直接复用底层
+        `android/device/utils.get_screen_size` 函数（`AndroidScreenDriver.get_screen_size`
+        同样是对它的薄封装），避免引入跨子驱动的依赖。
+        """
+        size = _get_screen_size(self._device_serial)
+        if size is None:
+            raise RuntimeError("Failed to get screen size")
+        return size
+
     def _find_elements_once(self, selector: dict, *, compressed: bool) -> list[dict]:
         """执行一次 dump + 解析 + 逐字段匹配（含翻译兜底），不含自动降级重试逻辑。"""
         # Dump and parse UI
@@ -420,17 +457,17 @@ class AndroidUIDriver:
         """
         results = self._find_elements_once(selector, compressed=compressed)
         if results or not auto_uncompressed_fallback or compressed is False:
-            return results
+            return self._enrich_with_visibility(results)
 
         class_name = str(selector.get("class_name") or "")
         if not any(h in class_name for h in _CONTAINER_CLASS_HEURISTIC):
-            return results
+            return self._enrich_with_visibility(results)
 
         import time as _time
 
         now = _time.monotonic()
         if _fallback_cooldown_until.get(self._device_serial, 0) > now:
-            return results
+            return self._enrich_with_visibility(results)
         _fallback_cooldown_until[self._device_serial] = now + _FALLBACK_COOLDOWN_S
 
         # 命中启发式说明压缩 dump 可能剔除了目标容器节点；连带失效压缩缓存，
@@ -442,13 +479,13 @@ class AndroidUIDriver:
         fallback_xml_result = dump_ui_xml(self._device_serial, compressed=False)
         if not fallback_xml_result.get("ok"):
             self._last_fallback_error = fallback_xml_result.get("error")
-            return results
+            return self._enrich_with_visibility(results)
         self._last_fallback_error = None
         fallback_nodes = parse_uiautomator_nodes(fallback_xml_result.get("xml", ""))
         fallback_results = self._match_nodes(fallback_nodes, selector)
         for r in fallback_results:
             r["from_uncompressed"] = True
-        return fallback_results
+        return self._enrich_with_visibility(fallback_results)
 
     def get_current_activity(self) -> dict:
         """Get current foreground activity info."""
