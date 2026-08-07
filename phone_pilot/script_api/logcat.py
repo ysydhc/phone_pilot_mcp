@@ -335,6 +335,16 @@ def logcat_assert_sequence(
         time.sleep(max(0.5, float(interval_s)))
 
 
+def _flatten_hits(found: dict[str, list[str]]) -> list[str]:
+    """把 hits 字典的所有 value 按原始顺序拼成一个扁平列表，不去重不排序。
+    Flatten the hits dict's values into one list, preserving order, no dedup.
+    """
+    flat: list[str] = []
+    for lines in found.values():
+        flat.extend(lines)
+    return flat
+
+
 def logcat_wait_for(
     ctx: ScriptContext,
     *patterns: str,
@@ -363,7 +373,10 @@ def logcat_wait_for(
         merge_multiline: 合并多行日志 / Merge multiline messages
 
     Returns / 返回值:
-        dict: {"ok": bool, "hits": {pattern: [lines]}, "missing": [str]}
+        dict: {"ok": bool, "hits": {pattern: [lines]}, "hit_lines": [str],
+               "missing": [str]}
+        - hit_lines: hits 的扁平化列表（保留原始顺序，不去重）/ flattened
+          hits, order-preserving, not deduplicated
     """
     if clear_before:
         try:
@@ -413,7 +426,12 @@ def logcat_wait_for(
         all_found = all(p in found for p in all_keys)
         any_satisfied = (not any_of_list) or (any_of_hit is not None)
         if all_found and any_satisfied:
-            return {"ok": True, "hits": found, "missing": []}
+            return {
+                "ok": True,
+                "hits": found,
+                "hit_lines": _flatten_hits(found),
+                "missing": [],
+            }
 
         remaining = max(0, deadline - time.monotonic())
         _auto_log_print(
@@ -426,7 +444,12 @@ def logcat_wait_for(
     missing = [p for p in all_keys if p not in found]
     if any_of_list and not any_of_hit:
         missing.append(f"any_of({', '.join(any_of_list)})")
-    return {"ok": False, "hits": found, "missing": missing}
+    return {
+        "ok": False,
+        "hits": found,
+        "hit_lines": _flatten_hits(found),
+        "missing": missing,
+    }
 
 
 def logcat_wait_for_tagged(
