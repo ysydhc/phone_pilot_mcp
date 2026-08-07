@@ -239,6 +239,7 @@ __all__ = [
     "_build_element_ops",
     "_merge_logcat_lines",
     "_finalize_run",
+    "_get_screen_size",
     "_input_swipe",
     "_input_tap",
     "_input_keyevent",
