@@ -160,3 +160,42 @@ def test_require_visible_default_false_keeps_old_behavior():
 
     # Old behavior: only checks present, not visible → satisfied
     assert result["satisfied"] is True
+
+
+# ---------------------------------------------------------------------------
+# _match_is_visible: 真实视口相交判断（screen_size 参数）
+# ---------------------------------------------------------------------------
+
+
+def test_visible_with_screen_size_offscreen_element():
+    """有 screen_size 时，视口外元素应判定为不可见（新语义，回归 btn_simulate_loss）。"""
+    match = {"bounds": "[440,1939][640,2039]"}
+    assert _match_is_visible(match, screen_size=(1080, 1920)) is False
+
+
+def test_visible_with_screen_size_onscreen_element():
+    match = {"bounds": "[100,100][300,200]"}
+    assert _match_is_visible(match, screen_size=(1080, 1920)) is True
+
+
+def test_visible_without_screen_size_keeps_legacy_behavior():
+    """不传 screen_size（默认 None）时，保持旧的"仅几何有效性"语义。"""
+    match = {"bounds": "[440,1939][640,2039]"}  # 视口外，但旧语义下仍算"有效"
+    assert _match_is_visible(match) is True
+
+
+def test_require_visible_uses_real_screen_size(monkeypatch):
+    """wait_for_element_appear(require_visible=True) 应该真正调用 get_screen_size 做视口判断。"""
+    match = {"text": "btn", "bounds": "[440,1939][640,2039]"}
+    monkeypatch.setattr(
+        "phone_pilot.android.ui.wait.get_screen_size",
+        lambda serial: (1080, 1920),
+    )
+    with patch(
+        "phone_pilot.android.ui.wait.element_exists_impl",
+        return_value={"exists": True, "match": match, "method": "uiautomator"},
+    ):
+        result = wait_for_element_appear(
+            "serial", query="btn", require_visible=True, timeout_s=0.3, interval_s=0.1
+        )
+    assert result["satisfied"] is False  # 视口外，新语义下不满足

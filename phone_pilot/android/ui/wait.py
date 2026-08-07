@@ -20,13 +20,14 @@ import asyncio
 import time
 from typing import Optional
 
-from phone_pilot.android.device.utils import get_current_focus
+from phone_pilot.android.device.utils import get_current_focus, get_screen_size
 from phone_pilot.android.ui.query import element_exists_impl
 from phone_pilot.android.ui.automator import (
     dump_ui_xml,
     parse_uiautomator_nodes,
     ui_signature,
 )
+from phone_pilot.core.geometry import compute_visibility
 
 
 import re
@@ -53,13 +54,20 @@ def _parse_bounds(bounds) -> tuple[int, int, int, int] | None:
     return None
 
 
-def _match_is_visible(match: Optional[dict]) -> bool:
+def _match_is_visible(
+    match: Optional[dict], screen_size: Optional[tuple[int, int]] = None
+) -> bool:
     """判断 match 是否满足 visible 条件。
 
-    第一版定义（不判断遮挡）：
+    基础判定（不判断遮挡）：
     1. 如果 match 有 visible/displayed/visible_to_user 字段且为 False → 不满足
     2. bounds 必须存在且可解析
     3. width > 0 且 height > 0
+
+    screen_size:
+    - None（默认）：保持旧行为，只做上述几何有效性判断（向后兼容现有调用方）。
+    - 有值：额外调用 compute_visibility() 做真正的视口相交判断；无法判定
+      （compute_visibility 返回 None）按"不满足"处理。
     """
     if not isinstance(match, dict):
         return False
@@ -78,7 +86,11 @@ def _match_is_visible(match: Optional[dict]) -> bool:
     if (x2 - x1) <= 0 or (y2 - y1) <= 0:
         return False
 
-    return True
+    if screen_size is None:
+        return True  # 旧语义：仅几何有效性，不做视口相交（向后兼容）
+
+    visible, _ratio = compute_visibility(b, screen_size)
+    return bool(visible)  # None（无法判定）在这里按"不满足"处理
 
 
 def _match_meets_state(
@@ -86,6 +98,7 @@ def _match_meets_state(
     require_clickable: bool,
     require_enabled: bool,
     require_visible: bool = False,
+    screen_size: Optional[tuple[int, int]] = None,
 ) -> bool:
     """Check that a match dict satisfies the required interactive state.
 
@@ -93,13 +106,14 @@ def _match_meets_state(
     matches carry no clickable/enabled info), treat it as NOT satisfied — we
     cannot confirm the element is actually interactive.
 
-    require_visible: 检查 bounds 有效且尺寸 > 0（不判断遮挡）。
+    require_visible: 检查 bounds 有效且尺寸 > 0；若提供 screen_size，还会做真正
+    的视口相交判断（不判断遮挡）。
     """
     if not require_clickable and not require_enabled and not require_visible:
         return True
     if not isinstance(match, dict):
         return False
-    if require_visible and not _match_is_visible(match):
+    if require_visible and not _match_is_visible(match, screen_size):
         return False
     if require_clickable and not match.get("clickable"):
         return False
@@ -162,6 +176,13 @@ def wait_for_element_appear(
     last_match = None
     last_method = None
 
+    screen_size: Optional[tuple[int, int]] = None
+    if require_visible:
+        try:
+            screen_size = get_screen_size(device_serial)
+        except Exception:
+            screen_size = None  # 获取失败自动降级为旧语义，不阻断轮询
+
     while True:
         attempts += 1
         elapsed = time.time() - start_time
@@ -180,7 +201,7 @@ def wait_for_element_appear(
         if result.get("exists"):
             match = result.get("match")
             if _match_meets_state(
-                match, require_clickable, require_enabled, require_visible
+                match, require_clickable, require_enabled, require_visible, screen_size
             ):
                 return {
                     "ok": True,
