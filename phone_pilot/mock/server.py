@@ -23,7 +23,10 @@ def _make_ctrl_handler(
 
         def log_message(self, fmt: str, *args: Any) -> None:  # noqa: ANN401
             # 写到 stderr,避免污染 stdout(MCP stdio 协议通道)
-            sys.stderr.write(f"[ctrl] {fmt % args}\n")
+            msg = fmt % args
+            if len(msg) > 140:
+                msg = msg[:100] + "...[truncated]..." + msg[-20:]
+            sys.stderr.write(f"[ctrl] {msg}\n")
 
         def _send_json(self, status: int, payload: dict) -> None:
             body = json.dumps(payload).encode()
@@ -147,7 +150,10 @@ def _make_data_handler(store: RuleStore, log: RequestLog) -> type:
         """数据面请求处理器:所有路径都走 match → 命中返回 stub,未命中 404。"""
 
         def log_message(self, fmt: str, *args: Any) -> None:  # noqa: ANN401
-            sys.stderr.write(f"[data] {fmt % args}\n")
+            msg = fmt % args
+            if len(msg) > 140:
+                msg = msg[:100] + "...[truncated]..." + msg[-20:]
+            sys.stderr.write(f"[data] {msg}\n")
 
         def _handle(self) -> None:
             method = self.command
