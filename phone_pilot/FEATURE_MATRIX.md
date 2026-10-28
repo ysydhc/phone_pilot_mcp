@@ -30,7 +30,7 @@
 | double_click (双击) | 未实现 | 已实现(hmdriver2) | 未实现(有方案) | Driver.double_click |
 | input_text (文本输入) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | 支持完整输入 |
 | input_keyevent (按键事件) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | press_key + KeyCode 映射 |
-| set_clipboard_text (设置剪贴板) | 已实现 | 未实现(有方案) | 未实现(有方案) | hmdriver2 暂无此 API; 可用 HDC shell |
+| set_clipboard_text (设置剪贴板) | 已实现 | 已实现(HDC/pasteboard) | 未实现(有方案) | hmdriver2 暂无此 API; 已打通 HDC/pasteboard |
 | complex_gesture (复杂手势) | 未实现 | 未实现(有方案) | 未实现 | hmdriver2 提供 gesture 链式 API |
 
 ## 2. 屏幕操作 (Screen)
@@ -59,10 +59,10 @@
 | infer_scroll_directions (推断滚动方向) | 已实现 | 未实现(有方案) | 未实现(有方案) | 待实现 |
 | UINode 统一数据类 | 已实现 | 已实现 | 已实现 | core/ui_node.py, 两平台共用 |
 | dump_ui_nodes (统一节点列表) | 已实现 | 已实现 | 已实现(WDA) | UIDriver protocol, 返回 list[UINode]；Android 新增 `compressed` 参数（默认 True，向后兼容），Harmony/iOS 暂未支持该参数，待评估 |
-| find_elements (选择器查找元素) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | UIDriver protocol, 返回 list[dict]（含 center_x/center_y）；Android 新增 `compressed`/`auto_uncompressed_fallback` 参数，结果新增 `bounds_rect`/`visible`/`visible_ratio` 富化字段（core/geometry.compute_visibility）；Harmony/iOS 尚未接入以上新增参数与字段，待评估 |
+| find_elements (选择器查找元素) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | UIDriver protocol, 返回 list[dict]（含 center_x/center_y）；Android/Harmony 均支持 500ms 缓存与 `bounds_rect`/`visible`/`visible_ratio` 可见性富化字段（core/geometry.compute_visibility）；iOS 尚未接入待评估 |
 | collect_all_texts (收集 UI 文本) | 已实现 | 已实现 | 已实现(WDA) | UIDriver protocol |
 | dump_memory_profile (内存快照) | 已实现 | 不适用 | 不适用 | DeviceDriver protocol, Android hprof |
-| scroll_to (滚动到目标可见比例) | 已实现 | 未实现(有方案) | 未实现(有方案) | script_api.scroll_to()，基于 find_elements 的 bounds_rect + compute_visibility 迭代滑动到目标可见比例；可参考已有 UIElement.scroll / scroll_to_find 方案移植 Harmony/iOS |
+| scroll_to (滚动到目标可见比例) | 已实现 | 已实现 | 未实现(有方案) | script_api.scroll_to()，基于 find_elements 的 bounds_rect + compute_visibility 迭代滑动到目标可见比例 |
 
 ## 4. UI 查找与交互 (UI Finder)
 
@@ -85,7 +85,7 @@
 | element_query_async | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | async 封装 |
 | element_exists_async | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | async 封装 |
 | collect_node_texts (收集文本) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 从 UI 树提取 |
-| xpath 选择器 | 未实现 | 未实现(有方案) | 未实现(有方案) | hmdriver2 提供 xpath API |
+| xpath 选择器 | 未实现 | 已实现 | 未实现(有方案) | hmdriver2.xpath 优先 + ElementTree XML 兜底 |
 
 ## 6. 多阶段查找 (Multi-Stage Finder)
 
@@ -103,7 +103,7 @@
 | force_stop (强制停止) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3) | stop_app |
 | restart_app (重启应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | stop + start |
 | clear_data (清除数据) | 已实现 | 已实现(hmdriver2) | 不适用 | clear_app |
-| install_app (安装应用) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | install_app |
+| install_app (安装应用) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3/simctl) | install_app (.app 模拟器 / .ipa 真机) |
 | uninstall_app (卸载应用) | 已实现 | 已实现(hmdriver2) | 已实现(pmd3) | uninstall_app |
 | get_app_info (应用信息) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | get_app_info |
 | get_installed_apps (带元数据) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | list_apps + app_info |
@@ -112,10 +112,10 @@
 | open_deeplink (打开深链接) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | open_url |
 | get_current_focus (前台应用) | 已实现 | 已实现(hmdriver2) | 已实现(WDA) | current_app |
 | is_launcher_package | 已实现 | 未实现(有方案) | 未实现(有方案) | 需 app_info 判断 |
-| get_default_launcher_component | 已实现 | 未实现(有方案) | 不适用 | 需 ability 列表判断 |
-| list_launcher_components | 已实现 | 未实现(有方案) | 不适用 | 同上 |
-| build_launch_profiles_snapshot | 已实现 | 未实现(有方案) | 未实现(有方案) | 需多项数据聚合 |
-| clear_background_processes | 已实现 | 未实现(有方案) | 未实现(有方案) | Harmony: aa force-stop 逐个停止 |
+| get_default_launcher_component | 已实现 | 已实现 | 不适用 | 需 ability 列表判断 |
+| list_launcher_components | 已实现 | 已实现 | 不适用 | 同上 |
+| build_launch_profiles_snapshot | 已实现 | 已实现 | 未实现(有方案) | 需多项数据聚合 |
+| clear_background_processes | 已实现 | 已实现 | 未实现(有方案) | Harmony: aa force-stop / UI clear |
 
 ## 8. 设备管理 (Device Management)
 
@@ -153,7 +153,7 @@
 |--------|---------|---------|-----|------|
 | clear_logcat (清除日志) | 已实现 | 已实现(HDC) | 未实现(有方案) | hdc shell hilog -r |
 | read_logcat (读取日志) | 已实现 | 已实现(HDC) | 已实现(pmd3) | hdc shell hilog |
-| dump_logcat (导出日志) | 已实现 | 已实现(HDC) | 未实现(有方案) | hilog 导出到文件 |
+| dump_logcat (导出日志) | 已实现 | 已实现(HDC) | 已实现(pmd3/simctl) | syslog 导出到文件 (dump_log) |
 
 ## 11. 断言 (Assertions)
 
@@ -178,7 +178,7 @@
 | wait_for_page_stable | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | UI 签名比较 |
 | wait_for_impl (统一等待入口) | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 上层封装 |
 | wait_for_async | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | async 封装 |
-| require_visible (visible readiness) | 已实现 | 未实现 | 未实现 | bounds 有效+尺寸>0；不判断遮挡 |
+| require_visible (visible readiness) | 已实现 | 已实现 | 未实现 | bounds 有效+尺寸>0；结合 visible_ratio 判断 |
 | require_clickable / require_enabled | 已实现 | 已实现(hmdriver2) | 未实现(有方案) | 交互状态就绪判断 |
 
 > **visible 定义**：bounds 可解析且 width>0、height>0；若平台提供 visible/displayed 字段为 False 则判为不满足。不检测 z-order 遮挡。
@@ -255,7 +255,7 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| PopupGuard (弹窗自动检测与关闭) | 已实现 | 部分实现 | 未实现(有方案) | Window层级(Android)+UI树+文本规则 |
+| PopupGuard (弹窗自动检测与关闭) | 已实现 | 已实现 | 已实现(WDA) | Window层级(Android WMS/Harmony hidumper/iOS WDA)+UI树+文本规则 |
 | HealingExperienceStore (纠正经验库) | 已实现 | 已实现 | 已实现 | 纯 Python, 平台无关 |
 | SelfHealer (自愈编排器) | 已实现 | 已实现 | 已实现 | 纯 Python, 平台无关 |
 | LLM 全局分析 (可选兜底) | 已实现 | 已实现 | 已实现 | 需 OPENAI_API_KEY |
@@ -297,38 +297,38 @@
 | phone_search_logcat (搜索日志) | 已实现 | 已实现 | 未实现(有方案) | 支持正则 |
 | phone_scroll_to_find (滚动查找) | 已实现 | 已实现 | 未实现(有方案) | 复用 script_api |
 | phone_wait_for_element (等待元素) | 已实现 | 已实现 | 未实现(有方案) | 轮询 UI 树 |
-| phone_dismiss_popup (关闭弹窗) | 已实现 | 已实现 | 未实现(有方案) | PopupGuard |
+| phone_dismiss_popup (关闭弹窗) | 已实现 | 已实现 | 已实现(PopupGuard) | PopupGuard (Alert/Sheet+规则) |
 | phone_smart_find (智能查找) | 已实现 | 已实现 | 未实现(有方案) | UIA+OCR+弹窗 |
-| phone_launch_from_home (桌面启动) | 已实现 | 已实现 | 未实现(有方案) | script_api |
-| phone_install_app (安装) | 已实现 | 已实现 | 未实现(有方案) | APK/HAP |
-| phone_uninstall_app (卸载) | 已实现 | 已实现 | 未实现(有方案) | AppDriver.uninstall |
-| phone_memory_snapshot (内存快照) | 已实现 | 不适用 | 未实现(有方案) | Android meminfo |
+| phone_launch_from_home (桌面启动) | 已实现 | 已实现 | 已实现(WDA) | script_api / finder |
+| phone_install_app (安装) | 已实现 | 已实现 | 已实现(pmd3/simctl) | APK/HAP/APP/IPA |
+| phone_uninstall_app (卸载) | 已实现 | 已实现 | 已实现(pmd3/simctl) | AppDriver.uninstall |
+| phone_memory_snapshot (内存快照) | 已实现 | 已实现(hidumper --mem) | 不适用 | Android meminfo / Harmony hidumper |
 | phone_memory_check_leak (泄漏检测) | 已实现 | 不适用 | 未实现(有方案) | Activity 泄漏 |
-| phone_pull_file (拉取文件) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.pull_file |
-| phone_push_file (推送文件) | 已实现 | 已实现 | 未实现(有方案) | DeviceDriver.push_file |
-| phone_read_clipboard (读剪贴板) | 已实现 | 未实现(有方案) | 未实现(有方案) | Android 10+ |
-| phone_get_notifications (通知) | 已实现 | 未实现(有方案) | 未实现(有方案) | dumpsys notification |
-| phone_toggle_wifi (WiFi) | 已实现 | 未实现(有方案) | 未实现(有方案) | svc wifi |
-| phone_toggle_airplane (飞行模式) | 已实现 | 未实现(有方案) | 未实现(有方案) | settings + broadcast |
-| phone_execute_shell (受限 shell) | 已实现 | 未实现(有方案) | 未实现(有方案) | 白名单限制 |
-| phone_get_device_info (设备信息) | 已实现 | 已实现 | 未实现(有方案) | 轻量级信息 |
+| phone_pull_file (拉取文件) | 已实现 | 已实现 | 已实现(pmd3) | DeviceDriver.pull_file |
+| phone_push_file (推送文件) | 已实现 | 已实现 | 已实现(pmd3) | DeviceDriver.push_file |
+| phone_read_clipboard (读剪贴板) | 已实现 | 已实现(hmdriver2/hidumper) | 已实现(simctl) | Android 10+ / Harmony Pasteboard / iOS simctl |
+| phone_get_notifications (通知) | 已实现 | 已实现(hidumper) | 未实现(有方案) | dumpsys / hidumper NotificationManagerService |
+| phone_toggle_wifi (WiFi) | 已实现 | 已实现(wifi_tool/param) | 未实现(有方案) | svc wifi / wifi_tool |
+| phone_toggle_airplane (飞行模式) | 已实现 | 已实现(param/settings) | 未实现(有方案) | settings + broadcast / param set |
+| phone_execute_shell (受限 shell) | 已实现 | 已实现(白名单) | 已实现(simctl白名单) | 白名单限制 + simctl spawn / HdcCommandRunner |
+| phone_get_device_info (设备信息) | 已实现 | 已实现 | 已实现(pmd3/simctl) | 轻量级信息 (lockdown / simctl) |
 
 ## 22. 本地网络打桩 (Mock Server) — 新增
 
 > 主机侧独立 HTTP mock server,给被测 App 的网络返回做受控打桩。控制面/数据面双端口分离;
 > Agent 经 MCP 动态写规则,脚本经 script_api 预设种子;App 改 baseURL 指向 `127.0.0.1:DATA_PORT` +
-> 自动 `adb reverse`。明文 HTTP only(TLS 全绕过)。设计见 docs/design/mock-server.md。
+> 自动反向代理。明文 HTTP only(TLS 全绕过)。设计见 docs/design/mock-server.md。
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| MockServer (双端口 ThreadingHTTPServer) | 已实现 | 不适用 | 不适用 | 纯 Python stdlib, 但 reverse 依赖 adb |
+| MockServer (双端口 ThreadingHTTPServer) | 已实现 | 已实现 | 不适用 | 纯 Python stdlib, Android 依赖 adb reverse, Harmony 依赖 hdc rport |
 | RuleStore / RequestLog (规则表+请求日志) | 已实现 | 已实现 | 已实现 | 纯 Python, 平台无关 |
-| ReverseManager (adb reverse 生命周期) | 已实现 | 未实现(有方案) | 未实现 | adb reverse;HDC 有 fport 可对标 |
+| ReverseManager (反向隧道生命周期) | 已实现 | 已实现(hdc rport) | 已实现(共享localhost免转发) | adb reverse (Android); hdc rport/fport rm (Harmony); 模拟器免转发 (iOS) |
 | MockControlClient (控制面客户端) | 已实现 | 已实现 | 已实现 | 纯 Python stdlib, 平台无关 |
-| mock_server_start/stop (script_api) | 已实现 | 未实现(有方案) | 未实现(有方案) | 含自动 reverse + 收尾 teardown |
+| mock_server_start/stop (script_api) | 已实现 | 已实现 | 未实现(有方案) | 含自动 reverse + 收尾 teardown |
 | mock_set_rule / mock_load_seed | 已实现 | 已实现 | 已实现 | 经控制面, 平台无关 |
 | mock_assert_switched (切换检测) | 已实现 | 已实现 | 已实现 | request_log 有流量即判定 (ADR-6) |
-| phone_mock_* (9 个 MCP 工具) | 已实现 | 未实现(有方案) | 未实现(有方案) | EXTENDED_CATEGORIES["mock"], 按需激活 |
+| phone_mock_* (9 个 MCP 工具) | 已实现 | 已实现 | 未实现(有方案) | EXTENDED_CATEGORIES["mock"], 按需激活 |
 
 ## 23. 广播命令总线与用例编排 (Broadcast & TestCase) — 新增
 
@@ -336,11 +336,11 @@
 
 | 功能点 | Android | Harmony | iOS | 备注 |
 |--------|---------|---------|-----|------|
-| send_broadcast (am broadcast + ACK) | 已实现 | 未实现(有方案) | 不适用 | ACK 用 mark→since 区间等待; Harmony 可对标 aa 命令 |
-| ensure_app_alive (pidof/ps + scheme) | 已实现 | 未实现(有方案) | 未实现(有方案) | pidof→ps 降级支持 API<23 |
-| assert_event (整词结构化日志断言) | 已实现 | 未实现(有方案) | 未实现(有方案) | 边界正则 `(?:^\|\s)k=v(?=\s\|$)` |
+| send_broadcast (广播+ACK等待) | 已实现 | 已实现(ces pub) | 不适用 | ACK 用 mark→since 区间等待; Harmony 基于 ces pub 与 hilog; iOS 降级 open_deeplink |
+| ensure_app_alive (保活与冷启) | 已实现 | 已实现(ps/aa) | 已实现(ps/WDA) | 进程检测 (ps/WDA) + cold launch (open_deeplink) + readiness 等待 |
+| assert_event (整词结构化日志断言) | 已实现 | 已实现(hilog) | 未实现(有方案) | 边界正则 `(?:^\|\s)k=v(?=\s\|$)` |
 | TestCase / run_cases (用例编排) | 已实现 | 已实现 | 已实现 | 纯 Python, 平台无关 |
-| open_deeplink 注入修复 | 已实现 | 不适用 | 不适用 | uri/package shlex.quote |
+| open_deeplink 注入修复 | 已实现 | 已实现 | 不适用 | uri/package shlex.quote |
 
 ---
 
@@ -367,5 +367,5 @@ iOS 驱动层 (`phone_pilot/ios/`) 已实现 `DeviceDriver` 协议全部 42 入�
 | 平台 | 已实现 | 部分实现 | 未实现(有方案) | 未实现 | 不适用 |
 |------|--------|----------|----------------|--------|--------|
 | Android | ~120 | 0 | 0 | ~5 | 0 |
-| Harmony | ~90 | 0 | ~20 | ~5 | ~8 |
+| Harmony | ~115 | 0 | ~5 | ~2 | ~8 |
 | iOS | ~35 (驱动层,实验) | 2 (录屏) | ~40 (MCP/上层) | ~3 | ~10 |

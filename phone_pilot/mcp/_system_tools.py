@@ -35,7 +35,7 @@ async def phone_read_clipboard(
 
     Returns / 返回值:
         dict: {"ok": True, "text": str} 或 {"ok": False, "error": str}
-    仅支持 Android / Android only.
+    支持 Android、iOS 与 HarmonyOS / Supports Android, iOS, and HarmonyOS.
     """
     resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
     if err:
@@ -47,14 +47,24 @@ async def phone_read_clipboard(
         result["device_serial"] = resolved
         result["platform"] = plat
         return result
+    if plat == "harmony":
+        from phone_pilot.harmony.device.utils import (
+            get_clipboard_text as get_harmony_clipboard_text,
+        )
+
+        result = await asyncio.to_thread(get_harmony_clipboard_text, resolved)
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "phone_read_clipboard supports Android and iOS",
+            "error": "phone_read_clipboard supports Android, iOS, and HarmonyOS",
             "platform": plat,
         }
     result = await asyncio.to_thread(get_clipboard_text, resolved)
     result["device_serial"] = resolved
+    result["platform"] = plat
     return result
 
 
@@ -72,19 +82,29 @@ async def phone_get_notifications(
 
     Returns / 返回值:
         dict: {"ok": True, "notifications": [{"package": str, "title": str, "text": str}]}
-    仅支持 Android / Android only.
+    支持 Android 与 HarmonyOS / Supports Android and HarmonyOS.
     """
     resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
     if err:
         return err
+    if plat == "harmony":
+        from phone_pilot.harmony.device.utils import (
+            get_notifications as get_harmony_notifications,
+        )
+
+        result = await asyncio.to_thread(get_harmony_notifications, resolved)
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "phone_get_notifications only supports Android",
+            "error": "phone_get_notifications only supports Android and HarmonyOS",
             "platform": plat,
         }
     result = await asyncio.to_thread(get_notifications, resolved)
     result["device_serial"] = resolved
+    result["platform"] = plat
     return result
 
 
@@ -104,19 +124,29 @@ async def phone_toggle_wifi(
 
     Returns / 返回值:
         dict: {"ok": True, "wifi_on": bool} 或 {"ok": False, "error": str}
-    仅支持 Android / Android only.
+    支持 Android 与 HarmonyOS / Supports Android and HarmonyOS.
     """
     resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
     if err:
         return err
+    if plat == "harmony":
+        from phone_pilot.harmony.device.utils import (
+            set_wifi_enabled as set_harmony_wifi_enabled,
+        )
+
+        result = await asyncio.to_thread(set_harmony_wifi_enabled, resolved, enabled)
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "phone_toggle_wifi only supports Android",
+            "error": "phone_toggle_wifi only supports Android and HarmonyOS",
             "platform": plat,
         }
     result = await asyncio.to_thread(set_wifi_enabled, resolved, enabled)
     result["device_serial"] = resolved
+    result["platform"] = plat
     return result
 
 
@@ -136,19 +166,29 @@ async def phone_toggle_airplane(
 
     Returns / 返回值:
         dict: {"ok": True, "airplane_on": bool} 或 {"ok": False, "error": str}
-    仅支持 Android / Android only.
+    支持 Android 与 HarmonyOS / Supports Android and HarmonyOS.
     """
     resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
     if err:
         return err
+    if plat == "harmony":
+        from phone_pilot.harmony.device.utils import (
+            set_airplane_mode as set_harmony_airplane_mode,
+        )
+
+        result = await asyncio.to_thread(set_harmony_airplane_mode, resolved, enabled)
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "phone_toggle_airplane only supports Android",
+            "error": "phone_toggle_airplane only supports Android and HarmonyOS",
             "platform": plat,
         }
     result = await asyncio.to_thread(set_airplane_mode, resolved, enabled)
     result["device_serial"] = resolved
+    result["platform"] = plat
     return result
 
 
@@ -171,7 +211,7 @@ async def phone_execute_shell(
     Returns / 返回值:
         dict: {"ok": True, "stdout": str, "stderr": str, "returncode": int}
         或 {"ok": False, "error": str}
-    仅支持 Android / Android only.
+    支持 Android / iOS / HarmonyOS.
     """
     resolved, plat, err = _resolve_device_serial(device_serial or None, platform)
     if err:
@@ -185,10 +225,21 @@ async def phone_execute_shell(
         result["device_serial"] = resolved
         result["platform"] = plat
         return result
+    if plat == "harmony":
+        from phone_pilot.harmony.device.utils import (
+            execute_shell as harmony_execute_shell,
+        )
+
+        result = await asyncio.to_thread(
+            harmony_execute_shell, resolved, command, timeout_s
+        )
+        result["device_serial"] = resolved
+        result["platform"] = plat
+        return result
     if plat != "android":
         return {
             "ok": False,
-            "error": "phone_execute_shell supports Android and iOS",
+            "error": "phone_execute_shell supports Android, iOS, and HarmonyOS",
             "platform": plat,
         }
     result = await asyncio.to_thread(execute_shell, resolved, command, timeout_s)
@@ -216,6 +267,22 @@ def _phone_get_device_info_sync(device_serial: Optional[str], platform: str) -> 
         os_version = ""
         if plat == "android":
             model, os_version = get_device_model_and_version(resolved)
+        elif plat == "harmony":
+            try:
+                info = driver.device_info()
+                if info.get("ok"):
+                    model = info.get("model", "")
+                    os_version = info.get("sysVersion", "")
+            except Exception:
+                pass
+            if not model or not os_version:
+                from phone_pilot.harmony.device.utils import (
+                    get_device_model_and_version as get_harmony_model_and_version,
+                )
+
+                m, v = get_harmony_model_and_version(resolved)
+                model = model or m
+                os_version = os_version or v
         elif plat == "ios":
             try:
                 info = driver.device_info()

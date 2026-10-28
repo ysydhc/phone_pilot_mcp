@@ -75,9 +75,15 @@ async def phone_run_script(
     import time as _time
     import contextlib
 
+    import os
     from phone_pilot.script_api import ScriptContext
 
-    script_path = pathlib.Path(path).expanduser().resolve()
+    raw_p = pathlib.Path(path).expanduser()
+    if not raw_p.is_absolute() and repo_path:
+        candidate = (pathlib.Path(repo_path).expanduser() / raw_p).resolve()
+        script_path = candidate if candidate.exists() else raw_p.resolve()
+    else:
+        script_path = raw_p.resolve()
     if not script_path.exists():
         return {"ok": False, "error": f"script not found: {path}"}
 
@@ -101,9 +107,20 @@ async def phone_run_script(
             }
         apk_installed = {"ok": True, "apk_path": str(install_apk)}
 
+    base_out_dir = "./.recordings"
+    try:
+        if os.getcwd() == "/":
+            anchor = pathlib.Path(repo_path).expanduser().resolve() if repo_path else script_path.parent
+            base_out_dir = str(anchor / ".recordings")
+    except Exception:
+        pass
+
     ctx = ScriptContext(
         device_serial=serial or "",
         platform=plat or "auto",
+        out_dir=base_out_dir,
+        recordings_dir=base_out_dir if base_out_dir != "./.recordings" else None,
+        script_path=str(script_path),
     )
 
     # Dynamic import

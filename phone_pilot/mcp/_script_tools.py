@@ -569,18 +569,19 @@ async def phone_memory_snapshot(
 
     Returns / 返回值:
         dict: {"ok": True, "summary": {...}, ...} 或 {"ok": False, "error": str}
+    支持 Android 与 HarmonyOS / Supports Android and HarmonyOS.
     """
 
     def _do(s: str, p: str) -> dict:
-        if p != "android":
+        if p not in ("android", "harmony"):
             return {
                 "ok": False,
-                "error": "memory_snapshot only supports Android",
+                "error": "memory_snapshot only supports Android and HarmonyOS",
                 "platform": p,
             }
         from phone_pilot.memory_analyze.meminfo import capture_meminfo
 
-        return capture_meminfo(s, package)
+        return capture_meminfo(s, package, platform=p)
 
     return await asyncio.to_thread(_with_device, _do, device_serial or None, platform)
 
