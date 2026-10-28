@@ -71,6 +71,36 @@ class TestInstallUninstall:
             r = system.uninstall_app(SERIAL, "com.example.a")
         assert r["ok"] is True
 
+    def test_install_app_real_device(self):
+        with (
+            patch.object(system.pmd_utils, "detect_form_factor", return_value="real"),
+            patch.object(system.pmd_utils, "pmd_executable", return_value="pmd"),
+            patch.object(
+                system.pmd_runner, "run", return_value=_completed(returncode=0)
+            ) as mock_run,
+        ):
+            r = system.install_app(SERIAL, "/tmp/MyApp.ipa")
+        assert r["ok"] is True
+        assert r["engine"] == "pymobiledevice3"
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "apps" in cmd and "install" in cmd
+
+    def test_uninstall_app_real_device(self):
+        with (
+            patch.object(system.pmd_utils, "detect_form_factor", return_value="real"),
+            patch.object(system.pmd_utils, "pmd_executable", return_value="pmd"),
+            patch.object(
+                system.pmd_runner, "run", return_value=_completed(returncode=0)
+            ) as mock_run,
+        ):
+            r = system.uninstall_app(SERIAL, "com.example.a")
+        assert r["ok"] is True
+        assert r["engine"] == "pymobiledevice3"
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "apps" in cmd and "uninstall" in cmd
+
 
 class TestExecuteShell:
     def test_execute_shell_allows_whitelisted(self):

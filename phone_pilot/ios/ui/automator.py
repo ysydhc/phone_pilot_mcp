@@ -38,6 +38,18 @@ def _rect_center(rect: dict) -> tuple[int, int]:
     return (x + w // 2, y + h // 2)
 
 
+def _scale_rect(rect: dict, scale: float) -> dict:
+    """Scale a WDA rect dict (in points) to physical pixels."""
+    if scale == 1.0 or not rect:
+        return rect
+    return {
+        "x": int(round(rect.get("x", 0) * scale)),
+        "y": int(round(rect.get("y", 0) * scale)),
+        "width": int(round(rect.get("width", 0) * scale)),
+        "height": int(round(rect.get("height", 0) * scale)),
+    }
+
+
 def _bounds_str(rect: dict) -> str:
     """Build an Android-style "[x1,y1][x2,y2]" bounds string from a WDA rect."""
     x = int(rect.get("x", 0))
@@ -47,12 +59,13 @@ def _bounds_str(rect: dict) -> str:
     return f"[{x},{y}][{x + w},{y + h}]"
 
 
-def parse_wda_source(source: Union[str, dict]) -> list[dict]:
+def parse_wda_source(source: Union[str, dict], scale: float = 1.0) -> list[dict]:
     """
     Flatten a WDA source tree into a list of element dicts.
 
     Each dict carries the raw WDA fields plus top-level center_x / center_y
-    and a bounds string (cross-platform contract).
+    and a bounds string (cross-platform contract). When scale != 1.0, rect and
+    coordinates are converted from WDA points to physical pixels.
     """
     root = _as_dict(source)
     out: list[dict] = []
@@ -60,7 +73,8 @@ def parse_wda_source(source: Union[str, dict]) -> list[dict]:
     def _walk(node: dict) -> None:
         if not isinstance(node, dict):
             return
-        rect = node.get("rect", {}) or {}
+        raw_rect = node.get("rect", {}) or {}
+        rect = _scale_rect(raw_rect, scale) if scale != 1.0 else raw_rect
         cx, cy = _rect_center(rect)
         elem = {
             "type": node.get("type", ""),
@@ -102,15 +116,17 @@ def wda_node_to_universal(elem: dict) -> UINode:
     )
 
 
-def wda_source_to_ui_nodes(source: Union[str, dict]) -> list[UINode]:
+def wda_source_to_ui_nodes(
+    source: Union[str, dict], scale: float = 1.0
+) -> list[UINode]:
     """Convert a full WDA source tree to a universal UINode list."""
-    return [wda_node_to_universal(e) for e in parse_wda_source(source)]
+    return [wda_node_to_universal(e) for e in parse_wda_source(source, scale=scale)]
 
 
-def collect_texts(source: Union[str, dict]) -> list[str]:
+def collect_texts(source: Union[str, dict], scale: float = 1.0) -> list[str]:
     """Collect visible text (label / value / name) from a WDA source tree."""
     texts: list[str] = []
-    for elem in parse_wda_source(source):
+    for elem in parse_wda_source(source, scale=scale):
         for key in ("label", "value", "name"):
             v = elem.get(key)
             if v and v not in texts:
@@ -157,11 +173,15 @@ def match_selector(elem: dict, selector: dict) -> bool:
     return True
 
 
-def find_in_source(source: Union[str, dict], selector: dict) -> list[dict]:
+def find_in_source(
+    source: Union[str, dict], selector: dict, scale: float = 1.0
+) -> list[dict]:
     """Return all parsed elements matching the selector (each has center_x/y)."""
     if not selector:
         return []
-    return [e for e in parse_wda_source(source) if match_selector(e, selector)]
+    return [
+        e for e in parse_wda_source(source, scale=scale) if match_selector(e, selector)
+    ]
 
 
 def selector_to_wda_predicate(selector: dict) -> str:

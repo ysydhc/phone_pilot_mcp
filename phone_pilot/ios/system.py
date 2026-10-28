@@ -68,27 +68,55 @@ def set_clipboard(serial: str, text: str) -> dict:
 
 
 def install_app(serial: str, app_path: str) -> dict:
-    """Install a .app/.ipa bundle via `simctl install`."""
+    """Install a .app/.ipa bundle via `simctl install` (simulator) or `pmd apps install` (real device)."""
     if not app_path or not str(app_path).strip():
         return {"ok": False, "error": "app_path is required", "platform": "ios"}
+    form = pmd_utils.detect_form_factor(serial)
     try:
-        proc = _simctl(serial, ["install", serial, app_path], timeout_s=120.0)
+        if form == "real":
+            exe = pmd_utils.pmd_executable()
+            proc = pmd_runner.run(
+                [exe, "apps", "install", app_path, "--udid", serial],
+                timeout_s=120.0,
+            )
+            engine = "pymobiledevice3"
+        else:
+            proc = _simctl(serial, ["install", serial, app_path], timeout_s=120.0)
+            engine = "simctl"
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc), "platform": "ios"}
     if proc.returncode != 0:
-        return {"ok": False, "error": (proc.stderr or "install_failed").strip()[:200]}
-    return {"ok": True, "app_path": app_path}
+        return {
+            "ok": False,
+            "error": (proc.stderr or "install_failed").strip()[:200],
+            "platform": "ios",
+        }
+    return {"ok": True, "app_path": app_path, "engine": engine}
 
 
 def uninstall_app(serial: str, bundle_id: str) -> dict:
-    """Uninstall an app via `simctl uninstall`."""
+    """Uninstall an app via `simctl uninstall` (simulator) or `pmd apps uninstall` (real device)."""
+    form = pmd_utils.detect_form_factor(serial)
     try:
-        proc = _simctl(serial, ["uninstall", serial, bundle_id], timeout_s=60.0)
+        if form == "real":
+            exe = pmd_utils.pmd_executable()
+            proc = pmd_runner.run(
+                [exe, "apps", "uninstall", bundle_id, "--udid", serial],
+                timeout_s=60.0,
+            )
+            engine = "pymobiledevice3"
+        else:
+            proc = _simctl(serial, ["uninstall", serial, bundle_id], timeout_s=60.0)
+            engine = "simctl"
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc), "platform": "ios"}
     if proc.returncode != 0:
-        return {"ok": False, "error": (proc.stderr or "uninstall_failed").strip()[:200]}
-    return {"ok": True, "package": bundle_id}
+        return {
+            "ok": False,
+            "error": (proc.stderr or "uninstall_failed").strip()[:200],
+            "platform": "ios",
+        }
+    return {"ok": True, "package": bundle_id, "engine": engine}
 
 
 def execute_shell(serial: str, command: str, timeout_s: float = 30.0) -> dict:

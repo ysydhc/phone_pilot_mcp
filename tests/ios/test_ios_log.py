@@ -106,3 +106,22 @@ class TestDriverLogEntries:
             res2 = drv.stop_log_capture(out)
         assert res2["ok"] is True
         stop.assert_called_once()
+
+    def test_dump_log_success(self, tmp_path):
+        out = str(tmp_path / "dump.log")
+        drv = iOSDriver(SERIAL)
+        with patch.object(
+            drv, "read_log", return_value="log line 1\nlog line 2\n"
+        ) as mock_read:
+            res = drv.dump_log(out, lines=100)
+        assert res["ok"] is True
+        assert res["lines"] == 2
+        mock_read.assert_called_once_with(lines=100)
+        assert (tmp_path / "dump.log").read_text(encoding="utf-8") == "log line 1\nlog line 2\n"
+
+    def test_dump_log_failure(self):
+        drv = iOSDriver(SERIAL)
+        with patch.object(drv, "read_log", side_effect=RuntimeError("read error")):
+            res = drv.dump_log("/tmp/dump.log")
+        assert res["ok"] is False
+        assert res["error"] == "dump_log_failed"

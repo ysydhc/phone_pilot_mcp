@@ -97,6 +97,13 @@ def _parse_simctl_listapps(text: str, include_system: bool) -> list[str]:
     return bundles
 
 
+def _to_pt(val: int | float, scale: float) -> int:
+    """Convert physical pixels to WDA logical points."""
+    if scale <= 0:
+        scale = 1.0
+    return int(round(val / scale))
+
+
 # ---------------------------------------------------------------------------
 # iOSInputDriver  (5 entries — InputDriver protocol)
 # ---------------------------------------------------------------------------
@@ -109,10 +116,11 @@ class iOSInputDriver:
         self._serial = device_serial
 
     def tap(self, x: int, y: int, wait_s: float = 0.15) -> dict:
-        """Tap at screen coordinates via WDA."""
+        """Tap at screen coordinates (physical pixels) via WDA."""
 
         def _do(client):
-            client.tap(int(x), int(y))
+            scale = float(getattr(client, "scale", 1.0) or 1.0)
+            client.tap(_to_pt(x, scale), _to_pt(y, scale))
             return {"ok": True, "x": int(x), "y": int(y), "engine": "wda"}
 
         return _wda_call(self._serial, _do)
@@ -125,10 +133,17 @@ class iOSInputDriver:
         y2: int,
         duration_ms: int = 300,
     ) -> dict:
-        """Swipe from (x1, y1) to (x2, y2) via WDA drag-for-duration."""
+        """Swipe from (x1, y1) to (x2, y2) in physical pixels via WDA drag-for-duration."""
 
         def _do(client):
-            client.swipe(int(x1), int(y1), int(x2), int(y2), duration_ms / 1000.0)
+            scale = float(getattr(client, "scale", 1.0) or 1.0)
+            client.swipe(
+                _to_pt(x1, scale),
+                _to_pt(y1, scale),
+                _to_pt(x2, scale),
+                _to_pt(y2, scale),
+                duration_ms / 1000.0,
+            )
             return {
                 "ok": True,
                 "x1": int(x1),
@@ -142,10 +157,11 @@ class iOSInputDriver:
         return _wda_call(self._serial, _do)
 
     def long_press(self, x: int, y: int, duration_ms: int = 500) -> dict:
-        """Long press at coordinates via WDA tap_hold."""
+        """Long press at coordinates (physical pixels) via WDA tap_hold."""
 
         def _do(client):
-            client.tap_hold(int(x), int(y), duration_ms / 1000.0)
+            scale = float(getattr(client, "scale", 1.0) or 1.0)
+            client.tap_hold(_to_pt(x, scale), _to_pt(y, scale), duration_ms / 1000.0)
             return {"ok": True, "x": int(x), "y": int(y), "engine": "wda"}
 
         return _wda_call(self._serial, _do)
@@ -304,11 +320,33 @@ class iOSUIDriver:
 
     def __init__(self, device_serial: str) -> None:
         self._serial = device_serial
+        self._scale_cache: Optional[float] = None
+
+    def _get_scale(self) -> float:
+        """Get scale factor (physical pixels / logical points). Cached."""
+        if self._scale_cache is not None:
+            return self._scale_cache
+
+        def _do(client):
+            return float(getattr(client, "scale", 1.0) or 1.0)
+
+        res = _wda_call(self._serial, _do)
+        if isinstance(res, (int, float)) and res > 0:
+            self._scale_cache = float(res)
+            return self._scale_cache
+        return 1.0
 
     def _source(self) -> str:
         """Fetch WDA source as a JSON string (empty string on failure)."""
 
         def _do(client):
+            if self._scale_cache is None:
+                try:
+                    s = getattr(client, "scale", 1.0)
+                    if s:
+                        self._scale_cache = float(s)
+                except Exception:
+                    pass
             return client.source(format="json")
 
         result = _wda_call(self._serial, _do)
@@ -326,16 +364,18 @@ class iOSUIDriver:
         return self._source()
 
     def dump_ui_nodes(self) -> list:
-        """Dump UI hierarchy as universal UINode list."""
-        return automator.wda_source_to_ui_nodes(self._source())
+        """Dump UI hierarchy as universal UINode list (in physical pixels)."""
+        return automator.wda_source_to_ui_nodes(self._source(), scale=self._get_scale())
 
     def collect_all_texts(self) -> list[str]:
         """Collect all visible text/label/value from UI tree."""
-        return automator.collect_texts(self._source())
+        return automator.collect_texts(self._source(), scale=self._get_scale())
 
     def find_elements(self, selector: dict) -> list[dict]:
-        """Find UI elements matching selector. Each result contains center_x/center_y."""
-        return automator.find_in_source(self._source(), selector)
+        """Find UI elements matching selector. Each result contains center_x/center_y in physical pixels."""
+        return automator.find_in_source(
+            self._source(), selector, scale=self._get_scale()
+        )
 
     def get_current_activity(self) -> dict:
         """Get current foreground app → {"package": bundleId, "activity": ""}."""
@@ -343,9 +383,14 @@ class iOSUIDriver:
         def _do(client):
             info = client.app_current()
             bundle = ""
+            pid = None
             if isinstance(info, dict):
                 bundle = info.get("bundleId") or info.get("bundleID") or ""
-            return {"ok": True, "package": bundle, "activity": ""}
+                pid = info.get("pid")
+            res = {"ok": True, "package": bundle, "activity": ""}
+            if pid is not None:
+                res["pid"] = pid
+            return res
 
         result = _wda_call(self._serial, _do)
         if isinstance(result, dict) and result.get("ok"):
@@ -437,6 +482,12 @@ class iOSAppDriver:
         """Clear application data. iOS v1: not_supported (no direct API; see design §4.4)."""
         return _err("not_supported", package=package)
 
+    def install_app(self, app_path: str) -> dict:
+        """Install .app (simulator) or .ipa (real device). Form-factor split."""
+        from phone_pilot.ios import system
+
+        return system.install_app(self._serial, app_path)
+
     def uninstall(self, package: str, keep_data: bool = False) -> dict:
         """Uninstall an app. keep_data ignored on iOS. Form-factor split."""
         try:
@@ -451,6 +502,10 @@ class iOSAppDriver:
         if proc.returncode != 0:
             return _err("uninstall_failed", package=package, detail=proc.stderr or "")
         return {"ok": True, "package": package, "engine": engine}
+
+    def uninstall_app(self, package: str) -> dict:
+        """Uninstall app by bundle ID (alias for uninstall)."""
+        return self.uninstall(package)
 
 
 # ---------------------------------------------------------------------------
@@ -750,8 +805,28 @@ class iOSDriver:
         return _err("not_supported")
 
     def dump_log(self, path: str, **kwargs) -> dict:
-        """Export a slice of syslog to a host file via a short capture window."""
-        return _err("not_implemented")
+        """Export a slice of syslog to a host file."""
+        try:
+            lines = kwargs.pop("lines", 500)
+            log_content = self.read_log(lines=lines, **kwargs)
+            out_file = pathlib.Path(path)
+            out_file.parent.mkdir(parents=True, exist_ok=True)
+            out_file.write_text(log_content, encoding="utf-8", errors="replace")
+            return {
+                "ok": True,
+                "path": str(out_file.resolve()),
+                "lines": len(log_content.splitlines()),
+            }
+        except Exception as exc:  # noqa: BLE001
+            return _err("dump_log_failed", detail=str(exc))
+
+    def install_app(self, app_path: str) -> dict:
+        """Install app from host path."""
+        return self._app.install_app(app_path)
+
+    def uninstall_app(self, package: str) -> dict:
+        """Uninstall app by bundle ID."""
+        return self._app.uninstall(package)
 
     def start_log_capture(
         self,
