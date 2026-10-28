@@ -28,10 +28,11 @@ def capture_meminfo(
     package_name: str,
     *,
     timeout_s: float = 30.0,
+    platform: str = "android",
 ) -> dict:
     """
-    Capture memory info using `adb shell dumpsys meminfo <package>`.
-    使用 `adb shell dumpsys meminfo <package>` 捕获内存信息。
+    Capture memory info using `adb shell dumpsys meminfo <package>` or HarmonyOS equivalent.
+    使用 `dumpsys meminfo` (Android) 或 `hidumper --mem` (HarmonyOS) 捕获内存信息。
 
     This captures detailed memory breakdown including:
     捕获详细的内存分解，包括：
@@ -44,6 +45,7 @@ def capture_meminfo(
         device_serial: Device serial number / 设备序列号
         package_name: App package name / 应用包名
         timeout_s: Timeout in seconds / 超时时间（秒）
+        platform: Target platform ("android" or "harmony") / 目标平台
 
     Returns:
         dict with parsed memory info / 包含解析后内存信息的字典
@@ -52,6 +54,15 @@ def capture_meminfo(
         return {"ok": False, "error": "package_name is required"}
 
     package_name = package_name.strip()
+
+    if platform == "harmony":
+        from phone_pilot.harmony.device.utils import (
+            capture_meminfo as capture_harmony_meminfo,
+        )
+
+        return capture_harmony_meminfo(
+            device_serial, package_name, timeout_s=timeout_s
+        )
 
     try:
         cmd = adb_prefix(device_serial) + ["shell", "dumpsys", "meminfo", package_name]
@@ -66,12 +77,14 @@ def capture_meminfo(
                 "returncode": proc.returncode,
                 "stderr": proc.stderr,
                 "package": package_name,
+                "platform": "android",
             }
 
         output = proc.stdout
         parsed = parse_meminfo(output)
         parsed["ok"] = True
         parsed["package"] = package_name
+        parsed["platform"] = "android"
         parsed["raw_output"] = output
         parsed["captured_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -82,6 +95,7 @@ def capture_meminfo(
             "ok": False,
             "error": str(e),
             "package": package_name,
+            "platform": "android",
         }
 
 
@@ -377,17 +391,44 @@ def diff_meminfo(before: dict, after: dict) -> dict:
     return {
         "ok": True,
         "before": {
+            "platform": before.get("platform", "android"),
             "package": before.get("package"),
             "captured_at": before.get("captured_at"),
             **_summary_mb(before),
         },
         "after": {
+            "platform": after.get("platform", "android"),
             "package": after.get("package"),
             "captured_at": after.get("captured_at"),
             **_summary_mb(after),
         },
         "diff": diff,
     }
+
+
+def compare_meminfo(before: dict, after: dict) -> dict:
+    """比较两个 meminfo 快照（支持 Android 及 HarmonyOS）。
+
+    返回包含 summary diff 和详细模块 (details) 变化的字典。
+    """
+    res = diff_meminfo(before, after)
+    b_det = before.get("details", {})
+    a_det = after.get("details", {})
+    all_keys = set(b_det.keys()) | set(a_det.keys())
+    details_diff = {}
+    for k in sorted(all_keys):
+        b_val = b_det.get(k, {})
+        a_val = a_det.get(k, {})
+        b_pss = b_val.get("pss", b_val.get("pss_total_kb", 0))
+        a_pss = a_val.get("pss", a_val.get("pss_total_kb", 0))
+        details_diff[k] = {
+            "delta_pss_kb": a_pss - b_pss,
+            "delta_pss_mb": round((a_pss - b_pss) / 1024.0, 2),
+            "before_pss_kb": b_pss,
+            "after_pss_kb": a_pss,
+        }
+    res["details_diff"] = details_diff
+    return res
 
 
 # ---------------------------------------------------------------------------
