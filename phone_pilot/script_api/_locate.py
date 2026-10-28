@@ -615,6 +615,7 @@ def _ui_locate(ctx: ScriptContext, locator: dict) -> Optional[UIElement]:
         res = find_text(
             ctx,
             str(query),
+            exact=bool(locator.get("exact", False)),
             ocr_lang=locator.get("ocr_lang"),
             ocr_exact=bool(locator.get("ocr_exact", False)),
             ocr_case_sensitive=bool(locator.get("ocr_case_sensitive", False)),

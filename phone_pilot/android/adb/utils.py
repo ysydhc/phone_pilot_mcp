@@ -101,6 +101,7 @@ def adb_executable() -> str:
     - Using an absolute path makes tool execution more reliable.
     """
     global _ADB_CACHED
+    ensure_adb_env()
     if _ADB_CACHED:
         return _ADB_CACHED
 

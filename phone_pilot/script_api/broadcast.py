@@ -17,6 +17,7 @@ sub-classification on timeout (ADR-7).
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import time
@@ -45,6 +46,97 @@ def _invalid(field: str, value: str) -> dict:
     }
 
 
+def _pid_of_ios(ctx: ScriptContext, package: str) -> Optional[int]:
+    """iOS 存活与 PID 探测：
+    1. 优先尝试受限 shell: ps（通过 driver.shell 或 phone_pilot.ios.system.execute_shell）
+    2. 次选通过 driver.ui.get_current_activity() 检查前台 bundle ID（若有 pid 字段则返回，若无则返回 1 作为存活哨兵）
+    3. 再次尝试 WDA 直连 client.app_current() / client.app_state()
+    """
+    serial = getattr(ctx, "device_serial", "") or getattr(
+        getattr(ctx, "driver", None), "device_serial", ""
+    )
+    ps_outputs: list[str] = []
+
+    # 1a. driver.shell("ps") (例如测试 mock 或自定义 driver)
+    try:
+        r = ctx.driver.shell("ps")
+        if isinstance(r, dict) and r.get("ok") and r.get("stdout"):
+            ps_outputs.append(r["stdout"])
+    except Exception:
+        pass
+
+    # 1b. system.execute_shell(serial, "ps") (针对 iOS 模拟器)
+    if serial:
+        try:
+            from phone_pilot.ios import system
+
+            r = system.execute_shell(serial, "ps")
+            if isinstance(r, dict) and r.get("ok") and r.get("stdout"):
+                ps_outputs.append(r["stdout"])
+        except Exception:
+            pass
+
+    for out in ps_outputs:
+        for line in out.splitlines():
+            if package in line:
+                cols = line.split()
+                if not cols:
+                    continue
+                # ps 输出可能为 "PID TTY TIME CMD" 或 "UID PID PPID..."
+                # 若带 UID (ps -ef)，第 2 列 (idx=1) 为 PID；若不带 UID (ps)，第 2 列通常为 TTY ("??")，第 1 列 (idx=0) 为 PID
+                for idx in (1, 0, 2):
+                    if idx < len(cols) and cols[idx].isdigit():
+                        return int(cols[idx])
+
+    # 2. 检查 driver.ui.get_current_activity()
+    try:
+        driver = getattr(ctx, "driver", None)
+        if driver and hasattr(driver, "ui") and hasattr(driver.ui, "get_current_activity"):
+            act = driver.ui.get_current_activity()
+            if isinstance(act, dict) and act.get("ok"):
+                cur_pkg = act.get("package") or ""
+                if cur_pkg == package:
+                    pid = act.get("pid")
+                    if pid and str(pid).isdigit() and int(pid) > 0:
+                        return int(pid)
+                    return 1
+    except Exception:
+        pass
+
+    # 3. 尝试 WDA 直连 app_current() / app_state()
+    if serial:
+        try:
+            from phone_pilot.ios.driver import _wda_call
+
+            def _wda_probe(client):
+                try:
+                    cur = client.app_current()
+                    if isinstance(cur, dict):
+                        b = cur.get("bundleId") or cur.get("bundleID") or ""
+                        if b == package:
+                            p = cur.get("pid")
+                            return int(p) if (p and str(p).isdigit() and int(p) > 0) else 1
+                except Exception:
+                    pass
+                try:
+                    state = client.app_state(package)
+                    if isinstance(state, int) and state > 1:
+                        return 1
+                    if isinstance(state, dict) and state.get("value", 0) > 1:
+                        return 1
+                except Exception:
+                    pass
+                return None
+
+            wda_res = _wda_call(serial, _wda_probe)
+            if isinstance(wda_res, int) and wda_res > 0:
+                return wda_res
+        except Exception:
+            pass
+
+    return None
+
+
 def _pid_of(ctx: ScriptContext, package: str) -> Optional[int]:
     """探测进程 pid：先 ``pidof``，失败降级 ``ps`` 解析（ADR-4）。
     Probe the process pid: try ``pidof`` first, fall back to parsing
@@ -61,19 +153,35 @@ def _pid_of(ctx: ScriptContext, package: str) -> Optional[int]:
     Returns / 返回值:
         进程 pid，未找到返回 None / Process pid, or None if not running.
     """
+    if getattr(ctx, "platform", "") == "ios":
+        return _pid_of_ios(ctx, package)
+
     r = ctx.driver.shell(f"pidof {shlex.quote(package)}")
     out = (r.get("stdout") or "").strip()
     if r.get("ok") and out:
-        return int(out.split()[0])  # 多 pid 取第一个 / first pid wins (B7)
-    # 降级 ps（API<23 无 pidof；ps 输出最后一列为进程名，精确匹配）
+        first = out.split()[0]
+        if first.isdigit():
+            return int(first)  # 多 pid 取第一个 / first pid wins (B7)
+    # 降级 ps（Android 降级 ps；HarmonyOS 降级 ps -ef / ps -A / ps）
     # Fallback: parse `ps` (no pidof on API<23; last column is the exact name).
-    r = ctx.driver.shell("ps")
-    for line in (r.get("stdout") or "").splitlines():
-        cols = line.split()
-        if cols and cols[-1] == package:
-            for c in cols[1:3]:  # PID 通常在第 2 列，厂商差异容错 / vendor-tolerant
-                if c.isdigit():
-                    return int(c)
+    ps_cmds = (
+        ("ps -ef", "ps -A", "ps")
+        if getattr(ctx, "platform", "") == "harmony"
+        else ("ps",)
+    )
+    for cmd in ps_cmds:
+        r = ctx.driver.shell(cmd)
+        stdout = (r.get("stdout") or "").strip()
+        if not r.get("ok") or not stdout:
+            continue
+        for line in stdout.splitlines():
+            cols = line.split()
+            if not cols:
+                continue
+            if cols[-1] == package or cols[-1].endswith("/" + package):
+                for idx in (1, 0, 2):  # PID 通常在第 2 列，厂商差异容错 / vendor-tolerant
+                    if idx < len(cols) and cols[idx].isdigit():
+                        return int(cols[idx])
     return None
 
 
@@ -153,7 +261,36 @@ def send_broadcast(
         - cmd: 掩码后的命令串（证据用）/ redacted command string (evidence)
     """
     # 1. 平台判定 / platform gate
-    if ctx.platform != "android":
+    if ctx.platform == "ios":
+        # iOS 不支持系统广播；若传入了 scheme/deeplink 则降级通过 open_deeplink 触发
+        if "://" in action:
+            try:
+                res = ctx.driver.open_deeplink(action)
+                return {
+                    "ok": bool(res.get("ok")),
+                    "ack_seen": False,
+                    "line": None,
+                    "error": "" if res.get("ok") else str(res.get("error", "open_deeplink_failed")),
+                    "reason": "" if res.get("ok") else "open_deeplink_failed",
+                    "cmd": f"open_deeplink: {action}",
+                }
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "ack_seen": False,
+                    "line": None,
+                    "error": str(exc),
+                    "reason": "open_deeplink_failed",
+                    "cmd": f"open_deeplink: {action}",
+                }
+        return {
+            "ok": False,
+            "ack_seen": False,
+            "line": None,
+            "error": "not_supported",
+            "reason": "not_supported",
+        }
+    elif ctx.platform not in ("android", "harmony"):
         return {
             "ok": False,
             "ack_seen": False,
@@ -206,6 +343,34 @@ def send_broadcast(
     # 5. 拼命令：校验过的裸词外一律 shlex.quote / build command, quote all values
     def _build(masked: bool) -> str:
         redact = set(redact_keys or [])
+        if getattr(ctx, "platform", "") == "harmony":
+            parts = ["ces", "pub", "-e", shlex.quote(action)]
+            if extras:
+                if "data" in extras:
+                    shown_data = (
+                        _REDACTED if (masked and "data" in redact) else extras["data"]
+                    )
+                    parts += ["-d", shlex.quote(shown_data)]
+                elif extras:
+                    masked_extras = {
+                        k: (_REDACTED if (masked and k in redact) else v)
+                        for k, v in extras.items()
+                    }
+                    payload = masked_extras if masked else extras
+                    parts += ["-d", shlex.quote(json.dumps(payload))]
+                if "code" in extras and str(extras["code"]).isdigit():
+                    shown_code = (
+                        _REDACTED
+                        if (masked and "code" in redact)
+                        else str(extras["code"])
+                    )
+                    parts += ["-s", shown_code]
+            for f in flags or []:
+                parts.append(shlex.quote(f))
+            if package:
+                parts += ["-p", shlex.quote(package)]
+            return " ".join(parts)
+
         parts = ["am", "broadcast", "-a", shlex.quote(action)]
         if package:
             parts += ["-p", shlex.quote(package)]
@@ -221,7 +386,10 @@ def send_broadcast(
     cmd_logged = _build(masked=True)  # 日志/返回用 / for logs and return dict
 
     # 6. 发送 / send
-    _auto_log_print(f"  >> am broadcast: {cmd_logged}")
+    log_prefix = (
+        "ces pub" if getattr(ctx, "platform", "") == "harmony" else "am broadcast"
+    )
+    _auto_log_print(f"  >> {log_prefix}: {cmd_logged}")
     r = ctx.driver.shell(cmd)
     if not r.get("ok"):
         return {
@@ -276,7 +444,7 @@ def send_broadcast(
         _auto_log_print(
             f"  ... 等待 ACK '{wait_ack}' ({max(0, deadline - time.monotonic()):.0f}s)"
         )
-        time.sleep(0.5)
+        time.sleep(0.15)
 
 
 def _ensure_result(
@@ -363,7 +531,7 @@ def ensure_app_alive(
           "not_supported"}
     """
     # 1. 平台判定 + package 校验（ADR-12）/ platform gate + validation
-    if ctx.platform != "android":
+    if ctx.platform not in ("android", "harmony", "ios"):
         return _ensure_result(False, error="not_supported", reason="not_supported")
     if not _ACTION_RE.match(package):
         return _ensure_result(
@@ -372,9 +540,14 @@ def ensure_app_alive(
             reason="invalid_param",
         )
 
-    # 2. force_restart → 先杀进程（一例一重置）/ kill first when force_restart
+    # 2. force_restart → 先杀进程并清空旧日志（一例一重置）/ kill first and clear log when force_restart
     if force_restart:
         ctx.driver.app.force_stop(package)
+        try:
+            ctx.driver.clear_log()
+        except Exception:
+            pass
+        setattr(ctx, "_ui_cache", None)
 
     # 3. 存活探测（ADR-4）；已存活且非 force_restart → 不拉起且跳过等待（R1）
     #    probe; alive without force_restart → no relaunch, skip ready wait (R1)
@@ -428,7 +601,7 @@ def ensure_app_alive(
                 f"  ... 等待就绪 '{ready_event}' "
                 f"({max(0, deadline - time.monotonic()):.0f}s)"
             )
-            time.sleep(0.5)
+            time.sleep(0.2)
 
     # 7. 成功路径补一次存活探测填 pid / final probe to fill pid on success
     return _ensure_result(

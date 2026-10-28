@@ -21,7 +21,10 @@ from phone_pilot.android.adb.utils import adb_prefix
 from phone_pilot.android.adb.runner import CommandRunner
 
 
-_DUMP_PATH_RE = re.compile(r"UI hierarchy dumped to:\s*(\S+)")
+_DUMP_PATH_RE = re.compile(
+    r"(?:UI\s+hier\w*y\s+)?dumped to:\s*(\S+)",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------

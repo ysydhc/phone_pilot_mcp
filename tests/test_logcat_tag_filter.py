@@ -89,7 +89,7 @@ def test_logcat_mark_accepts_tag_param():
     mark = logcat_mark(ctx, tag="TPAdapterTest")
 
     assert mark is not None
-    assert mark == "02-09 10:00:00.000"
+    assert mark == "02-09 10:00:00.001"
 
 
 def test_logcat_since_accepts_tag_param():

@@ -48,20 +48,24 @@ def get_screen_size(ctx: ScriptContext) -> dict:
 def _input_swipe(
     ctx: ScriptContext, x1: int, y1: int, x2: int, y2: int, *, duration_ms: int
 ) -> dict:
+    setattr(ctx, "_ui_cache", None)
     return ctx.driver.input.swipe(
         int(x1), int(y1), int(x2), int(y2), duration_ms=duration_ms
     )
 
 
 def _input_tap(ctx: ScriptContext, x: int, y: int, *, wait_s: float = 0.15) -> dict:
+    setattr(ctx, "_ui_cache", None)
     return ctx.driver.input.tap(int(x), int(y), wait_s=wait_s)
 
 
 def _input_keyevent(ctx: ScriptContext, keycode: str, *, wait_s: float = 0.12) -> dict:
+    setattr(ctx, "_ui_cache", None)
     return ctx.driver.input.keyevent(keycode)
 
 
 def _input_text(ctx: ScriptContext, text: str, *, enter: bool = False) -> dict:
+    setattr(ctx, "_ui_cache", None)
     return ctx.driver.input.input_text(text, enter=enter)
 
 

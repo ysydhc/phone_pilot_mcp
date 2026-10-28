@@ -875,7 +875,22 @@ def run_script(fn: Callable[[], int], *, ctx: Optional[ScriptContext] = None) ->
             _runner_log(f"  [perfetto] 启动失败: {exc}")
 
     try:
-        code = fn() or 0
+        if ctx is None:
+            ctx = ScriptContext()
+        import inspect
+        sig = inspect.signature(fn)
+        if len(sig.parameters) > 0:
+            res = fn(ctx)
+        else:
+            res = fn()
+        if isinstance(res, dict):
+            code = 0 if res.get("ok", True) else 1
+        elif isinstance(res, int):
+            code = res
+        elif isinstance(res, bool):
+            code = 0 if res else 1
+        else:
+            code = 0
     except RetryExhausted as exc:
         code = 1
         error_msg = str(exc)

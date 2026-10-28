@@ -305,6 +305,8 @@ class SelfHealer:
 
     def _get_app_context(self) -> tuple[str, str]:
         """获取当前 app + activity / Get current app context."""
+        if getattr(self._ctx, "_driver", None) is None:
+            return "", ""
         try:
             info = self._ctx.driver.ui.get_current_activity()
             return info.get("package", ""), info.get("activity", "")

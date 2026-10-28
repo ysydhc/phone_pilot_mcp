@@ -3002,6 +3002,7 @@ def get_current_focus(device_serial: Optional[str]) -> dict[str, Optional[str]]:
             "dumpsys window | grep -E 'mCurrentFocus=|mFocusedApp=' | head -n 5",
         ],
         check=False,
+        delay_s=0.0,
         log_output=False,
     )
     m = _FOCUS_RE.search(proc.stdout or "")
@@ -3194,7 +3195,10 @@ def _getprop(device_serial: Optional[str], key: str) -> Optional[str]:
     if not device_serial:
         return None
     proc = CommandRunner.run(
-        adb_prefix(device_serial) + ["shell", "getprop", key], check=False
+        adb_prefix(device_serial) + ["shell", "getprop", key],
+        check=False,
+        delay_s=0.0,
+        log_output=False,
     )
     val = (proc.stdout or "").strip()
     return val or None
@@ -3495,6 +3499,7 @@ def get_screen_size(device_serial: Optional[str]) -> Optional[tuple[int, int]]:
     proc = CommandRunner.run(
         adb_prefix(device_serial) + ["shell", "wm", "size"],
         check=False,
+        delay_s=0.0,
         timeout_s=6.0,
         log_output=False,
         silent=True,
@@ -3512,7 +3517,10 @@ def get_screen_density(device_serial: Optional[str]) -> Optional[int]:
     if not device_serial:
         return None
     proc = CommandRunner.run(
-        adb_prefix(device_serial) + ["shell", "wm", "density"], check=False
+        adb_prefix(device_serial) + ["shell", "wm", "density"],
+        check=False,
+        delay_s=0.0,
+        log_output=False,
     )
     text = proc.stdout or ""
     # Prefer Override density if present by scanning all matches and taking last.

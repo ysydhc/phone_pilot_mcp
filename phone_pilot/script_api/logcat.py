@@ -39,9 +39,9 @@ def _merge_logcat_lines(raw: str) -> list[str]:
     if not lines:
         return []
 
-    # logcat threadtime header: date time PID TID level Tag: message
+    # logcat threadtime header / hilog header: date time PID TID level Tag: message
     _LOG_RE = re.compile(
-        r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\d+\s+\w\s+[\w\-./]+:\s"
+        r"^(?:\d{4}-)?\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+\d+\s+\d+\s+\w\s+[\w\-./[\]]+:\s"
     )
 
     merged: list[str] = []
@@ -114,7 +114,22 @@ def logcat_find(
     return {"ok": ok, "count": len(hits), "pattern": pattern, "hits": hits}
 
 
-_LOG_TS_RE = re.compile(r"^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})")
+_LOG_TS_RE = re.compile(r"^((?:\d{4}-)?\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3})")
+
+
+def _bump_logcat_ts(ts: str) -> str:
+    """将 logcat/hilog 时间戳增加 1ms，避免 logcat -T / since 闭区间包含最后一行历史日志。"""
+    try:
+        from datetime import datetime, timedelta
+
+        has_year = bool(re.match(r"^\d{4}-", ts))
+        parse_str = ts if has_year else f"2024-{ts}"
+        fmt = "%Y-%m-%d %H:%M:%S.%f"
+        dt = datetime.strptime(parse_str, fmt) + timedelta(milliseconds=1)
+        out_fmt = "%Y-%m-%d %H:%M:%S.%f" if has_year else "%m-%d %H:%M:%S.%f"
+        return dt.strftime(out_fmt)[:-3]
+    except Exception:
+        return ts
 
 
 def logcat_mark(ctx: ScriptContext, *, tag: Optional[str] = None) -> Optional[str]:
@@ -140,11 +155,10 @@ def logcat_mark(ctx: ScriptContext, *, tag: Optional[str] = None) -> Optional[st
         if tag:
             content = ctx.driver.read_log(lines=5, tag_filter=tag)
             if content:
-                lines = content.strip().splitlines()
-                if lines:
-                    m = _LOG_TS_RE.match(lines[-1])
+                for line in reversed(content.strip().splitlines()):
+                    m = _LOG_TS_RE.match(line)
                     if m:
-                        return m.group(1)
+                        return _bump_logcat_ts(m.group(1))
         return ctx.driver.logcat_time()
     except Exception:
         return None
@@ -210,7 +224,7 @@ def logcat_assert_sequence(
     *,
     tag: Optional[str] = None,
     timeout_s: float = 60,
-    interval_s: float = 2,
+    interval_s: float = 0.3,
     regex: bool = True,
     merge_multiline: bool = True,
 ) -> dict:
@@ -332,7 +346,7 @@ def logcat_assert_sequence(
                 else ""
             )
         )
-        time.sleep(max(0.5, float(interval_s)))
+        time.sleep(max(0.15, float(interval_s)))
 
 
 def _flatten_hits(found: dict[str, list[str]]) -> list[str]:
@@ -350,7 +364,7 @@ def logcat_wait_for(
     *patterns: str,
     any_of: Optional[list[str]] = None,
     timeout_s: float = 30,
-    interval_s: float = 2,
+    interval_s: float = 0.3,
     lines: int = 5000,
     clear_before: bool = False,
     merge_multiline: bool = True,
@@ -383,7 +397,7 @@ def logcat_wait_for(
             ctx.driver.clear_log()
         except Exception:
             pass
-        time.sleep(0.5)
+        time.sleep(0.1)
 
     any_of_list = list(any_of or [])
     all_keys = list(patterns)
@@ -391,9 +405,15 @@ def logcat_wait_for(
     any_of_hit: Optional[str] = None
 
     deadline = time.monotonic() + max(0, float(timeout_s))
+    first_poll = True
+    poll_count = 0
 
-    while time.monotonic() < deadline:
-        time.sleep(max(0.5, float(interval_s)))
+    while time.monotonic() < deadline or first_poll:
+        if not first_poll:
+            step_s = 0.15 if poll_count == 1 else max(0.15, float(interval_s))
+            time.sleep(step_s)
+        first_poll = False
+        poll_count += 1
 
         content = ctx.driver.read_log(lines=int(lines), tag_filter=tag)
         if not content:

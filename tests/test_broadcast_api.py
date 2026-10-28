@@ -117,7 +117,7 @@ def test_mark_failed_no_send_when_wait_ack():
 
 def test_not_supported_platform():
     # B20
-    ctx = _ctx(platform="harmony")
+    ctx = _ctx(platform="ios")
     r = send_broadcast(ctx, "com.x.TEST")
     assert r["ok"] is False and r["error"] == "not_supported"
 

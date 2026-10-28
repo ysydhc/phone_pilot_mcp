@@ -1,13 +1,13 @@
 """弹窗自动检测与关闭 / Automatic popup detection and dismissal.
 
 三层本地检测管线：
-1. Window 层级检测 — 通过 dumpsys window 快速判断是否有 Dialog Window
+1. Window 层级检测 — 通过 dumpsys window / hidumper WindowManagerService 快速判断是否有 Dialog Window
 2. UI 树结构分析 — 检查 class_name / resource_id / 遮罩层等结构特征
 3. 文本规则匹配 — 内置 DEFAULT_RULES 覆盖中/英/日常见弹窗
 
 检测到弹窗后，查找并点击关闭按钮。
 Three-layer local detection pipeline:
-1. Window layer detection — dumpsys window for Dialog windows
+1. Window layer detection — dumpsys window / hidumper WindowManagerService for Dialog windows
 2. UI tree structure analysis — class_name / resource_id / overlay detection
 3. Text rule matching — built-in DEFAULT_RULES for common popups
 """
@@ -68,30 +68,59 @@ DEFAULT_RULES: list[PopupRule] = [
             "存储权限",
             "相机权限",
             "通知权限",
+            "麦克风权限",
+            "剪贴板",
+            "媒体和文件",
+            "仅本次允许",
+            "不允许",
+            "无线局域网",
+            "无线局域网与蜂窝网络",
+            "想访问您的",
+            "想使用您的",
+            "com.ohos.permissionmanager",
             "Allow",
             "Permission",
             "While using",
             "Only this time",
+            "Would Like to Access",
+            "Would Like to Use",
+            "Would Like to Send You Notifications",
         ],
         dismiss_texts=[
-            "允许",
-            "始终允许",
+            "仅本次允许",
             "仅在使用中允许",
+            "使用App时允许",
+            "始终允许",
+            "无线局域网与蜂窝网络",
+            "允许",
+            "好",
             "Allow",
             "While using the app",
+            "Allow While Using App",
+            "Allow only while in use",
             "Only this time",
+            "Always Allow",
             "許可",
             "許可する",
         ],
         dismiss_resource_ids=[
             "com.android.permissioncontroller:id/permission_allow_button",
             "com.android.packageinstaller:id/permission_allow_button",
+            "com.ohos.permissionmanager:id/permission_allow_button",
             "android:id/button1",
         ],
-        detect_class_names=["AlertDialog", "GrantPermissionsActivity"],
+        detect_class_names=[
+            "AlertDialog",
+            "GrantPermissionsActivity",
+            "CustomDialog",
+            "DialogComponent",
+            "XCUIElementTypeAlert",
+        ],
         detect_resource_ids=[
             "android:id/alertTitle",
             "com.android.permissioncontroller:id/permission_message",
+            "com.ohos.permissionmanager:id/permission_message",
+            "com.ohos.permissionmanager:id/permission_allow_button",
         ],
         priority=100,
     ),
@@ -193,6 +222,11 @@ _DIALOG_CLASS_PATTERNS = [
     "PopupWindow",
     "BottomSheetDialog",
     "DialogFragment",
+    "CustomDialog",
+    "DialogComponent",
+    "XCUIElementTypeAlert",
+    "XCUIElementTypeSheet",
+    "XCUIElementTypeActionSheet",
 ]
 
 # resource_id 精确匹配（系统标准弹窗组件）
@@ -204,11 +238,19 @@ _DIALOG_RESOURCE_IDS = {
     "android:id/button3",
     "android:id/parentPanel",
     "android:id/contentPanel",
+    "com.ohos.permissionmanager:id/permission_allow_button",
+    "com.ohos.permissionmanager:id/permission_message",
 }
 
-# Window 层级检测关键字
+# Android Window 层级检测关键字
 _DIALOG_WINDOW_PATTERNS = re.compile(
     r"(Dialog|PopupWindow|AlertDialog|BottomSheet|Toast|permission)",
+    re.IGNORECASE,
+)
+
+# HarmonyOS Window 层级检测关键字
+_DIALOG_WINDOW_PATTERNS_HARMONY = re.compile(
+    r"(Dialog|PopupWindow|AlertDialog|BottomSheet|Toast|permission|com\.ohos\.permissionmanager|WINDOW_TYPE_DIALOG|WINDOW_TYPE_FLOAT|WINDOW_TYPE_APP_SUB_WINDOW|subWindowType|isDialog)",
     re.IGNORECASE,
 )
 
@@ -254,6 +296,9 @@ class PopupGuard:
             dict: {"popup_type": str, "dismiss_text": str, "detect_method": str, ...}
             None: 未检测到弹窗 / No popup detected
         """
+        if getattr(self._ctx, "_driver", None) is None:
+            return None
+
         try:
             nodes = self._ctx.driver.ui.dump_ui_nodes()
         except Exception:
@@ -297,15 +342,34 @@ class PopupGuard:
     # ---- 第一层：Window 层级检测 ----
 
     def _check_window_layer(self) -> bool:
-        """通过 dumpsys window 检测是否有 Dialog Window。
-        Check for Dialog windows via dumpsys window.
+        """通过 dumpsys / hidumper window / WDA alert 检测是否有 Dialog Window。
+        Check for Dialog windows via dumpsys window, hidumper, or WDA alert.
         """
         try:
-            platform = self._ctx.driver.platform
+            platform = getattr(self._ctx.driver, "platform", None)
+            if callable(platform):
+                platform = platform()
             if platform == "android":
                 return self._check_window_android()
             elif platform == "harmony":
                 return self._check_window_harmony()
+            elif platform == "ios":
+                return self._check_window_ios()
+        except Exception:
+            pass
+        return False
+
+    def _check_window_ios(self) -> bool:
+        """iOS: 检测是否有 XCUIElementTypeAlert 或 XCUIElementTypeSheet 窗口。"""
+        try:
+            driver = getattr(self._ctx, "driver", None)
+            if driver and hasattr(driver, "ui"):
+                alerts = driver.ui.find_elements({"class_name": "XCUIElementTypeAlert"})
+                if alerts:
+                    return True
+                sheets = driver.ui.find_elements({"class_name": "XCUIElementTypeSheet"})
+                if sheets:
+                    return True
         except Exception:
             pass
         return False
@@ -327,8 +391,45 @@ class PopupGuard:
         return False
 
     def _check_window_harmony(self) -> bool:
-        """HarmonyOS: hdc shell 等效检测。"""
-        # HarmonyOS 目前没有 dumpsys 等效命令，跳过此层
+        """HarmonyOS: hidumper -s WindowManagerService -a -a → 检测 Dialog / Permission 等窗口。
+        HarmonyOS: inspect active windows via hidumper WindowManagerService.
+        """
+        try:
+            output = ""
+            try:
+                from phone_pilot.harmony.hdc.runner import HdcCommandRunner
+                from phone_pilot.harmony.hdc.utils import hdc_prefix
+
+                serial = getattr(self._ctx, "device_serial", "") or ""
+                cmd = hdc_prefix(serial) + [
+                    "shell",
+                    "hidumper",
+                    "-s",
+                    "WindowManagerService",
+                    "-a",
+                    "-a",
+                ]
+                result = HdcCommandRunner.run(cmd, check=False, log_output=False)
+                if result and getattr(result, "stdout", None):
+                    output = result.stdout
+            except Exception:
+                pass
+
+            # Fallback: driver.shell if available
+            if not output and hasattr(self._ctx, "driver") and hasattr(self._ctx.driver, "shell"):
+                try:
+                    res = self._ctx.driver.shell("hidumper -s WindowManagerService -a -a")
+                    if isinstance(res, dict):
+                        output = res.get("stdout", "") or ""
+                    elif isinstance(res, str):
+                        output = res
+                except Exception:
+                    pass
+
+            if output:
+                return bool(_DIALOG_WINDOW_PATTERNS_HARMONY.search(output))
+        except Exception:
+            pass
         return False
 
     # ---- 第二层：UI 树结构分析 ----
@@ -338,9 +439,10 @@ class PopupGuard:
         Analyze UI tree structure to detect popup characteristics.
 
         检查点 / Checks:
-        1. class_name 包含 Dialog/AlertDialog/BottomSheet/PopupWindow
-        2. resource_id 命中系统标准弹窗组件
-        3. 是否有覆盖大面积的遮罩层
+        1. class_name 包含 Dialog/AlertDialog/BottomSheet/PopupWindow/CustomDialog/DialogComponent
+        2. package / bundleName 命中系统权限弹窗 (com.ohos.permissionmanager)
+        3. resource_id 命中系统标准弹窗组件 (含 com.ohos.permissionmanager)
+        4. 是否有覆盖大面积的遮罩层
         """
         info: dict[str, Any] = {"is_popup": False, "type": "", "dialog_nodes": []}
 
@@ -360,12 +462,32 @@ class PopupGuard:
                     info["dialog_nodes"].append(node)
                     break
 
-            # 检查 resource_id
-            res_id = getattr(node, "resource_id", "") or ""
-            if res_id in _DIALOG_RESOURCE_IDS:
+            # 检查 package / bundleName / class_name 命中 HarmonyOS 权限弹窗
+            pkg = (
+                getattr(node, "package", "")
+                or getattr(node, "bundle_name", "")
+                or getattr(node, "bundleName", "")
+                or ""
+            )
+            if "com.ohos.permissionmanager" in pkg or "com.ohos.permissionmanager" in cls:
                 info["is_popup"] = True
                 if not info["type"]:
-                    info["type"] = "dialog_resource_id"
+                    info["type"] = "permission_dialog"
+                if node not in info["dialog_nodes"]:
+                    info["dialog_nodes"].append(node)
+
+            # 检查 resource_id
+            res_id = getattr(node, "resource_id", "") or ""
+            if res_id in _DIALOG_RESOURCE_IDS or "com.ohos.permissionmanager" in res_id:
+                info["is_popup"] = True
+                if not info["type"]:
+                    info["type"] = (
+                        "permission_dialog"
+                        if "com.ohos.permissionmanager" in res_id
+                        else "dialog_resource_id"
+                    )
+                if node not in info["dialog_nodes"]:
+                    info["dialog_nodes"].append(node)
 
             # 检查覆盖面积（遮罩层检测）
             if screen_size and not info["is_popup"]:
@@ -419,10 +541,14 @@ class PopupGuard:
         """通过文本规则匹配并关闭弹窗。
         Dismiss popup using text-based rules.
         """
-        # 收集所有可见文本
+        # 收集所有可见文本与标识
         all_texts: list[str] = []
         for node in nodes:
             for attr in ("text", "content_desc"):
+                val = getattr(node, attr, "") or ""
+                if val:
+                    all_texts.append(val)
+            for attr in ("package", "bundle_name", "bundleName"):
                 val = getattr(node, attr, "") or ""
                 if val:
                     all_texts.append(val)
@@ -439,7 +565,7 @@ class PopupGuard:
                     break
 
             if not detected:
-                # 也检查 detect_class_names / detect_resource_ids
+                # 也检查 detect_class_names / detect_resource_ids / package
                 for node in nodes:
                     cls = getattr(node, "class_name", "") or ""
                     for dcls in rule.detect_class_names:
@@ -451,6 +577,18 @@ class PopupGuard:
                     res_id = getattr(node, "resource_id", "") or ""
                     for drid in rule.detect_resource_ids:
                         if drid == res_id:
+                            detected = True
+                            break
+                    if detected:
+                        break
+                    pkg = (
+                        getattr(node, "package", "")
+                        or getattr(node, "bundle_name", "")
+                        or getattr(node, "bundleName", "")
+                        or ""
+                    )
+                    for dt in rule.detect_texts:
+                        if dt and dt in pkg:
                             detected = True
                             break
                     if detected:
@@ -484,6 +622,18 @@ class PopupGuard:
                 for node in nodes:
                     node_text = getattr(node, "text", "") or ""
                     node_desc = getattr(node, "content_desc", "") or ""
+
+                    # 避免 "允许" 误匹配 "不允许" / "Allow" 误匹配 "Don't allow" 等否定按钮
+                    if dismiss_text == "允许" and ("不允许" in node_text or "不允许" in node_desc):
+                        continue
+                    if dismiss_text.lower() == "allow":
+                        lower_combined = f"{node_text} {node_desc}".lower()
+                        if any(
+                            neg in lower_combined
+                            for neg in ("don't allow", "dont allow", "not allow", "never allow", "disallow")
+                        ):
+                            continue
+
                     if (
                         dismiss_text in node_text or dismiss_text in node_desc
                     ) and getattr(node, "clickable", False):

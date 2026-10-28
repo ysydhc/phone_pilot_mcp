@@ -339,9 +339,9 @@ class UIElement:
             dict: {"ok": bool, "x": int, "y": int, "times": int, "results": [...]}
         """
         # ---- 坐标刷新（不依赖 wait 参数）----
-        # 距上次 dump 超过 0.5s 时自动刷新坐标
+        # 距上次 dump 超过 3.0s 时自动刷新坐标（避免 find_text 后紧跟 logcat_mark 触发二次重 dump）
         dump_ts = self.meta.get("_dump_ts")
-        if dump_ts is not None and (time.time() - dump_ts) > 0.5:
+        if dump_ts is not None and (time.time() - dump_ts) > 3.0:
             refreshed = self.refresh()
             if isinstance(refreshed, UIElement):
                 self._sync_from(refreshed)

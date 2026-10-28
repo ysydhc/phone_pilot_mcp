@@ -15,12 +15,12 @@ from phone_pilot.android.adb.utils import adb_prefix
 from phone_pilot.android.adb.runner import CommandRunner
 
 
-def clear_logcat(device_serial: Optional[str] = None) -> dict:
+def clear_logcat(device_serial: Optional[str] = None, timeout_s: float = 5.0) -> dict:
     """
     Clear the in-memory logcat buffer: `adb logcat -c`.
     """
     cmd = adb_prefix(device_serial) + ["logcat", "-c"]
-    proc = CommandRunner.run(cmd, check=False, log_output=False)
+    proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, timeout_s=timeout_s)
     return {
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,
@@ -28,7 +28,7 @@ def clear_logcat(device_serial: Optional[str] = None) -> dict:
     }
 
 
-def device_logcat_time(device_serial: Optional[str] = None) -> Optional[str]:
+def device_logcat_time(device_serial: Optional[str] = None, timeout_s: float = 5.0) -> Optional[str]:
     """Return the device's current time as a logcat threadtime timestamp.
 
     Format matches ``logcat -v threadtime`` ("MM-DD HH:MM:SS.mmm"), so the
@@ -39,17 +39,17 @@ def device_logcat_time(device_serial: Optional[str] = None) -> Optional[str]:
     # The device-side shell re-splits the command on spaces, so the format
     # string must be quoted to survive as a single argument to `date`.
     cmd = adb_prefix(device_serial) + ["shell", "date", "'+%m-%d %H:%M:%S.000'"]
-    proc = CommandRunner.run(cmd, check=False, log_output=False)
+    proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, timeout_s=timeout_s)
     out = (proc.stdout or "").strip()
     return out or None
 
 
-def _pidof(device_serial: Optional[str], package_name: Optional[str]) -> Optional[int]:
+def _pidof(device_serial: Optional[str], package_name: Optional[str], timeout_s: float = 5.0) -> Optional[int]:
     """Return the first pid for a package, or None if not found."""
     if not package_name:
         return None
     cmd = adb_prefix(device_serial) + ["shell", "pidof", package_name]
-    proc = CommandRunner.run(cmd, check=False, log_output=False)
+    proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, timeout_s=timeout_s)
     out = (proc.stdout or "").strip()
     if not out:
         return None
@@ -86,6 +86,7 @@ def read_logcat(
     tag_filter: Optional[str] = None,
     package_name: Optional[str] = None,
     since: Optional[str] = None,
+    timeout_s: float = 10.0,
 ) -> Tuple[str, dict]:
     """
     Read logcat content from the device.
@@ -100,6 +101,7 @@ def read_logcat(
         since: Only return logs at/after this device timestamp (maps to
             ``logcat -T``, e.g. "01-15 14:30:00.000"). Takes precedence over
             ``lines``.
+        timeout_s: Command timeout in seconds.
 
     Returns:
         Tuple of (content, metadata dict)
@@ -119,7 +121,7 @@ def read_logcat(
             return ["-T", since]
         return ["-t", str(n)]
 
-    pid = _pidof(device_serial, package_name)
+    pid = _pidof(device_serial, package_name, timeout_s=min(5.0, timeout_s))
     cmd = adb_prefix(device_serial) + ["logcat", "-d", "-v", fmt2] + _window_args()
     used_pid = False
     if pid is not None:
@@ -128,13 +130,13 @@ def read_logcat(
     if fs:
         cmd.append(fs)
 
-    proc = CommandRunner.run(cmd, check=False, log_output=False)
+    proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, timeout_s=timeout_s)
     # If --pid is unsupported, retry without pid.
     if proc.returncode != 0 and used_pid:
         cmd = adb_prefix(device_serial) + ["logcat", "-d", "-v", fmt2] + _window_args()
         if fs:
             cmd.append(fs)
-        proc = CommandRunner.run(cmd, check=False, log_output=False)
+        proc = CommandRunner.run(cmd, check=False, delay_s=0.0, log_output=False, timeout_s=timeout_s)
         used_pid = False
 
     content = proc.stdout or ""

@@ -419,8 +419,8 @@ def find_text(
             locator=locator,
         )
 
-    def _find_once() -> Optional[UIElement]:
-        if use_ocr and len(norm_query) <= 2 and not exact:
+    def _find_once(allow_ocr: bool = True) -> Optional[UIElement]:
+        if use_ocr and allow_ocr and len(norm_query) <= 2 and not exact:
             hit = _try_ocr_first()
             if hit:
                 return hit
@@ -463,13 +463,16 @@ def find_text(
             if ui_boxes:
                 return _make_elem(ui_boxes[0])
 
-        if use_ocr:
+        if use_ocr and allow_ocr:
             return _try_ocr_first()
         return None
 
     attempts = max(1, int(retry_attempts))
     for i in range(attempts):
-        hit = _find_once()
+        if i > 0:
+            setattr(ctx, "_ui_cache", None)
+        # 仅在最后一次重试（或单次查找）时启用高耗时 OCR 兜底，避免页面刚打开时首轮失败立即卡在 OCR
+        hit = _find_once(allow_ocr=(i == attempts - 1))
         if hit:
             ctx._observe("find_text", str(hit), element=hit)
             return hit
@@ -479,9 +482,10 @@ def find_text(
                 ctx, "find_text", raw_text, "element_not_found", i
             )
             if heal_info:
+                setattr(ctx, "_ui_cache", None)
                 if heal_info["fix_type"] == "popup_dismiss":
                     # 弹窗已关闭，立即重试
-                    hit = _find_once()
+                    hit = _find_once(allow_ocr=False)
                     if hit:
                         _report_heal_outcome(ctx, heal_info, True)
                         ctx._observe("find_text", str(hit), element=hit)
@@ -640,8 +644,10 @@ def find_text_list(
 
     attempts = max(1, int(retry_attempts))
     for i in range(attempts):
+        if i > 0:
+            setattr(ctx, "_ui_cache", None)
         elems = _uia_list()
-        if not elems and use_ocr:
+        if not elems and use_ocr and (i == attempts - 1):
             elems = _ocr_list()
         if elems:
             return UIElementList(elems)

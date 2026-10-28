@@ -411,8 +411,19 @@ def _ocr_find_text_boxes_regex(
             continue
         txt = str(b.get("text", ""))
         if pattern.search(txt):
+            b = dict(b)
+            if "center_x" not in b or "center_y" not in b:
+                cx, cy = _box_center(b)
+                b["center_x"] = cx
+                b["center_y"] = cy
+            if "x2" not in b or "y2" not in b:
+                bx1 = int(b.get("x", 0))
+                by1 = int(b.get("y", 0))
+                bw = int(b.get("w", 0))
+                bh = int(b.get("h", 0))
+                b["x2"] = bx1 + bw
+                b["y2"] = by1 + bh
             if roi:
-                b = dict(b)
                 b["x"] = int(b.get("x", 0)) + roi[0]
                 b["y"] = int(b.get("y", 0)) + roi[1]
                 b["x2"] = int(b.get("x2", 0)) + roi[0]

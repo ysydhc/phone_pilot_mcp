@@ -95,7 +95,7 @@ def test_tap_refreshes_when_dump_is_stale():
     """当 dump 时间戳过旧时，tap() 应自动 refresh 坐标。"""
     elem = TextElement(x=10, y=20, width=100, height=50, text="test")
     elem._ops = {"tap_xy": MagicMock(return_value={"ok": True})}
-    elem.meta = {"_dump_ts": time.time() - 2.0}  # 2 秒前的 dump
+    elem.meta = {"_dump_ts": time.time() - 4.0}  # 4 秒前的 dump (超过 3.0s 阈值)
 
     # 模拟 refresh 返回新坐标
     refreshed = TextElement(x=15, y=25, width=100, height=50, text="test")
@@ -136,7 +136,7 @@ def test_tap_refresh_failure_uses_original_coords():
     """refresh 失败时，应使用原始坐标。"""
     elem = TextElement(x=10, y=20, width=100, height=50, text="test")
     elem._ops = {"tap_xy": MagicMock(return_value={"ok": True})}
-    elem.meta = {"_dump_ts": time.time() - 2.0}
+    elem.meta = {"_dump_ts": time.time() - 4.0}
 
     with patch.object(elem, "refresh", return_value=None) as mock_refresh:
         res = elem.tap()
