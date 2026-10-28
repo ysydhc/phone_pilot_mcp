@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from typing import Optional
+from typing import BinaryIO, Optional, Union
 
 from phone_pilot.core.storage import recordings_root, read_json, write_json
+from phone_pilot.harmony.device.hap_parser import (
+    parse_hap,
+    extract_hap_icon,
+    save_hap_to_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,10 +148,50 @@ def _update_index(devices_dir: pathlib.Path, device_id: str, profile: dict):
     write_json(str(index_path), {"devices": index_data})
 
 
+def save_hap_profile(
+    device_id: str,
+    hap_path: Union[str, pathlib.Path, BinaryIO],
+    out_dir: Optional[str] = None,
+    extract_icon: bool = True,
+) -> dict:
+    """
+    Parse a HAP file, optionally extract its icon, and persist into device DB.
+
+    Args:
+        device_id: Device identifier or serial.
+        hap_path: Path to .hap file or binary stream.
+        out_dir: Optional recordings directory.
+        extract_icon: Whether to extract icon to devices/icons/ directory.
+
+    Returns:
+        Dict with "ok", "hap_info", and "icon_path".
+    """
+    hap_info = parse_hap(hap_path)
+    icon_path: Optional[str] = None
+    if extract_icon and hap_info.get("icon_path_in_hap"):
+        devices_dir = _devices_dir(out_dir)
+        icons_dir = devices_dir / "icons"
+        icons_dir.mkdir(parents=True, exist_ok=True)
+        bundle_name = hap_info.get("bundle_name") or "app"
+        icon_out = icons_dir / f"{bundle_name}.png"
+        icon_path = extract_hap_icon(hap_path, icon_out)
+
+    saved = save_hap_to_db(device_id, hap_info, out_dir=out_dir, icon_path=icon_path)
+    return {
+        "ok": saved,
+        "hap_info": hap_info,
+        "icon_path": icon_path,
+    }
+
+
 __all__ = [
     "capture_device_profile",
     "get_device_profile_from_store",
     "list_devices_from_store",
     "set_device_unlock_pin",
     "get_device_unlock_pin",
+    "parse_hap",
+    "extract_hap_icon",
+    "save_hap_to_db",
+    "save_hap_profile",
 ]

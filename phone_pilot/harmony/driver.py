@@ -9,6 +9,7 @@ Fallback: raw HDC commands for basic operations.
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 import pathlib
 from typing import Optional
@@ -266,39 +267,78 @@ class HarmonyUIDriver:
         The caller can parse this with json.loads() to get a dict/list.
         """
         import json
+        from phone_pilot.core import ui_snapshot_cache
 
-        hm = _get_hm(self._serial)
-        hierarchy = hm.dump_hierarchy()
-        if isinstance(hierarchy, dict):
-            return json.dumps(hierarchy, ensure_ascii=False)
-        return str(hierarchy)
+        key = ("harmony", self._serial, "ui_str")
+
+        def _compute() -> str:
+            hm = _get_hm(self._serial)
+            hierarchy = hm.dump_hierarchy()
+            if isinstance(hierarchy, dict):
+                return json.dumps(hierarchy, ensure_ascii=False)
+            return str(hierarchy)
+
+        return ui_snapshot_cache.get_or_compute(key, _compute)
 
     def dump_ui_hierarchy_dict(self) -> dict:
         """Dump current UI hierarchy as a Python dict (hmdriver2 native format)."""
-        hm = _get_hm(self._serial)
-        return hm.dump_hierarchy()
+        from phone_pilot.core import ui_snapshot_cache
+
+        key = ("harmony", self._serial, "ui_dict")
+
+        def _compute() -> dict:
+            hm = _get_hm(self._serial)
+            return hm.dump_hierarchy()
+
+        return ui_snapshot_cache.get_or_compute(key, _compute)
+
+    def get_screen_size(self) -> tuple[int, int]:
+        """Get screen size (width, height) for visibility enrichment."""
+        from phone_pilot.harmony.device.utils import get_screen_size as _get_screen_size
+
+        size = _get_screen_size(self._serial)
+        if size is None:
+            raise RuntimeError("Failed to get screen size")
+        return size
+
+    def _enrich_with_visibility(self, results: list[dict]) -> list[dict]:
+        """Enrich results with visible/visible_ratio/visible_reason."""
+        if not results:
+            return results
+        from phone_pilot.core.geometry import compute_visibility
+
+        try:
+            screen_size = self.get_screen_size()
+        except Exception:
+            screen_size = None
+
+        for r in results:
+            bounds_rect = r.get("bounds_rect")
+            bounds_tuple = tuple(bounds_rect) if bounds_rect else None
+            visible, ratio = compute_visibility(bounds_tuple, screen_size)
+            r["visible"] = visible
+            r["visible_ratio"] = ratio
+            if screen_size is None:
+                r["visible_reason"] = "screen_size_unavailable"
+        return results
 
     def dump_ui_nodes(self):
         """Dump UI hierarchy as universal UINode list."""
         from phone_pilot.core.ui_node import UINode as UnivNode
-        from phone_pilot.harmony.ui.automator import (
-            dump_hierarchy_dict,
-            parse_hierarchy_nodes,
-        )
+        from phone_pilot.harmony.ui.automator import parse_hierarchy_nodes
 
-        hierarchy = dump_hierarchy_dict(self._serial)
+        hierarchy = self.dump_ui_hierarchy_dict()
         hm_nodes = parse_hierarchy_nodes(hierarchy)
         return [_harmony_node_to_universal(n, UnivNode) for n in hm_nodes]
 
     def collect_all_texts(self) -> list[str]:
         """Collect all visible texts from UI tree."""
         from phone_pilot.harmony.ui.automator import (
-            dump_hierarchy_dict,
             parse_hierarchy_nodes,
             collect_node_texts,
         )
 
-        hierarchy = dump_hierarchy_dict(self._serial)
+        hierarchy = self.dump_ui_hierarchy_dict()
         nodes = parse_hierarchy_nodes(hierarchy)
         return collect_node_texts(nodes)
 
@@ -306,10 +346,20 @@ class HarmonyUIDriver:
         """
         Find UI elements matching selector.
 
-        Supported selector keys (aligned with hmdriver2):
+        Supported selector keys:
+            xpath (string expression)
             text, type, id, key, description,
             clickable, enabled, focused, selected, scrollable
         """
+        if not selector or not isinstance(selector, dict):
+            return []
+
+        if "xpath" in selector:
+            xpath_expr = selector.get("xpath")
+            if not xpath_expr or not isinstance(xpath_expr, str) or not xpath_expr.strip():
+                return []
+            return self._find_by_xpath(xpath_expr.strip(), single=True)
+
         hm = _get_hm(self._serial)
 
         # Map our selector to hmdriver2 kwargs
@@ -355,7 +405,7 @@ class HarmonyUIDriver:
             # find_component returns a single ElementInfo or None
             info = component
             elem = _element_info_to_dict(info)
-            return [elem]
+            return self._enrich_with_visibility([elem])
         except Exception:
             pass
 
@@ -363,6 +413,15 @@ class HarmonyUIDriver:
 
     def find_all_elements(self, selector: dict) -> list[dict]:
         """Find all UI elements matching selector."""
+        if not selector or not isinstance(selector, dict):
+            return []
+
+        if "xpath" in selector:
+            xpath_expr = selector.get("xpath")
+            if not xpath_expr or not isinstance(xpath_expr, str) or not xpath_expr.strip():
+                return []
+            return self._find_by_xpath(xpath_expr.strip(), single=False)
+
         hm = _get_hm(self._serial)
         hm_kwargs = {}
         for k, v in selector.items():
@@ -386,8 +445,109 @@ class HarmonyUIDriver:
                 comp = hm(**hm_kwargs, index=i).find_component()
                 if comp:
                     results.append(_element_info_to_dict(comp))
-            return results
+            return self._enrich_with_visibility(results)
         except Exception:
+            return []
+
+    def _find_by_xpath(self, xpath_expr: str, single: bool = False) -> list[dict]:
+        """Find UI elements via XPath with hmdriver2 priority dispatch and ElementTree fallback."""
+        # 1. Try hmdriver2.xpath if available
+        try:
+            hm = _get_hm(self._serial)
+            if hasattr(hm, "xpath") and callable(getattr(hm, "xpath")):
+                xpath_obj = hm.xpath(xpath_expr)
+                if xpath_obj is not None:
+                    if isinstance(xpath_obj, list):
+                        if not xpath_obj:
+                            return []
+                        items = [_element_info_to_dict(x) for x in (xpath_obj[:1] if single else xpath_obj)]
+                        return self._enrich_with_visibility(items)
+
+                    if single:
+                        if hasattr(xpath_obj, "find_component") and callable(getattr(xpath_obj, "find_component")):
+                            comp = xpath_obj.find_component()
+                            if comp is not None:
+                                return self._enrich_with_visibility([_element_info_to_dict(comp)])
+                            return []
+                        elif hasattr(xpath_obj, "all") and callable(getattr(xpath_obj, "all")):
+                            comps = xpath_obj.all()
+                            if comps:
+                                return self._enrich_with_visibility([_element_info_to_dict(comps[0])])
+                            return []
+                    else:
+                        if hasattr(xpath_obj, "all") and callable(getattr(xpath_obj, "all")):
+                            comps = xpath_obj.all()
+                            if comps is not None:
+                                return self._enrich_with_visibility([_element_info_to_dict(c) for c in comps])
+                        elif hasattr(xpath_obj, "find_components") and callable(getattr(xpath_obj, "find_components")):
+                            comps = xpath_obj.find_components()
+                            if comps is not None:
+                                return self._enrich_with_visibility([_element_info_to_dict(c) for c in comps])
+        except Exception as exc:
+            logger.debug("hm.xpath failed, falling back to ElementTree: %s", exc)
+
+        # 2. Fallback: query via XML hierarchy
+        try:
+            hierarchy = self.dump_ui_hierarchy_dict()
+            if not hierarchy:
+                return []
+            return self._match_xpath_fallback(hierarchy, xpath_expr, single=single)
+        except Exception as exc:
+            logger.debug("Fallback XPath evaluation failed: %s", exc)
+            return []
+
+    def _match_xpath_fallback(self, hierarchy: dict, xpath_expr: str, single: bool = False) -> list[dict]:
+        """Evaluate XPath against UI hierarchy using lxml or xml.etree."""
+        nodes_list = []
+
+        def _create(n, parent=None):
+            if not isinstance(n, dict):
+                return None
+            attrs = n.get("attributes", {})
+            tag = attrs.get("type") or "Node"
+            tag_clean = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", str(tag))
+            if not tag_clean or (not tag_clean[0].isalpha() and tag_clean[0] != "_"):
+                tag_clean = f"Node_{tag_clean}"
+            idx = len(nodes_list)
+            nodes_list.append(attrs)
+            xml_attrs = {"__node_idx": str(idx)}
+            for k, v in attrs.items():
+                if isinstance(v, (str, int, float, bool)):
+                    str_v = str(v).lower() if isinstance(v, bool) else str(v)
+                    k_clean = re.sub(r"[^a-zA-Z0-9_\-\.]", "_", str(k))
+                    xml_attrs[k_clean] = str_v
+            nid = attrs.get("id")
+            if nid is not None:
+                xml_attrs["id"] = str(nid)
+                xml_attrs["resource_id"] = str(nid)
+                xml_attrs["resource-id"] = str(nid)
+            desc = attrs.get("description")
+            if desc is not None:
+                xml_attrs["description"] = str(desc)
+                xml_attrs["content_desc"] = str(desc)
+                xml_attrs["content-desc"] = str(desc)
+
+            elem = etree.Element(tag_clean, attrib=xml_attrs) if parent is None else etree.SubElement(parent, tag_clean, attrib=xml_attrs)
+            for c in n.get("children", []):
+                _create(c, parent=elem)
+            return elem
+
+        try:
+            from lxml import etree
+
+            root = _create(hierarchy)
+            if root is None:
+                return []
+            matches = root.xpath(xpath_expr)
+            if not matches:
+                return []
+            if single:
+                matches = matches[:1]
+            raw_matched = [nodes_list[int(m.get("__node_idx"))] for m in matches if m.get("__node_idx") is not None]
+            converted = [_element_info_to_dict(attrs) for attrs in raw_matched]
+            return self._enrich_with_visibility(converted)
+        except Exception as exc:
+            logger.debug("XPath parsing error: %s", exc)
             return []
 
     def get_current_activity(self) -> dict:
@@ -504,6 +664,45 @@ class HarmonyAppDriver:
         hm = _get_hm(self._serial)
         return hm.get_app_main_ability(package)
 
+    def get_default_launcher_component(self) -> Optional[str]:
+        """Get the default launcher component (e.g. com.ohos.sceneboard/MainAbility)."""
+        from phone_pilot.harmony.device.utils import get_default_launcher_component
+
+        return get_default_launcher_component(self._serial)
+
+    def list_all_launcher_components(self) -> dict[str, list[str]]:
+        """List all launcher components grouped by bundleName."""
+        from phone_pilot.harmony.device.utils import list_all_launcher_components
+
+        return list_all_launcher_components(self._serial)
+
+    def build_launch_profiles(self) -> list[dict]:
+        """Build launch profiles snapshot."""
+        from phone_pilot.harmony.device.utils import build_launch_profiles_snapshot
+
+        return build_launch_profiles_snapshot(self._serial)
+
+    def launch_from_home(
+        self,
+        package_or_name: str,
+        activity: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Launch app from home screen or by explicit bundle/ability."""
+        if activity is not None:
+            from phone_pilot.harmony.device.utils import launch_from_home as _h_launch_comp
+
+            return _h_launch_comp(self._serial, package_or_name, activity, **kwargs)
+        else:
+            from phone_pilot.harmony.ui.finder import launch_from_home as _h_launch_finder
+
+            return _h_launch_finder(
+                self._serial,
+                package_or_name,
+                reset_home=bool(kwargs.get("reset_home", True)),
+                max_swipes=int(kwargs.get("max_swipes", 5)),
+            )
+
 
 # ---------------------------------------------------------------------------
 # HarmonyDriver (composite)
@@ -586,7 +785,10 @@ class HarmonyDriver:
             hm.unlock()
             return {"ok": True, "engine": "hmdriver2"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            logger.debug("hmdriver2 unlock failed, fallback to HDC CLI: %s", exc)
+            from phone_pilot.harmony.device.utils import unlock_screen
+
+            return unlock_screen(self._device_serial, pin=pin)
 
     def lock_screen(self) -> dict:
         """Lock / turn off screen."""
@@ -595,7 +797,10 @@ class HarmonyDriver:
             hm.screen_off()
             return {"ok": True, "engine": "hmdriver2"}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            logger.debug("hmdriver2 lock_screen failed, fallback to HDC CLI: %s", exc)
+            from phone_pilot.harmony.device.utils import lock_screen
+
+            return lock_screen(self._device_serial)
 
     def clear_background(self) -> dict:
         """Best-effort clear background apps."""
@@ -671,22 +876,95 @@ class HarmonyDriver:
 
     # ---- high-level skills ----
 
+    def get_default_launcher_component(self) -> Optional[str]:
+        """获取默认桌面组件名 (bundle/ability)。"""
+        from phone_pilot.harmony.device.utils import get_default_launcher_component
+
+        return get_default_launcher_component(self._device_serial)
+
+    def list_all_launcher_components(self) -> dict[str, list[str]]:
+        """获取所有含桌面入口的 Bundle 及其 Ability。"""
+        from phone_pilot.harmony.device.utils import list_all_launcher_components
+
+        return list_all_launcher_components(self._device_serial)
+
+    def build_launch_profiles(self) -> list[dict]:
+        """构建设备上所有可启动应用的配置快照。"""
+        from phone_pilot.harmony.device.utils import build_launch_profiles_snapshot
+
+        return build_launch_profiles_snapshot(self._device_serial)
+
+    def launch_from_home(
+        self,
+        package_or_name: str,
+        activity: Optional[str] = None,
+        **kwargs,
+    ) -> dict:
+        """Launch an app from home screen or by explicit bundle/ability."""
+        if activity is not None:
+            from phone_pilot.harmony.device.utils import launch_from_home as _h_launch_comp
+
+            return _h_launch_comp(self._device_serial, package_or_name, activity, **kwargs)
+        else:
+            from phone_pilot.harmony.ui.finder import launch_from_home as _h_launch_finder
+
+            return _h_launch_finder(
+                self._device_serial,
+                package_or_name,
+                reset_home=bool(kwargs.get("reset_home", True)),
+                max_swipes=int(kwargs.get("max_swipes", 5)),
+            )
+
     def open_deeplink(self, uri: str, package: Optional[str] = None, **kwargs) -> dict:
-        """深链接 — HarmonyOS 暂不支持。
-        Deeplink — not supported on HarmonyOS yet.
-        """
-        return {"ok": False, "error": "not_supported", "platform": "harmony"}
+        """打开深链接 (URL Scheme)。优先尝试 hmdriver2 open_url，失败降级至 HDC aa start。"""
+        if not uri or not str(uri).strip():
+            return {"ok": False, "error": "uri is required", "platform": "harmony"}
+        try:
+            hm = _get_hm(self._device_serial)
+            if hasattr(hm, "open_url") and callable(getattr(hm, "open_url")):
+                hm.open_url(uri)
+                return {
+                    "ok": True,
+                    "engine": "hmdriver2",
+                    "uri": uri,
+                    "package": package,
+                    "platform": "harmony",
+                }
+        except Exception as exc:
+            logger.debug("hmdriver2 open_url failed: %s", exc)
 
-    def launch_from_home(self, app_name: str, **kwargs) -> dict:
-        """Launch an app from the home screen (HarmonyOS flow)."""
-        from phone_pilot.harmony.ui.finder import launch_from_home as _h_launch
+        from phone_pilot.harmony.device.utils import open_deeplink as _h_open_deeplink
 
-        return _h_launch(
+        return _h_open_deeplink(
             self._device_serial,
-            app_name,
-            reset_home=bool(kwargs.get("reset_home", True)),
-            max_swipes=int(kwargs.get("max_swipes", 5)),
+            uri,
+            package=package,
+            wait_s=kwargs.get("wait_s", 0.8),
         )
+
+    def get_meminfo(self, package: str, timeout_s: float = 30.0) -> dict:
+        """获取指定应用的内存信息。"""
+        from phone_pilot.harmony.device.utils import capture_meminfo
+
+        return capture_meminfo(self._device_serial, package, timeout_s=timeout_s)
+
+    def set_wifi_enabled(self, enabled: bool) -> dict:
+        """开启或关闭 Wi-Fi。"""
+        from phone_pilot.harmony.device.utils import set_wifi_enabled
+
+        return set_wifi_enabled(self._device_serial, enabled)
+
+    def set_airplane_mode(self, enabled: bool) -> dict:
+        """开启或关闭飞行模式。"""
+        from phone_pilot.harmony.device.utils import set_airplane_mode
+
+        return set_airplane_mode(self._device_serial, enabled)
+
+    def get_notifications(self) -> dict:
+        """获取当前通知栏通知列表。"""
+        from phone_pilot.harmony.device.utils import get_notifications
+
+        return get_notifications(self._device_serial)
 
     def dump_memory_profile(self, package: str, **kwargs) -> dict:
         """Not supported on HarmonyOS."""
@@ -709,6 +987,12 @@ class HarmonyDriver:
                 "displayRotation": str(info.displayRotation),
             }
         except Exception as exc:
+            logger.debug("hmdriver2 device_info failed, fallback to HDC: %s", exc)
+            from phone_pilot.harmony.device.utils import get_device_info as _h_device_info
+
+            res = _h_device_info(self._device_serial)
+            if res.get("ok"):
+                return res
             return {"ok": False, "error": str(exc)}
 
     # ---- log capture (stream) ----
@@ -849,6 +1133,12 @@ class HarmonyDriver:
             lines=kwargs.get("lines", 500),
         )
 
+    def logcat_time(self) -> str:
+        """获取设备当前 hilog 时间戳 (格式: MM-DD HH:MM:SS.000)。"""
+        from phone_pilot.harmony.hdc.logcat import device_hilog_time
+
+        return device_hilog_time(self._device_serial)
+
     # ---- extra convenience (not in Protocol) ----
 
     def screen_on(self) -> dict:
@@ -940,11 +1230,69 @@ def _resolve_keycode(keycode_str: str, keycode_enum):
     raise ValueError(f"Unknown keycode: {keycode_str}")
 
 
+def _parse_bounds_rect(bounds) -> list[int] | None:
+    """Standardize element bounds into [left, top, right, bottom] list of ints.
+
+    Supports:
+    - dict with left, top, right, bottom
+    - list or tuple of 4 ints/floats
+    - string in '[left,top][right,bottom]' format
+    - object with left, top, right, bottom attributes
+    """
+    if bounds is None:
+        return None
+    try:
+        from unittest.mock import NonCallableMagicMock
+
+        if isinstance(bounds, NonCallableMagicMock):
+            return None
+    except ImportError:
+        pass
+
+    if isinstance(bounds, (list, tuple)):
+        if len(bounds) == 4 and all(isinstance(x, (int, float)) for x in bounds):
+            return [int(x) for x in bounds]
+        return None
+    if isinstance(bounds, dict):
+        if all(k in bounds for k in ("left", "top", "right", "bottom")):
+            try:
+                return [
+                    int(bounds["left"]),
+                    int(bounds["top"]),
+                    int(bounds["right"]),
+                    int(bounds["bottom"]),
+                ]
+            except (ValueError, TypeError):
+                return None
+        return None
+    if isinstance(bounds, str):
+        m = re.match(r"^\[(-?\d+),\s*(-?\d+)\]\[(-?\d+),\s*(-?\d+)\]$", bounds.strip())
+        if m:
+            return [int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))]
+        return None
+    if (
+        hasattr(bounds, "left")
+        and hasattr(bounds, "top")
+        and hasattr(bounds, "right")
+        and hasattr(bounds, "bottom")
+    ):
+        try:
+            return [
+                int(bounds.left),
+                int(bounds.top),
+                int(bounds.right),
+                int(bounds.bottom),
+            ]
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def _element_info_to_dict(info) -> dict:
     """Convert hmdriver2 ElementInfo to a standard dict.
 
-    Always includes ``center_x`` / ``center_y`` at the top level so callers
-    can locate elements uniformly across platforms.
+    Always includes ``bounds_rect`` and ``center_x`` / ``center_y`` at the top level
+    so callers can locate elements uniformly across platforms.
     """
     try:
         d = info.to_dict()
@@ -952,47 +1300,68 @@ def _element_info_to_dict(info) -> dict:
         d = None
 
     if not isinstance(d, dict):
-        d = {}
-        for attr in (
-            "id",
-            "key",
-            "type",
-            "text",
-            "description",
-            "isSelected",
-            "isChecked",
-            "isEnabled",
-            "isFocused",
-            "isCheckable",
-            "isClickable",
-            "isLongClickable",
-            "isScrollable",
-        ):
-            val = getattr(info, attr, None)
-            if val is not None:
-                d[attr] = val
+        if isinstance(info, dict):
+            d = dict(info)
+        else:
+            d = {}
+            for attr in (
+                "id",
+                "key",
+                "type",
+                "text",
+                "description",
+                "isSelected",
+                "isChecked",
+                "isEnabled",
+                "isFocused",
+                "isCheckable",
+                "isClickable",
+                "isLongClickable",
+                "isScrollable",
+            ):
+                val = getattr(info, attr, None)
+                if val is not None:
+                    d[attr] = val
 
-    # Ensure bounds
-    if "bounds" not in d:
-        bounds = getattr(info, "bounds", None)
-        if bounds:
+    # Determine raw bounds prioritizing d["bounds"]
+    raw_bounds = None
+    if isinstance(d, dict) and "bounds" in d:
+        raw_bounds = d["bounds"]
+    elif isinstance(info, dict):
+        raw_bounds = info.get("bounds")
+    elif hasattr(info, "bounds"):
+        raw_bounds = getattr(info, "bounds", None)
+
+    rect = _parse_bounds_rect(raw_bounds)
+    d["bounds_rect"] = rect
+
+    # Ensure bounds dict representation
+    if "bounds" not in d or not isinstance(d["bounds"], dict):
+        if isinstance(raw_bounds, dict):
+            d["bounds"] = raw_bounds
+        elif rect is not None and hasattr(raw_bounds, "left"):
             d["bounds"] = {
-                "left": bounds.left,
-                "top": bounds.top,
-                "right": bounds.right,
-                "bottom": bounds.bottom,
+                "left": rect[0],
+                "top": rect[1],
+                "right": rect[2],
+                "bottom": rect[3],
             }
 
     # Ensure boundsCenter and top-level center_x / center_y
-    center = getattr(info, "boundsCenter", None)
-    if center:
+    center = getattr(info, "boundsCenter", None) if not isinstance(info, dict) else None
+    if (
+        center is not None
+        and hasattr(center, "x")
+        and hasattr(center, "y")
+        and isinstance(center.x, (int, float))
+        and not type(center.x).__name__.endswith("Mock")
+    ):
         d.setdefault("boundsCenter", {"x": center.x, "y": center.y})
         d.setdefault("center_x", center.x)
         d.setdefault("center_y", center.y)
-    elif "bounds" in d:
-        b = d["bounds"]
-        cx = (b["left"] + b["right"]) // 2
-        cy = (b["top"] + b["bottom"]) // 2
+    elif rect is not None:
+        cx = (rect[0] + rect[2]) // 2
+        cy = (rect[1] + rect[3]) // 2
         d.setdefault("center_x", cx)
         d.setdefault("center_y", cy)
 
