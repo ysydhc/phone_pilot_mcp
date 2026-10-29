@@ -1,14 +1,14 @@
 """
 phone_pilot - Multi-platform mobile automation framework.
 
-Supports Android, iOS (planned), and HarmonyOS through unified interfaces.
+Supports Android, iOS, and HarmonyOS through unified interfaces.
 
 Architecture:
 - core/: Platform-agnostic coordination (protocols, storage, run session)
 - extensions/: Platform-agnostic capabilities (vision, ocr, diff)
 - android/: Android platform implementation
 - harmony/: HarmonyOS platform implementation
-- ios/: iOS platform (planned)
+- ios/: iOS platform implementation
 - mcp/: MCP Server with phone_* tools
 - memory_analyze/: Memory profiling and leak detection
 
@@ -30,7 +30,7 @@ Usage:
     # Start: phone-pilot-mcp
 """
 
-__version__ = "0.5.1"
+__version__ = "0.7.0"
 
 # Convenience imports
 from phone_pilot.core import (
