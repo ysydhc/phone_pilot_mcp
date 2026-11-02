@@ -1,6 +1,7 @@
 """Tests for iOS routing in mcp/_helpers.py (design §5 / Plan C2)."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+import pytest
 
 from phone_pilot.mcp import _helpers
 
@@ -122,3 +123,132 @@ class TestResolveIosSerial:
         assert err is None
         assert plat == "ios"
         assert serial == UDID_REAL
+
+
+class TestNavToolsIos:
+    @pytest.mark.asyncio
+    async def test_phone_go_home_ios(self):
+        from phone_pilot.mcp import _nav_tools
+
+        with (
+            patch.object(_helpers, "_scan_android_serials", return_value=[]),
+            patch.object(_helpers, "_scan_harmony_serials", return_value=[]),
+            patch.object(_helpers, "_scan_ios_serials", return_value=[UDID_REAL]),
+            patch("phone_pilot.mcp._nav_tools.get_driver") as mock_get_drv,
+        ):
+            mock_drv = MagicMock()
+            mock_drv.go_home.return_value = {"ok": True, "engine": "wda"}
+            mock_get_drv.return_value = mock_drv
+
+            res = await _nav_tools.phone_go_home(device_serial=UDID_REAL, platform="ios")
+            assert res["ok"] is True
+            assert res["platform"] == "ios"
+            assert res["device_serial"] == UDID_REAL
+            mock_drv.go_home.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_phone_go_back_ios(self):
+        from phone_pilot.mcp import _nav_tools
+
+        with (
+            patch.object(_helpers, "_scan_android_serials", return_value=[]),
+            patch.object(_helpers, "_scan_harmony_serials", return_value=[]),
+            patch.object(_helpers, "_scan_ios_serials", return_value=[UDID_REAL]),
+            patch("phone_pilot.mcp._nav_tools.get_driver") as mock_get_drv,
+        ):
+            mock_drv = MagicMock()
+            mock_drv.go_back.return_value = {"ok": True, "engine": "wda"}
+            mock_get_drv.return_value = mock_drv
+
+            res = await _nav_tools.phone_go_back(device_serial=UDID_REAL, platform="ios")
+            assert res["ok"] is True
+            assert res["platform"] == "ios"
+            mock_drv.go_back.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_phone_unlock_ios(self):
+        from phone_pilot.mcp import _nav_tools
+
+        with (
+            patch.object(_helpers, "_scan_android_serials", return_value=[]),
+            patch.object(_helpers, "_scan_harmony_serials", return_value=[]),
+            patch.object(_helpers, "_scan_ios_serials", return_value=[UDID_REAL]),
+            patch("phone_pilot.mcp._nav_tools.get_driver") as mock_get_drv,
+        ):
+            mock_drv = MagicMock()
+            mock_drv.unlock.return_value = {"ok": True, "engine": "wda"}
+            mock_get_drv.return_value = mock_drv
+
+            res = await _nav_tools.phone_unlock(device_serial=UDID_REAL, pin="", platform="ios")
+            assert res["ok"] is True
+            assert res["platform"] == "ios"
+            mock_drv.unlock.assert_called_once_with(pin=None)
+
+    @pytest.mark.asyncio
+    async def test_phone_open_deeplink_ios(self):
+        from phone_pilot.mcp import _nav_tools
+
+        with (
+            patch.object(_helpers, "_scan_android_serials", return_value=[]),
+            patch.object(_helpers, "_scan_harmony_serials", return_value=[]),
+            patch.object(_helpers, "_scan_ios_serials", return_value=[UDID_REAL]),
+            patch("phone_pilot.mcp._nav_tools.get_driver") as mock_get_drv,
+        ):
+            mock_drv = MagicMock()
+            mock_drv.open_deeplink.return_value = {"ok": True, "engine": "wda"}
+            mock_get_drv.return_value = mock_drv
+
+            res = await _nav_tools.phone_open_deeplink(
+                uri="myapp://home",
+                package="com.example.app",
+                device_serial=UDID_REAL,
+                platform="ios",
+            )
+            assert res["ok"] is True
+            assert res["uri"] == "myapp://home"
+            assert res["platform"] == "ios"
+            mock_drv.open_deeplink.assert_called_once_with("myapp://home", package="com.example.app")
+
+    @pytest.mark.asyncio
+    async def test_phone_clear_background_ios(self):
+        from phone_pilot.mcp import _nav_tools
+
+        with (
+            patch.object(_helpers, "_scan_android_serials", return_value=[]),
+            patch.object(_helpers, "_scan_harmony_serials", return_value=[]),
+            patch.object(_helpers, "_scan_ios_serials", return_value=[UDID_REAL]),
+            patch("phone_pilot.mcp._nav_tools.get_driver") as mock_get_drv,
+        ):
+            mock_drv = MagicMock()
+            mock_drv.clear_background.return_value = {"ok": False, "error": "not_supported"}
+            mock_get_drv.return_value = mock_drv
+
+            res = await _nav_tools.phone_clear_background(device_serial=UDID_REAL, platform="ios")
+            assert res["ok"] is False
+            assert res["error"] == "not_supported"
+            assert res["platform"] == "ios"
+            mock_drv.clear_background.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_phone_clear_data_ios(self):
+        from phone_pilot.mcp import _nav_tools
+
+        with (
+            patch.object(_helpers, "_scan_android_serials", return_value=[]),
+            patch.object(_helpers, "_scan_harmony_serials", return_value=[]),
+            patch.object(_helpers, "_scan_ios_serials", return_value=[UDID_REAL]),
+            patch("phone_pilot.mcp._nav_tools.get_driver") as mock_get_drv,
+        ):
+            mock_drv = MagicMock()
+            mock_drv.app.clear_data.return_value = {"ok": False, "error": "not_supported"}
+            mock_get_drv.return_value = mock_drv
+
+            res = await _nav_tools.phone_clear_data(
+                package="com.example.app", device_serial=UDID_REAL, platform="ios"
+            )
+            assert res["ok"] is False
+            assert res["error"] == "not_supported"
+            assert res["package"] == "com.example.app"
+            assert res["platform"] == "ios"
+            mock_drv.app.clear_data.assert_called_once_with("com.example.app")
+

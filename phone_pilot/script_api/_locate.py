@@ -445,8 +445,14 @@ def _ui_element_from_box(
         elem = ImageElement.from_box(
             box, kind=kind, meta=meta_dict, src=image_src, match_src=match_src
         )
+    elif kind == "vision":
+        elem = TextElement.from_box(
+            box, kind=kind, meta=meta_dict, text=text, desc=text
+        )
     else:
         elem = UIElement.from_box(box, kind=kind, meta=meta_dict)
+        if text:
+            elem.desc = text
     _apply_uia_fields(elem, uia if isinstance(uia, dict) else {})
     elem._ops = _ui_ops(ctx)
     elem._locator = locator

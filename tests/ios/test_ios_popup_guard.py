@@ -7,9 +7,7 @@ from typing import Optional
 from unittest.mock import MagicMock
 
 from phone_pilot.script_api.popup_guard import (
-    DEFAULT_RULES,
     PopupGuard,
-    PopupRule,
     _DIALOG_CLASS_PATTERNS,
 )
 
@@ -204,6 +202,66 @@ class TestIOSPopupRulesAndDismiss(unittest.TestCase):
         dismissed = self.pg.check_and_dismiss()
         self.assertTrue(dismissed)
         self.ctx.driver.input.tap.assert_called_with(400, 1300)
+
+    def test_dismiss_springboard_paste_dialog(self) -> None:
+        """iOS SpringBoard paste dialog with '允许粘贴'."""
+        title_node = MockIOSUINode(
+            class_name="XCUIElementTypeAlert",
+            package="com.apple.springboard",
+            text="“App”想要从“Safari”粘贴",
+        )
+        deny_button = MockIOSUINode(
+            class_name="XCUIElementTypeButton",
+            package="com.apple.springboard",
+            text="不允许粘贴",
+            clickable=True,
+            _center_x=200,
+            _center_y=1200,
+        )
+        allow_button = MockIOSUINode(
+            class_name="XCUIElementTypeButton",
+            package="com.apple.springboard",
+            text="允许粘贴",
+            clickable=True,
+            _center_x=500,
+            _center_y=1200,
+        )
+        self.ctx.driver.ui.dump_ui_nodes.return_value = [title_node, deny_button, allow_button]
+
+        dismissed = self.pg.check_and_dismiss()
+        self.assertTrue(dismissed)
+        self.assertEqual(dismissed["dismiss_text"], "允许粘贴")
+        self.ctx.driver.input.tap.assert_called_with(500, 1200)
+
+    def test_dismiss_avoids_dont_allow(self) -> None:
+        """When dialog offers 'Don't Allow' and 'Allow', dismiss should tap 'Allow'."""
+        title_node = MockIOSUINode(
+            class_name="XCUIElementTypeAlert",
+            package="com.apple.springboard",
+            text="“App” Would Like to Access Your Photos",
+        )
+        deny_button = MockIOSUINode(
+            class_name="XCUIElementTypeButton",
+            package="com.apple.springboard",
+            text="Don't Allow",
+            clickable=True,
+            _center_x=200,
+            _center_y=1200,
+        )
+        allow_button = MockIOSUINode(
+            class_name="XCUIElementTypeButton",
+            package="com.apple.springboard",
+            text="Allow",
+            clickable=True,
+            _center_x=500,
+            _center_y=1200,
+        )
+        self.ctx.driver.ui.dump_ui_nodes.return_value = [title_node, deny_button, allow_button]
+
+        dismissed = self.pg.check_and_dismiss()
+        self.assertTrue(dismissed)
+        self.assertEqual(dismissed["dismiss_text"], "Allow")
+        self.ctx.driver.input.tap.assert_called_with(500, 1200)
 
 
 if __name__ == "__main__":

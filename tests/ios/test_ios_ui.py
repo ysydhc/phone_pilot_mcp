@@ -134,6 +134,10 @@ class TestUIDriver:
             results = iOSUIDriver(SERIAL).find_elements({"text": "Login"})
         assert len(results) == 1
         assert results[0]["center_x"] == 160 and results[0]["center_y"] == 220
+        assert "visible" in results[0]
+        assert "visible_ratio" in results[0]
+        assert "bounds_rect" in results[0]
+        assert results[0]["bounds_rect"] == [100, 200, 220, 240]
 
     def test_find_elements_by_resource_id(self):
         client = MagicMock()

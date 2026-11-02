@@ -111,7 +111,17 @@ DEFAULT_RULES: list[PopupRule] = [
             "无线局域网与蜂窝网络",
             "想访问您的",
             "想使用您的",
+            "想要访问您的",
+            "想要使用您的",
+            "想给您发送通知",
+            "想要给您发送通知",
+            "想要使用蓝牙",
+            "想使用蓝牙",
+            "是否允许“",
+            "允许粘贴",
             "com.ohos.permissionmanager",
+            "com.apple.springboard",
+            "SpringBoard",
             "Allow",
             "Permission",
             "While using",
@@ -119,6 +129,9 @@ DEFAULT_RULES: list[PopupRule] = [
             "Would Like to Access",
             "Would Like to Use",
             "Would Like to Send You Notifications",
+            "Would Like to Find and Connect",
+            "Would Like to Paste from",
+            "Allow Paste",
         ],
         dismiss_texts=[
             "仅本次允许",
@@ -126,14 +139,19 @@ DEFAULT_RULES: list[PopupRule] = [
             "使用App时允许",
             "始终允许",
             "无线局域网与蜂窝网络",
+            "允许使用",
+            "允许粘贴",
             "允许",
             "好",
-            "Allow",
-            "While using the app",
             "Allow While Using App",
+            "While using the app",
             "Allow only while in use",
             "Only this time",
             "Always Allow",
+            "Allow Paste",
+            "Allow",
+            "Keep",
+            "OK",
             "許可",
             "許可する",
         ],
@@ -499,19 +517,27 @@ class PopupGuard:
                     info["dialog_nodes"].append(node)
                     break
 
-            # 检查 package / bundleName / class_name 命中 HarmonyOS 权限弹窗
+            # 检查 package / bundleName / class_name 命中 HarmonyOS 权限弹窗或 iOS SpringBoard
             pkg = (
                 getattr(node, "package", "")
                 or getattr(node, "bundle_name", "")
                 or getattr(node, "bundleName", "")
                 or ""
             )
+            pkg_lower = pkg.lower()
             if "com.ohos.permissionmanager" in pkg or "com.ohos.permissionmanager" in cls:
                 info["is_popup"] = True
                 if not info["type"]:
                     info["type"] = "permission_dialog"
                 if node not in info["dialog_nodes"]:
                     info["dialog_nodes"].append(node)
+            elif "springboard" in pkg_lower or "com.apple.springboard" in pkg_lower:
+                if any(p.lower() in cls.lower() for p in ("alert", "sheet", "dialog", "action")):
+                    info["is_popup"] = True
+                    if not info["type"]:
+                        info["type"] = "permission_dialog"
+                    if node not in info["dialog_nodes"]:
+                        info["dialog_nodes"].append(node)
 
             # 检查 resource_id
             res_id = getattr(node, "resource_id", "") or ""
@@ -661,7 +687,7 @@ class PopupGuard:
                     node_desc = getattr(node, "content_desc", "") or ""
 
                     # 避免 "允许" 误匹配 "不允许" / "Allow" 误匹配 "Don't allow" 等否定按钮
-                    if dismiss_text == "允许" and ("不允许" in node_text or "不允许" in node_desc):
+                    if ("不允许" in node_text or "不允许" in node_desc) and "允许" in dismiss_text and "不允许" not in dismiss_text:
                         continue
                     if dismiss_text.lower() == "allow":
                         lower_combined = f"{node_text} {node_desc}".lower()
@@ -671,9 +697,10 @@ class PopupGuard:
                         ):
                             continue
 
+                    is_clickable = getattr(node, "clickable", False) or "button" in getattr(node, "class_name", "").lower()
                     if (
                         dismiss_text in node_text or dismiss_text in node_desc
-                    ) and getattr(node, "clickable", False):
+                    ) and is_clickable:
                         center = node.center()
                         if center:
                             try:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import pathlib
 import re
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from phone_pilot.core.ui import Box, UIElement, UIElementList
 from phone_pilot.core.log import _log as _runner_log
@@ -566,7 +566,10 @@ def find_vision(
         return None
 
     try:
-        screenshot_bytes = ctx.driver.screen.screenshot_bytes()
+        if hasattr(ctx.driver.screen, "screenshot_bytes"):
+            screenshot_bytes = ctx.driver.screen.screenshot_bytes()
+        else:
+            screenshot_bytes = ctx.driver.screen.screenshot()
         screen_size = ctx.driver.screen.get_screen_size()
     except Exception as e:
         if not _silent_fail:

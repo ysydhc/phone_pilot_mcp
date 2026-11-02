@@ -31,6 +31,7 @@ class HarmonyUINode:
     description: str = ""  # content-desc equivalent
     type: str = ""  # class name equivalent
     id: str = ""  # resource-id equivalent
+    synthetic_id: str = ""  # synthesized fallback identifier for ArkUI components
     key: str = ""
     bounds: str = ""  # "[left,top][right,bottom]" format for compat
     bounds_raw: dict = field(default_factory=dict)
@@ -76,6 +77,7 @@ class HarmonyUINode:
             "description": self.description,
             "type": self.type,
             "id": self.id,
+            "synthetic_id": self.synthetic_id or self.id,
             "key": self.key,
             "bounds": self.bounds,
             "clickable": self.clickable,
@@ -126,28 +128,56 @@ def _walk_node(node: Any, result: list[HarmonyUINode]):
     # Extract node attributes
     attributes = node.get("attributes", node)
     if isinstance(attributes, dict):
+        left = 0
+        top = 0
+        right = 0
+        bottom = 0
+        bounds_raw = {}
+
         bounds_info = attributes.get("bounds", {})
         if isinstance(bounds_info, dict):
-            left = bounds_info.get("left", 0)
-            top = bounds_info.get("top", 0)
-            right = bounds_info.get("right", 0)
-            bottom = bounds_info.get("bottom", 0)
+            left = bounds_info.get("left", 0) or 0
+            top = bounds_info.get("top", 0) or 0
+            right = bounds_info.get("right", 0) or 0
+            bottom = bounds_info.get("bottom", 0) or 0
             bounds_str = f"[{left},{top}][{right},{bottom}]"
             bounds_raw = bounds_info
+        elif isinstance(bounds_info, (list, tuple)) and len(bounds_info) >= 4:
+            left, top, right, bottom = [int(v) for v in bounds_info[:4]]
+            bounds_str = f"[{left},{top}][{right},{bottom}]"
+            bounds_raw = {"left": left, "top": top, "right": right, "bottom": bottom}
         else:
-            bounds_str = str(bounds_info)
+            bounds_str = str(bounds_info or "")
             bounds_raw = {}
 
         center = attributes.get("boundsCenter", {})
         cx = center.get("x", 0) if isinstance(center, dict) else 0
         cy = center.get("y", 0) if isinstance(center, dict) else 0
 
+        node_text = str(attributes.get("text", "") or "")
+        node_desc = str(attributes.get("description", "") or "")
+        node_type = str(attributes.get("type", "") or "")
+        node_id = str(attributes.get("id", "") or "")
+        node_key = str(attributes.get("key", "") or "")
+
+        synth_id = node_id
+        if not synth_id:
+            if node_key:
+                synth_id = f"key:{node_key}"
+            elif node_text and node_type:
+                synth_id = f"{node_type}[text={node_text[:20]}]"
+            elif node_desc and node_type:
+                synth_id = f"{node_type}[desc={node_desc[:20]}]"
+            elif node_type and (left or top):
+                synth_id = f"{node_type}@{left}_{top}"
+
         ui_node = HarmonyUINode(
-            text=str(attributes.get("text", "") or ""),
-            description=str(attributes.get("description", "") or ""),
-            type=str(attributes.get("type", "") or ""),
-            id=str(attributes.get("id", "") or ""),
-            key=str(attributes.get("key", "") or ""),
+            text=node_text,
+            description=node_desc,
+            type=node_type,
+            id=node_id,
+            synthetic_id=synth_id,
+            key=node_key,
             bounds=bounds_str,
             bounds_raw=bounds_raw,
             clickable=bool(attributes.get("clickable", False)),
@@ -163,7 +193,7 @@ def _walk_node(node: Any, result: list[HarmonyUINode]):
         )
 
         # Only add nodes that have some identifiable content
-        if ui_node.text or ui_node.description or ui_node.type or ui_node.id:
+        if ui_node.text or ui_node.description or ui_node.type or ui_node.id or ui_node.synthetic_id:
             result.append(ui_node)
 
     # Recurse into children
@@ -202,7 +232,9 @@ def find_nodes(
 
     for node in nodes:
         if field == "any":
-            candidates = [node.text, node.description, node.id, node.type, node.key]
+            candidates = [node.text, node.description, node.id, node.synthetic_id, node.type, node.key]
+        elif field == "id":
+            candidates = [node.id, node.synthetic_id]
         else:
             candidates = [getattr(node, field, "")]
 

@@ -143,6 +143,26 @@ class TestFindNodes(unittest.TestCase):
         results = find_nodes(self.nodes, "Item", field="text", limit=1)
         self.assertEqual(len(results), 1)
 
+    def test_find_by_synthetic_id(self):
+        # Create an ArkUI hierarchy node without explicit id, but with key
+        hierarchy = {
+            "attributes": {
+                "text": "SubmitBtn",
+                "type": "Button",
+                "key": "submit_action_key",
+                "bounds": {"left": 10, "top": 20, "right": 100, "bottom": 60},
+            }
+        }
+        nodes = parse_hierarchy_nodes(hierarchy)
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0].synthetic_id, "key:submit_action_key")
+        self.assertEqual(nodes[0].to_dict()["synthetic_id"], "key:submit_action_key")
+
+        # Find by id should match synthetic_id
+        matched = find_nodes(nodes, "key:submit_action_key", field="id")
+        self.assertEqual(len(matched), 1)
+        self.assertEqual(matched[0].text, "SubmitBtn")
+
     def test_find_case_insensitive(self):
         results = find_nodes(
             self.nodes, "douyin", field="description", case_sensitive=False

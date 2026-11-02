@@ -56,15 +56,18 @@ class HarmonyInputDriver:
 
     def tap(self, x: int, y: int, wait_s: float = 0.15) -> dict:
         """Tap at screen coordinates."""
-        try:
-            hm = _get_hm(self._serial)
-            hm.click(int(x), int(y))
-            return {"ok": True, "x": int(x), "y": int(y), "engine": "hmdriver2"}
-        except Exception as exc:
-            logger.debug("hmdriver2 tap failed, fallback to HDC: %s", exc)
-            from phone_pilot.harmony.device.utils import input_tap
+        from phone_pilot.harmony.session_lock import harmony_session_lock
 
-            return input_tap(self._serial, x, y, wait_s=wait_s)
+        with harmony_session_lock(self._serial):
+            try:
+                hm = _get_hm(self._serial)
+                hm.click(int(x), int(y))
+                return {"ok": True, "x": int(x), "y": int(y), "engine": "hmdriver2"}
+            except Exception as exc:
+                logger.debug("hmdriver2 tap failed, fallback to HDC: %s", exc)
+                from phone_pilot.harmony.device.utils import input_tap
+
+                return input_tap(self._serial, x, y, wait_s=wait_s)
 
     def swipe(
         self,
@@ -75,54 +78,63 @@ class HarmonyInputDriver:
         duration_ms: int = 300,
     ) -> dict:
         """Swipe from (x1, y1) to (x2, y2)."""
-        try:
-            hm = _get_hm(self._serial)
-            # hmdriver2 speed is pixels/sec; convert duration_ms
-            dist = max(abs(x2 - x1), abs(y2 - y1), 1)
-            speed = max(200, min(40000, int(dist / max(duration_ms / 1000, 0.05))))
-            hm.swipe(int(x1), int(y1), int(x2), int(y2), speed=speed)
-            return {
-                "ok": True,
-                "x1": int(x1),
-                "y1": int(y1),
-                "x2": int(x2),
-                "y2": int(y2),
-                "duration_ms": duration_ms,
-                "engine": "hmdriver2",
-            }
-        except Exception as exc:
-            logger.debug("hmdriver2 swipe failed, fallback to HDC: %s", exc)
-            from phone_pilot.harmony.device.utils import input_swipe
+        from phone_pilot.harmony.session_lock import harmony_session_lock
 
-            return input_swipe(self._serial, x1, y1, x2, y2, duration_ms=duration_ms)
+        with harmony_session_lock(self._serial):
+            try:
+                hm = _get_hm(self._serial)
+                # hmdriver2 speed is pixels/sec; convert duration_ms
+                dist = max(abs(x2 - x1), abs(y2 - y1), 1)
+                speed = max(200, min(40000, int(dist / max(duration_ms / 1000, 0.05))))
+                hm.swipe(int(x1), int(y1), int(x2), int(y2), speed=speed)
+                return {
+                    "ok": True,
+                    "x1": int(x1),
+                    "y1": int(y1),
+                    "x2": int(x2),
+                    "y2": int(y2),
+                    "duration_ms": duration_ms,
+                    "engine": "hmdriver2",
+                }
+            except Exception as exc:
+                logger.debug("hmdriver2 swipe failed, fallback to HDC: %s", exc)
+                from phone_pilot.harmony.device.utils import input_swipe
+
+                return input_swipe(self._serial, x1, y1, x2, y2, duration_ms=duration_ms)
 
     def long_press(self, x: int, y: int, duration_ms: int = 500) -> dict:
         """Long press at coordinates."""
-        try:
-            hm = _get_hm(self._serial)
-            hm.long_click(int(x), int(y))
-            return {"ok": True, "x": int(x), "y": int(y), "engine": "hmdriver2"}
-        except Exception as exc:
-            logger.debug("hmdriver2 long_press failed, fallback to HDC: %s", exc)
-            from phone_pilot.harmony.device.utils import input_long_press
+        from phone_pilot.harmony.session_lock import harmony_session_lock
 
-            return input_long_press(self._serial, x, y, duration_ms=duration_ms)
+        with harmony_session_lock(self._serial):
+            try:
+                hm = _get_hm(self._serial)
+                hm.long_click(int(x), int(y))
+                return {"ok": True, "x": int(x), "y": int(y), "engine": "hmdriver2"}
+            except Exception as exc:
+                logger.debug("hmdriver2 long_press failed, fallback to HDC: %s", exc)
+                from phone_pilot.harmony.device.utils import input_long_press
+
+                return input_long_press(self._serial, x, y, duration_ms=duration_ms)
 
     def input_text(self, text: str, enter: bool = False) -> dict:
         """Input text into focused field."""
-        try:
-            hm = _get_hm(self._serial)
-            hm.input_text(text)
-            if enter:
-                from hmdriver2.proto import KeyCode
+        from phone_pilot.harmony.session_lock import harmony_session_lock
 
-                hm.press_key(KeyCode.ENTER)
-            return {"ok": True, "text": text, "engine": "hmdriver2"}
-        except Exception as exc:
-            logger.debug("hmdriver2 input_text failed, fallback to HDC: %s", exc)
-            from phone_pilot.harmony.device.utils import input_text as _hdc_input_text
+        with harmony_session_lock(self._serial):
+            try:
+                hm = _get_hm(self._serial)
+                hm.input_text(text)
+                if enter:
+                    from hmdriver2.proto import KeyCode
 
-            return _hdc_input_text(self._serial, text, enter=enter)
+                    hm.press_key(KeyCode.ENTER)
+                return {"ok": True, "text": text, "engine": "hmdriver2"}
+            except Exception as exc:
+                logger.debug("hmdriver2 input_text failed, fallback to HDC: %s", exc)
+                from phone_pilot.harmony.device.utils import input_text as _hdc_input_text
+
+                return _hdc_input_text(self._serial, text, enter=enter)
 
     def keyevent(self, keycode: str) -> dict:
         """Send a key event."""
@@ -268,27 +280,50 @@ class HarmonyUIDriver:
         """
         import json
         from phone_pilot.core import ui_snapshot_cache
+        from phone_pilot.harmony.session_lock import harmony_session_lock
+        from phone_pilot.harmony.device.lock import get_screen_state, wake_and_unlock
 
         key = ("harmony", self._serial, "ui_str")
 
         def _compute() -> str:
-            hm = _get_hm(self._serial)
-            hierarchy = hm.dump_hierarchy()
-            if isinstance(hierarchy, dict):
-                return json.dumps(hierarchy, ensure_ascii=False)
-            return str(hierarchy)
+            with harmony_session_lock(self._serial):
+                # Guard against screen-off crash
+                try:
+                    state_res = get_screen_state(self._serial)
+                    if state_res.get("ok") and state_res.get("screen_on") is False:
+                        logger.info("Device [%s] screen is off; waking up before dump", self._serial)
+                        wake_and_unlock(self._serial)
+                except Exception as e:
+                    logger.debug("Failed screen check before dump: %s", e)
+
+                hm = _get_hm(self._serial)
+                hierarchy = hm.dump_hierarchy()
+                if isinstance(hierarchy, dict):
+                    return json.dumps(hierarchy, ensure_ascii=False)
+                return str(hierarchy)
 
         return ui_snapshot_cache.get_or_compute(key, _compute)
 
     def dump_ui_hierarchy_dict(self) -> dict:
         """Dump current UI hierarchy as a Python dict (hmdriver2 native format)."""
         from phone_pilot.core import ui_snapshot_cache
+        from phone_pilot.harmony.session_lock import harmony_session_lock
+        from phone_pilot.harmony.device.lock import get_screen_state, wake_and_unlock
 
         key = ("harmony", self._serial, "ui_dict")
 
         def _compute() -> dict:
-            hm = _get_hm(self._serial)
-            return hm.dump_hierarchy()
+            with harmony_session_lock(self._serial):
+                try:
+                    state_res = get_screen_state(self._serial)
+                    if state_res.get("ok") and state_res.get("screen_on") is False:
+                        logger.info("Device [%s] screen is off; waking up before dump dict", self._serial)
+                        wake_and_unlock(self._serial)
+                except Exception as e:
+                    logger.debug("Failed screen check before dump: %s", e)
+
+                hm = _get_hm(self._serial)
+                return hm.dump_hierarchy()
 
         return ui_snapshot_cache.get_or_compute(key, _compute)
 

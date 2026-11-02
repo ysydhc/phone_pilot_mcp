@@ -10,6 +10,7 @@ Wraps port forwarding so the device reaches the host mock server.
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from typing import Callable, Optional
@@ -18,6 +19,8 @@ from phone_pilot.android.adb.runner import CommandRunner
 from phone_pilot.android.adb.utils import adb_prefix
 from phone_pilot.harmony.hdc.runner import HdcCommandRunner
 from phone_pilot.harmony.hdc.utils import hdc_prefix
+
+logger = logging.getLogger(__name__)
 
 
 class ReverseManager:
@@ -51,7 +54,28 @@ class ReverseManager:
     @property
     def _noop(self) -> bool:
         """iOS simulator shares host loopback → no port forwarding required."""
-        return self._platform == "ios"
+        if self._platform == "ios":
+            try:
+                from phone_pilot.ios.pmd.utils import detect_form_factor
+
+                return detect_form_factor(self._serial) != "real"
+            except Exception:
+                return True
+        return False
+
+    def get_target_host(self) -> str:
+        """Get the host IP accessible from the target device (127.0.0.1 or LAN IP)."""
+        if self._platform == "ios":
+            try:
+                from phone_pilot.ios.pmd.utils import detect_form_factor
+
+                if detect_form_factor(self._serial) == "real":
+                    from phone_pilot.ios.proxy import get_host_lan_ip
+
+                    return get_host_lan_ip()
+            except Exception:
+                pass
+        return "127.0.0.1"
 
     # ------------------------------------------------------------------
     # Public API
@@ -64,7 +88,24 @@ class ReverseManager:
         then creates the new mapping.
         Returns ``{"ok": True}`` on success or ``{"ok": False, "error": ...}``.
         """
-        if self._noop:
+        if self._platform == "ios":
+            try:
+                from phone_pilot.ios.pmd.utils import detect_form_factor
+
+                form = detect_form_factor(self._serial)
+                if form == "real":
+                    from phone_pilot.ios.proxy import get_host_lan_ip
+
+                    lan_ip = get_host_lan_ip()
+                    return {
+                        "ok": True,
+                        "mode": "ios_real_device_proxy",
+                        "host": lan_ip,
+                        "port": port,
+                        "guide": f"Configure iOS device HTTP proxy to {lan_ip}:{port} or point App baseURL to http://{lan_ip}:{port}",
+                    }
+            except Exception as e:
+                logger.debug("detect_form_factor error: %s", e)
             return {"ok": True, "noop": True, "platform": self._platform}
         try:
             tcp_spec = f"tcp:{port}"
@@ -163,7 +204,7 @@ class ReverseManager:
             lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
             if self._platform == "harmony":
                 # Filter for reverse rules if tagged, otherwise retain
-                reverse_lines = [l for l in lines if "[reverse]" in l.lower()]
+                reverse_lines = [item for item in lines if "[reverse]" in item.lower()]
                 return reverse_lines if reverse_lines else lines
             return lines
         except Exception:

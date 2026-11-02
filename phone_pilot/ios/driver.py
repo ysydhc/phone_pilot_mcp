@@ -387,6 +387,39 @@ class iOSUIDriver:
         except _EmptyWdaSourceError:
             return ""
 
+    def get_screen_size(self) -> tuple[int, int]:
+        """Get screen dimensions (width, height) in physical pixels."""
+        from phone_pilot.ios.driver import IOSScreenDriver
+
+        return IOSScreenDriver(self._serial).get_screen_size()
+
+    def _enrich_with_visibility(self, results: list[dict]) -> list[dict]:
+        """Enrich results with bounds_rect, visible, visible_ratio."""
+        if not results:
+            return results
+        from phone_pilot.core.geometry import compute_visibility
+
+        try:
+            screen_size = self.get_screen_size()
+        except Exception:
+            screen_size = None
+
+        for r in results:
+            rect = r.get("rect")
+            if rect and "bounds_rect" not in r:
+                x = int(rect.get("x", 0))
+                y = int(rect.get("y", 0))
+                w = int(rect.get("width", 0))
+                h = int(rect.get("height", 0))
+                r["bounds_rect"] = [x, y, x + w, y + h]
+
+            bounds_rect = r.get("bounds_rect")
+            bounds_tuple = tuple(bounds_rect) if bounds_rect else None
+            visible, ratio = compute_visibility(bounds_tuple, screen_size)
+            r["visible"] = visible
+            r["visible_ratio"] = ratio
+        return results
+
     def dump_ui_hierarchy(self) -> str:
         """Dump current UI hierarchy as a WDA JSON source string."""
         return self._source()
@@ -400,10 +433,11 @@ class iOSUIDriver:
         return automator.collect_texts(self._source(), scale=self._get_scale())
 
     def find_elements(self, selector: dict) -> list[dict]:
-        """Find UI elements matching selector. Each result contains center_x/center_y in physical pixels."""
-        return automator.find_in_source(
+        """Find UI elements matching selector. Each result contains center_x/center_y and visibility info."""
+        raw_results = automator.find_in_source(
             self._source(), selector, scale=self._get_scale()
         )
+        return self._enrich_with_visibility(raw_results)
 
     def get_current_activity(self) -> dict:
         """Get current foreground app → {"package": bundleId, "activity": ""}."""

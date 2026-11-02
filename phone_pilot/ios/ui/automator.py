@@ -76,12 +76,21 @@ def parse_wda_source(source: Union[str, dict], scale: float = 1.0) -> list[dict]
         raw_rect = node.get("rect", {}) or {}
         rect = _scale_rect(raw_rect, scale) if scale != 1.0 else raw_rect
         cx, cy = _rect_center(rect)
+        node_type = node.get("type", "") or ""
+        is_clickable = bool(
+            "button" in node_type.lower()
+            or "cell" in node_type.lower()
+            or "link" in node_type.lower()
+            or "switch" in node_type.lower()
+            or "key" in node_type.lower()
+        )
         elem = {
-            "type": node.get("type", ""),
+            "type": node_type,
             "name": node.get("name") or "",
             "label": node.get("label") or "",
             "value": node.get("value") or "",
             "isEnabled": bool(node.get("isEnabled", True)),
+            "clickable": is_clickable,
             "rect": rect,
             "bounds": _bounds_str(rect),
             "center_x": cx,
@@ -111,6 +120,7 @@ def wda_node_to_universal(elem: dict) -> UINode:
         class_name=elem.get("type", "") or "",
         bounds=elem.get("bounds", "") or "",
         enabled=bool(elem.get("isEnabled", True)),
+        clickable=bool(elem.get("clickable", False)),
         _center_x=int(elem.get("center_x", 0)),
         _center_y=int(elem.get("center_y", 0)),
     )

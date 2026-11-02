@@ -265,3 +265,32 @@ def test_harmony_runner_failure_returns_error() -> None:
     assert result["ok"] is False
     assert "error" in result
 
+
+def test_ios_real_device_proxy_setup(monkeypatch) -> None:
+    """When iOS device is a real physical device, setup() returns proxy instructions."""
+    monkeypatch.setattr(
+        "phone_pilot.ios.pmd.utils.detect_form_factor", lambda s: "real"
+    )
+    monkeypatch.setattr(
+        "phone_pilot.ios.proxy.get_host_lan_ip", lambda: "192.168.1.100"
+    )
+
+    mgr = ReverseManager("real-iphone-udid", platform="ios")
+    result = mgr.setup(8080)
+    assert result["ok"] is True
+    assert result["mode"] == "ios_real_device_proxy"
+    assert result["host"] == "192.168.1.100"
+    assert result["port"] == 8080
+    assert "guide" in result
+    assert mgr.get_target_host() == "192.168.1.100"
+
+
+def test_ios_simulator_target_host(monkeypatch) -> None:
+    """Simulator target host is 127.0.0.1."""
+    monkeypatch.setattr(
+        "phone_pilot.ios.pmd.utils.detect_form_factor", lambda s: "simulator"
+    )
+    mgr = ReverseManager("sim-udid", platform="ios")
+    assert mgr.get_target_host() == "127.0.0.1"
+
+

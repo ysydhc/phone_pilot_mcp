@@ -10,31 +10,16 @@ import asyncio
 from typing import Optional
 
 from phone_pilot.mcp.server import mcp
-from phone_pilot.mcp._helpers import get_driver, _with_device, _resolve_device_serial
+from phone_pilot.mcp._helpers import get_driver, _with_device
 
 
 def _phone_go_home_sync(device_serial: Optional[str], platform: str) -> dict:
     """Sync body for phone_go_home to run in thread (avoid blocking event loop)."""
-    if device_serial and str(device_serial).strip():
-        resolved = str(device_serial).strip()
-        plat = (platform or "auto").strip().lower()
-        plat = "android" if plat == "auto" else plat
-    else:
-        resolved, plat, err = _resolve_device_serial(device_serial, platform)
-        if err:
-            return err
-    if plat == "android":
-        from phone_pilot.android.adb.utils import ensure_adb_env
-
-        ensure_adb_env()
-    try:
-        driver = get_driver(resolved, plat)
-        result = driver.go_home()
-        result["platform"] = plat
-        result["device_serial"] = resolved
-        return result
-    except Exception as e:
-        return {"ok": False, "error": str(e), "device_serial": str(device_serial or "")}
+    return _with_device(
+        lambda s, p: get_driver(s, p).go_home(),
+        device_serial if device_serial and str(device_serial).strip() else None,
+        platform,
+    )
 
 
 @mcp.tool()
