@@ -66,10 +66,13 @@ EXTENDED_CATEGORIES: dict[str, list[str]] = {
         "phone_find_element",
         "phone_find_image",
         "phone_ocr_find",
+        "phone_vision_find",
         "phone_scroll_to_find",
         "phone_wait_for_element",
         "phone_dismiss_popup",
         "phone_get_current_activity",
+        "phone_get_focused_state",
+        "phone_navigate_to",
     ],
     "app": [
         "phone_clear_data",
@@ -117,6 +120,8 @@ EXTENDED_CATEGORIES: dict[str, list[str]] = {
         "phone_recordings_get",
         "phone_replay_recording",
         "phone_push_and_run_monkey",
+        "phone_check_freshness",
+        "phone_verify_ad_format",
     ],
     "script_record": [
         "phone_record_script_start",

@@ -543,6 +543,16 @@ _register(
 
 _register(
     ToolContract(
+        "phone_vision_find",
+        "B",
+        required_keys_when_ok=["ok", "center", "bounds", "text"],
+        required_keys_when_error=["ok", "error"],
+        optional_keys=["device_serial", "platform", "hint"],
+    )
+)
+
+_register(
+    ToolContract(
         "phone_launch_from_home",
         "B",
         required_keys_when_ok=["ok"],
@@ -690,6 +700,10 @@ _register(
             "screenshot_annotated_base64",
             "device_serial",
             "platform",
+            "focused",
+            "focus_query",
+            "total_elements_before",
+            "compression_ratio",
         ],
     )
 )
@@ -721,6 +735,85 @@ _register(
         required_keys_when_ok=["ok", "text", "center_x", "center_y", "matched_count"],
         required_keys_when_error=["ok", "error"],
         optional_keys=["match_mode", "index", "element", "device_serial", "platform"],
+    )
+)
+
+_register(
+    ToolContract(
+        "phone_check_freshness",
+        "A",
+        required_keys_when_ok=["ok", "src_mtime", "bin_mtime", "reason"],
+        required_keys_when_error=["ok", "error"],
+        optional_keys=[
+            "pid_mtime",
+            "install_mtime",
+            "pid",
+            "symbol_present",
+            "details",
+        ],
+    )
+)
+
+_register(
+    ToolContract(
+        "phone_get_focused_state",
+        "C",
+        required_keys_when_ok=[
+            "ok",
+            "elements",
+            "element_count",
+            "all_texts",
+            "focused",
+            "compression_ratio",
+        ],
+        required_keys_when_error=["ok", "error"],
+        optional_keys=[
+            "activity",
+            "screen",
+            "scrollable_areas",
+            "focus_query",
+            "total_elements_before",
+            "device_serial",
+            "platform",
+        ],
+    )
+)
+
+_register(
+    ToolContract(
+        "phone_navigate_to",
+        "B",
+        required_keys_when_ok=["ok", "target", "hops_executed", "path_taken"],
+        required_keys_when_error=["ok", "error"],
+        optional_keys=[
+            "heals_used",
+            "healing_events",
+            "final_node_id",
+            "reason",
+        ],
+    )
+)
+
+_register(
+    ToolContract(
+        "phone_verify_ad_format",
+        "A",
+        required_keys_when_ok=[
+            "ok",
+            "ad_format",
+            "matched_events",
+            "stages_found",
+            "out_of_order",
+        ],
+        required_keys_when_error=["ok", "error"],
+        optional_keys=[
+            "placement_id",
+            "missing_stages",
+            "missing_fields",
+            "reward_verified",
+            "reason",
+            "details",
+        ],
     )
 )
 

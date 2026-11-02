@@ -785,11 +785,11 @@ class TestContractValidation:
         assert len(missing) > 0
 
     def test_all_contracts_count(self):
-        """契约表总数应为 64。Contract table should have 64 entries."""
+        """契约表总数应为 68。Contract table should have 68 entries."""
         from phone_pilot.mcp.tool_contracts import get_all_contracts
 
         contracts = get_all_contracts()
-        assert len(contracts) == 64, f"Expected 64 contracts, got {len(contracts)}"
+        assert len(contracts) == 68, f"Expected 68 contracts, got {len(contracts)}"
 
 
 # ---------------------------------------------------------------------------
@@ -1152,3 +1152,232 @@ class TestLayeredToolLoading:
         for name in actual:
             if name.startswith("phone_"):
                 assert name in all_known, f"工具 {name} 未在核心层或扩展层中定义"
+
+
+# ===========================================================================
+# Evolution Tools Tests (演进工具契约与功能测试)
+# ===========================================================================
+
+
+class TestEvolutionTools:
+    """测试 4 个演进工具（phone_check_freshness / phone_get_focused_state / phone_navigate_to / phone_verify_ad_format）."""
+
+    def test_phone_check_freshness_ok(self, tmp_path):
+        """phone_check_freshness 新鲜二进制返回 ok=True 并通过契约校验."""
+        import os
+        from phone_pilot.mcp.server import phone_check_freshness
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        src_file = src_dir / "Main.java"
+        src_file.write_text("class Main {}", encoding="utf-8")
+        os.utime(src_file, (1000.0, 1000.0))
+
+        bin_file = tmp_path / "app.apk"
+        bin_file.write_bytes(b"fake_apk_binary")
+        os.utime(bin_file, (2000.0, 2000.0))
+
+        res = _run(
+            phone_check_freshness(
+                source_dir=str(src_dir),
+                binary_path=str(bin_file),
+            )
+        )
+        assert res["ok"] is True
+        assert res["reason"] == "fresh"
+        ok, missing = validate_response("phone_check_freshness", res)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+    def test_phone_check_freshness_stale_error(self, tmp_path):
+        """phone_check_freshness 过期二进制返回 ok=False 与 error 并通过契约校验."""
+        import os
+        from phone_pilot.mcp.server import phone_check_freshness
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        src_file = src_dir / "Main.java"
+        src_file.write_text("class Main {}", encoding="utf-8")
+        os.utime(src_file, (3000.0, 3000.0))
+
+        bin_file = tmp_path / "app.apk"
+        bin_file.write_bytes(b"fake_apk_binary")
+        os.utime(bin_file, (1000.0, 1000.0))
+
+        res = _run(
+            phone_check_freshness(
+                source_dir=str(src_dir),
+                binary_path=str(bin_file),
+            )
+        )
+        assert res["ok"] is False
+        assert "error" in res
+        assert "stale_binary" in res["error"]
+        ok, missing = validate_response("phone_check_freshness", res)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+    def test_phone_get_focused_state_ok_and_error(self):
+        """phone_get_focused_state 成功与失败响应均满足契约."""
+        from phone_pilot.mcp.server import phone_get_focused_state
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        raw_state = {
+            "ok": True,
+            "activity": {"package": "com.demo", "activity": ".MainActivity"},
+            "screen": {"width": 1080, "height": 2400},
+            "elements": [
+                {
+                    "index": 0,
+                    "type": "view",
+                    "label": "",
+                    "center": [100, 100],
+                    "bounds": [0, 0, 200, 200],
+                    "clickable": False,
+                    "scrollable": False,
+                    "resource_id": "",
+                },
+                {
+                    "index": 1,
+                    "type": "button",
+                    "label": "Load Banner Ad",
+                    "center": [540, 600],
+                    "bounds": [300, 500, 780, 700],
+                    "clickable": True,
+                    "scrollable": False,
+                    "resource_id": "btn_banner",
+                },
+            ],
+            "scrollable_areas": [],
+            "all_texts": ["Header", "Load Banner Ad", "Footer"],
+        }
+
+        res_ok = _run(phone_get_focused_state(focus="Banner", page_state=raw_state))
+        assert res_ok["ok"] is True
+        assert res_ok["focused"] is True
+        assert res_ok["element_count"] == 1
+        assert res_ok["elements"][0]["index"] == 1
+        ok, missing = validate_response("phone_get_focused_state", res_ok)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+        res_err = _run(
+            phone_get_focused_state(
+                focus="Banner",
+                page_state={"ok": False, "error": "no_device_connected"},
+            )
+        )
+        assert res_err["ok"] is False
+        assert "error" in res_err
+        ok, missing = validate_response("phone_get_focused_state", res_err)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+    def test_phone_get_page_state_with_focus(self, mock_resolve, mock_get_driver):
+        """phone_get_page_state 传入 focus 参数时执行语义投影且满足契约."""
+        from phone_pilot.mcp.server import phone_get_page_state
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        res = _run(phone_get_page_state(focus="TestButton"))
+        assert res["ok"] is True
+        assert res.get("focused") is True
+        assert res.get("focus_query") == "TestButton"
+        ok, missing = validate_response("phone_get_page_state", res)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+    def test_phone_navigate_to_ok_and_error(self):
+        """phone_navigate_to 成功与失败响应均满足契约."""
+        from phone_pilot.mcp.server import phone_navigate_to
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        graph_data = {
+            "version": "1.0",
+            "nodes": {
+                "home": {
+                    "node_id": "home",
+                    "page_signature": {
+                        "name": "home",
+                        "activity_or_controller": ".MainActivity",
+                        "required_elements": ["Home"],
+                        "forbidden_elements": [],
+                    },
+                },
+                "ad_menu": {
+                    "node_id": "ad_menu",
+                    "page_signature": {
+                        "name": "ad_menu",
+                        "activity_or_controller": ".AdMenuActivity",
+                        "required_elements": ["Banner"],
+                        "forbidden_elements": [],
+                    },
+                },
+            },
+            "edges": [
+                {
+                    "source_id": "home",
+                    "target_id": "ad_menu",
+                    "action_type": "tap",
+                    "trigger_criteria": {"text": "Go Ads"},
+                }
+            ],
+        }
+
+        # Already at target -> ok=True
+        res_ok = _run(
+            phone_navigate_to(
+                target_node_id="home",
+                graph_data=graph_data,
+                current_state={"node_id": "home", "all_texts": ["Home"], "activity": ".MainActivity"},
+            )
+        )
+        assert res_ok["ok"] is True
+        assert res_ok["target"] == "home"
+        ok, missing = validate_response("phone_navigate_to", res_ok)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+        # Unreachable target -> ok=False with error key
+        res_err = _run(
+            phone_navigate_to(
+                target_node_id="nonexistent_node",
+                graph_data=graph_data,
+                current_state={"node_id": "home", "all_texts": ["Home"], "activity": ".MainActivity"},
+            )
+        )
+        assert res_err["ok"] is False
+        assert "error" in res_err
+        ok, missing = validate_response("phone_navigate_to", res_err)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+    def test_phone_verify_ad_format_ok_and_error(self):
+        """phone_verify_ad_format 成功与失败响应均满足契约."""
+        from phone_pilot.mcp.server import phone_verify_ad_format
+        from phone_pilot.mcp.tool_contracts import validate_response
+
+        logs_ok = [
+            'I/AdSDK: {"stage": "INIT", "ad_format": "banner", "placement_id": "p1"}',
+            'I/AdSDK: {"stage": "LOAD", "ad_format": "banner", "placement_id": "p1"}',
+            'I/AdSDK: {"stage": "READY", "ad_format": "banner", "placement_id": "p1"}',
+            'I/AdSDK: {"stage": "RENDER", "ad_format": "banner", "placement_id": "p1"}',
+            'I/AdSDK: {"stage": "IMPRESSION", "ad_format": "banner", "placement_id": "p1"}',
+        ]
+        res_ok = _run(
+            phone_verify_ad_format(
+                ad_format="banner",
+                log_lines=logs_ok,
+                placement_id="p1",
+            )
+        )
+        assert res_ok["ok"] is True
+        assert res_ok["ad_format"] == "banner"
+        ok, missing = validate_response("phone_verify_ad_format", res_ok)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+
+        res_err = _run(
+            phone_verify_ad_format(
+                ad_format="banner",
+                log_lines=["I/AdSDK: unrelated log line"],
+            )
+        )
+        assert res_err["ok"] is False
+        assert "error" in res_err
+        ok, missing = validate_response("phone_verify_ad_format", res_err)
+        assert ok is True, f"Contract validation failed, missing: {missing}"
+

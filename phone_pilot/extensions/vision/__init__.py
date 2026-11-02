@@ -20,6 +20,13 @@ from phone_pilot.extensions.vision.features import match_features_sift
 from phone_pilot.extensions.vision.annotate import annotate_boxes, is_mostly_black, Box
 from phone_pilot.extensions.vision.crop import crop_image_file, crop_image_bytes
 from phone_pilot.extensions.vision.markup import extract_red_box_crop
+from phone_pilot.extensions.vision.grounding import (
+    VisionGroundingClient,
+    VisionGroundingConfig,
+    GroundingResult,
+    denormalize_box,
+    parse_vlm_grounding_response,
+)
 
 __all__ = [
     # Template matching
@@ -38,4 +45,10 @@ __all__ = [
     "crop_image_bytes",
     # Markup
     "extract_red_box_crop",
+    # Vision Grounding
+    "VisionGroundingClient",
+    "VisionGroundingConfig",
+    "GroundingResult",
+    "denormalize_box",
+    "parse_vlm_grounding_response",
 ]

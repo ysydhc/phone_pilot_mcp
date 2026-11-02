@@ -197,3 +197,240 @@ class TestGraphMisc:
         g.add("a", lambda: True)
         result = g.run()
         assert result["nodes"]["a"]["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Cognitive UI Knowledge Graph & Persistence
+# ---------------------------------------------------------------------------
+
+
+class TestUIKnowledgeGraph:
+    """UIKnowledgeGraph 节点匹配、边演进、Dijkstra 寻路与 JSON 持久化测试。"""
+
+    def test_node_and_edge_serialization(self):
+        from phone_pilot.core.ui.graph import CognitiveUINode, UIEdge, UINode
+        from phone_pilot.core.ui.page import PageSignature
+
+        assert CognitiveUINode is UINode
+
+        sig = PageSignature(
+            name="home",
+            activity_or_controller=".MainActivity",
+            required_elements=["首页", "设置"],
+            forbidden_elements=["崩溃"],
+        )
+        node = UINode(
+            node_id="home",
+            page_signature=sig,
+            activity_or_vc=".MainActivity",
+            interactive_elements=[{"text": "设置", "center": [100, 200]}],
+            last_seen_timestamp=1700000000.0,
+        )
+        d = node.to_dict()
+        restored = UINode.from_dict(d)
+        assert restored.node_id == "home"
+        assert restored.page_signature.name == "home"
+        assert restored.page_signature.required_elements == ["首页", "设置"]
+        assert restored.page_signature.forbidden_elements == ["崩溃"]
+        assert restored.activity_or_vc == ".MainActivity"
+        assert len(restored.interactive_elements) == 1
+
+        edge = UIEdge(
+            source_id="home",
+            target_id="settings",
+            action_type="tap",
+            trigger_criteria={"text": "设置"},
+        )
+        assert edge.success_rate == 1.0
+        edge.record_outcome(False)
+        assert edge.attempts == 2
+        assert edge.successes == 1
+        assert edge.success_rate == 0.5
+        edge.record_outcome(True)
+        assert edge.attempts == 3
+        assert edge.successes == 2
+        assert edge.success_rate == round(2 / 3, 4)
+
+        edge_restored = UIEdge.from_dict(edge.to_dict())
+        assert edge_restored.source_id == "home"
+        assert edge_restored.target_id == "settings"
+        assert edge_restored.trigger_criteria == {"text": "设置"}
+        assert edge_restored.attempts == 3
+        assert edge_restored.successes == 2
+
+    def test_infer_and_match_node_specificity(self):
+        from phone_pilot.core.ui.graph import UIKnowledgeGraph, UINode
+        from phone_pilot.core.ui.page import PageSignature
+
+        kg = UIKnowledgeGraph()
+        general_node = UINode(
+            node_id="general_home",
+            page_signature=PageSignature(name="general_home", required_elements=["首页"]),
+        )
+        specific_node = UINode(
+            node_id="specific_home",
+            page_signature=PageSignature(
+                name="specific_home", required_elements=["首页", "推荐", "搜索"]
+            ),
+        )
+        kg.add_or_update_node(general_node)
+        kg.add_or_update_node(specific_node)
+
+        state = {
+            "activity": {"activity": ".MainActivity", "package": "com.demo"},
+            "elements": [
+                {"text": "首页"},
+                {"text": "推荐"},
+                {"text": "搜索"},
+            ],
+        }
+        matched = kg.match_node(state)
+        assert matched is not None
+        assert matched.node_id == "specific_home"
+
+        assert kg.match_node("general_home") is general_node
+        assert (
+            kg.match_node(PageSignature(name="specific_home", required_elements=["首页"]))
+            is specific_node
+        )
+
+        inferred = kg.infer_node_from_state(state)
+        assert inferred.activity_or_vc == ".MainActivity"
+        assert inferred.page_signature.required_elements == ["首页", "推荐", "搜索"]
+
+    def test_record_transition_and_deduplication(self):
+        from phone_pilot.core.ui.graph import UIKnowledgeGraph
+
+        kg = UIKnowledgeGraph()
+        home_state = {
+            "activity": ".MainActivity",
+            "elements": [{"text": "首页"}, {"text": "设置"}],
+        }
+        settings_state = {
+            "activity": ".SettingsActivity",
+            "elements": [{"text": "通用设置"}, {"text": "关于我们"}],
+        }
+
+        n1, edge1, n2 = kg.record_transition(
+            home_state,
+            {"action_type": "tap", "text": "设置"},
+            settings_state,
+            from_node_id="home",
+            to_node_id="settings",
+            success=True,
+        )
+        assert n1.node_id == "home"
+        assert n2.node_id == "settings"
+        assert len(kg.nodes) == 2
+        assert len(kg.edges) == 1
+        assert edge1.attempts == 1
+        assert edge1.success_rate == 1.0
+
+        # 重复相同转移（不传 explicit node_id，验证自动指纹匹配去重）
+        n1_b, edge1_b, n2_b = kg.record_transition(
+            home_state,
+            {"action_type": "tap", "text": "设置"},
+            settings_state,
+            success=False,
+        )
+        assert n1_b.node_id == "home"
+        assert n2_b.node_id == "settings"
+        assert len(kg.nodes) == 2
+        assert len(kg.edges) == 1
+        assert edge1_b is edge1
+        assert edge1.attempts == 2
+        assert edge1.success_rate == 0.5
+
+    def test_dijkstra_find_path_to(self):
+        from phone_pilot.core.ui.graph import UIEdge, UIKnowledgeGraph, UINode
+        from phone_pilot.core.ui.page import PageSignature
+
+        kg = UIKnowledgeGraph()
+        for nid, label in [
+            ("home", "首页"),
+            ("menu", "菜单"),
+            ("profile", "个人中心"),
+            ("target", "目标页"),
+        ]:
+            kg.add_or_update_node(
+                UINode(
+                    node_id=nid,
+                    page_signature=PageSignature(name=nid, required_elements=[label]),
+                )
+            )
+
+        # 路径 A: home -> target 直接转移，但成功率极低 (0.1) => cost = 1.0 - 0.05 + (10 - 1) = 9.95
+        kg.edges.append(
+            UIEdge(
+                source_id="home",
+                target_id="target",
+                action_type="tap",
+                trigger_criteria={"text": "不稳定直达"},
+                success_rate=0.1,
+                attempts=10,
+                successes=1,
+            )
+        )
+        # 路径 B: home -> menu -> target 两跳高可靠 (1.0) => 单跳 cost = 0.5, 两跳总 cost = 1.0
+        kg.edges.append(
+            UIEdge(
+                source_id="home",
+                target_id="menu",
+                action_type="tap",
+                trigger_criteria={"text": "菜单"},
+                success_rate=1.0,
+            )
+        )
+        kg.edges.append(
+            UIEdge(
+                source_id="menu",
+                target_id="target",
+                action_type="tap",
+                trigger_criteria={"text": "目标页"},
+                success_rate=1.0,
+            )
+        )
+
+        path = kg.find_path_to("target", {"elements": [{"text": "首页"}]})
+        assert len(path) == 2
+        assert [e.target_id for e in path] == ["menu", "target"]
+
+        # 已在目标页时返回空列表
+        assert kg.find_path_to("target", "target") == []
+        # 不可达节点返回空列表
+        assert kg.find_path_to("nonexistent", "home") == []
+
+    def test_export_and_load_json_and_knowledge_base(self):
+        import pathlib
+        import tempfile
+
+        from phone_pilot.core.ui.graph import UIKnowledgeGraph
+        from phone_pilot.core.ui.knowledge_base import UIKnowledgeBase
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = pathlib.Path(tmpdir) / "ui_graph.json"
+            kb = UIKnowledgeBase(storage_path=json_path, auto_save=True)
+
+            kb.record(
+                {"activity": ".HomeActivity", "elements": [{"text": "首页"}]},
+                {"action_type": "tap", "text": "详情"},
+                {"activity": ".DetailActivity", "elements": [{"text": "详情页"}]},
+                from_node_id="home",
+                to_node_id="detail",
+            )
+            assert json_path.exists()
+
+            info = kb.summary()
+            assert info["node_count"] == 2
+            assert info["edge_count"] == 1
+
+            kb2 = UIKnowledgeBase(storage_path=json_path)
+            assert len(kb2.graph.nodes) == 2
+            assert len(kb2.graph.edges) == 1
+            path = kb2.find_path("detail", "home")
+            assert len(path) == 1
+            assert path[0].trigger_criteria == {"text": "详情"}
+
+            loaded = UIKnowledgeGraph.load_graph_json(kb2.save())
+            assert set(loaded.nodes.keys()) == {"home", "detail"}
+

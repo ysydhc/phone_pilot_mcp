@@ -2984,31 +2984,44 @@ def restart_app(
 
 
 _FOCUS_RE = re.compile(r"mCurrentFocus=Window\{[^}]*\s+u\d+\s+([^\s/]+)/([^\s}]+)")
+_FOCUSED_APP_RE = re.compile(
+    r"mFocusedApp=ActivityRecord\{[^}]*\s+u\d+\s+([^\s/]+)/([^\s}]+)"
+)
+_ANR_FOCUS_RE = re.compile(
+    r"mCurrentFocus=Window\{[^}]*\s+u\d+\s+Application Not Responding:\s+([^\s}]+)"
+)
 
 
 def get_current_focus(device_serial: Optional[str]) -> dict[str, Optional[str]]:
     """
-    Best-effort foreground focus from `dumpsys window`.
+    Best-effort foreground focus from `dumpsys window displays`.
     Returns: {package, activity}
     """
     if not device_serial:
         return {"package": None, "activity": None}
-    # `dumpsys window` output can be huge and slow (and can cause client timeouts).
-    # We only need focus lines; filter on-device to keep output small.
+    # Use `dumpsys window displays` instead of bare `dumpsys window` so we never
+    # match stale `mCurrentFocus=` entries inside `WINDOW MANAGER LAST ANR`.
     proc = CommandRunner.run(
         adb_prefix(device_serial)
         + [
             "shell",
-            "dumpsys window | grep -E 'mCurrentFocus=|mFocusedApp=' | head -n 5",
+            "dumpsys window displays | grep -E 'mCurrentFocus=|mFocusedApp=' | head -n 5",
         ],
         check=False,
         delay_s=0.0,
         log_output=False,
     )
-    m = _FOCUS_RE.search(proc.stdout or "")
-    if not m:
-        return {"package": None, "activity": None}
-    return {"package": m.group(1), "activity": m.group(2)}
+    out = proc.stdout or ""
+    m = _FOCUS_RE.search(out)
+    if m:
+        return {"package": m.group(1), "activity": m.group(2)}
+    m_app = _FOCUSED_APP_RE.search(out)
+    if m_app:
+        return {"package": m_app.group(1), "activity": m_app.group(2)}
+    m_anr = _ANR_FOCUS_RE.search(out)
+    if m_anr:
+        return {"package": m_anr.group(1), "activity": "ApplicationNotResponding"}
+    return {"package": None, "activity": None}
 
 
 def is_launcher_package(pkg: Optional[str]) -> bool:

@@ -134,9 +134,9 @@ def get_device_state(device_serial: Optional[str]) -> dict:
         if showing_lock and status_bar_keyguard:
             break
 
-    # 3) focus window
+    # 3) focus window (use `displays` to avoid matching stale `WINDOW MANAGER LAST ANR`)
     focus_proc = CommandRunner.run(
-        adb_prefix(device_serial) + ["shell", "dumpsys", "window"],
+        adb_prefix(device_serial) + ["shell", "dumpsys", "window", "displays"],
         check=False,
         log_output=False,
         silent=True,

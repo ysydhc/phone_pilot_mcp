@@ -6,11 +6,21 @@ WDA source JSON is a fixture; no real device.
 import json
 from unittest.mock import MagicMock, patch
 
-from phone_pilot.ios.driver import iOSUIDriver
+import pytest
+
+from phone_pilot.core import ui_snapshot_cache
+from phone_pilot.ios.driver import iOSDriver, iOSUIDriver
 from phone_pilot.ios.ui import automator
 
 
 SERIAL = "00008030-001234560A80802E"
+
+
+@pytest.fixture(autouse=True)
+def _clear_ui_cache():
+    ui_snapshot_cache.invalidate()
+    yield
+    ui_snapshot_cache.invalidate()
 
 # Representative WDA /source?format=json tree.
 WDA_SOURCE = {
@@ -155,3 +165,34 @@ class TestUIDriver:
             res = iOSUIDriver(SERIAL).get_current_activity()
         assert res["package"] == "com.example.app"
         assert res["activity"] == ""
+
+    def test_ios_ui_snapshot_cache_hit_and_invalidation(self):
+        client = MagicMock()
+        client.scale = 1.0
+        client.source.return_value = json.dumps(WDA_SOURCE)
+        driver = iOSDriver(SERIAL)
+        with _patch_bridge(client):
+            nodes = driver.ui.dump_ui_nodes()
+            elems = driver.ui.find_elements({"text": "Login"})
+            assert len(nodes) >= 2
+            assert len(elems) == 1
+            assert client.source.call_count == 1
+
+            tap_res = driver.input.tap(160, 220)
+            assert tap_res["ok"] is True
+
+            elems_after = driver.ui.find_elements({"text": "Login"})
+            assert len(elems_after) == 1
+            assert client.source.call_count == 2
+
+    def test_ios_ui_empty_source_not_cached(self):
+        client = MagicMock()
+        client.scale = 1.0
+        client.source.side_effect = ["", json.dumps(WDA_SOURCE)]
+        driver = iOSDriver(SERIAL)
+        with _patch_bridge(client):
+            first = driver.ui.dump_ui_hierarchy()
+            assert first == ""
+            second = driver.ui.find_elements({"text": "Login"})
+            assert len(second) == 1
+            assert client.source.call_count == 2

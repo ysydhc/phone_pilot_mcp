@@ -583,6 +583,9 @@ class AndroidDriver:
         self._screen = AndroidScreenDriver(device_serial)
         self._ui = AndroidUIDriver(device_serial)
         self._app = AndroidAppDriver(device_serial)
+        self._session_log_buffer: list[str] = []
+        self._session_log_seen: set[str] = set()
+        self._session_log_max_lines: int = 25000
 
     # ---- sub-driver accessors ----
 
@@ -888,12 +891,68 @@ class AndroidDriver:
 
     # ---- log ----
 
+    def _append_session_log_text(self, content: str) -> int:
+        """Append non-duplicate log lines into the in-memory session log accumulator."""
+        if not content:
+            return 0
+        if not hasattr(self, "_session_log_buffer"):
+            self._session_log_buffer = []
+            self._session_log_seen = set()
+            self._session_log_max_lines = 25000
+
+        added = 0
+        for raw_line in content.splitlines():
+            line = raw_line.rstrip("\r")
+            if not line.strip():
+                continue
+            if line not in self._session_log_seen:
+                self._session_log_seen.add(line)
+                self._session_log_buffer.append(line)
+                added += 1
+
+        max_lines = getattr(self, "_session_log_max_lines", 25000)
+        if len(self._session_log_buffer) > max_lines:
+            self._session_log_buffer = self._session_log_buffer[-max_lines:]
+            self._session_log_seen = set(self._session_log_buffer)
+        return added
+
+    def reset_session_log(self) -> None:
+        """Reset the accumulated session log buffer."""
+        if hasattr(self, "_session_log_buffer"):
+            self._session_log_buffer.clear()
+        if hasattr(self, "_session_log_seen"):
+            self._session_log_seen.clear()
+
+    def read_session_log(
+        self,
+        *,
+        include_current: bool = True,
+        current_lines: int = 2500,
+    ) -> str:
+        """Return accumulated session logs preserved across mid-session clear_log() calls."""
+        if not hasattr(self, "_session_log_buffer"):
+            self._session_log_buffer = []
+            self._session_log_seen = set()
+            self._session_log_max_lines = 25000
+
+        if include_current:
+            try:
+                live = self.read_log(lines=current_lines)
+                self._append_session_log_text(live)
+            except Exception:
+                pass
+        return "\n".join(self._session_log_buffer)
+
     def read_log(self, lines: int = 200, **kwargs) -> str:
         """Read recent logcat output.
 
         Pass ``since="MM-DD HH:MM:SS.mmm"`` to only read logs at/after a device
         timestamp (see ``logcat_time``); it takes precedence over ``lines``.
+        Pass ``include_session_history=True`` to include logs archived before ``clear_log()``.
         """
+        if kwargs.get("include_session_history"):
+            return self.read_session_log(include_current=True, current_lines=lines)
+
         from phone_pilot.android.adb.logcat import read_logcat
 
         content, _meta = read_logcat(
@@ -902,6 +961,11 @@ class AndroidDriver:
             since=kwargs.get("since"),
             tag_filter=kwargs.get("tag_filter"),
         )
+        if content:
+            try:
+                self._append_session_log_text(content)
+            except Exception:
+                pass
         return content
 
     def logcat_time(self) -> Optional[str]:
@@ -936,11 +1000,31 @@ class AndroidDriver:
             "returncode": proc.returncode,
         }
 
-    def clear_log(self) -> dict:
-        """Clear logcat buffer."""
+    def clear_log(self, *, archive: bool = True, archive_lines: int = 2500) -> dict:
+        """Clear logcat buffer.
+
+        When ``archive=True`` (default), snapshots current logcat lines into the
+        session log accumulator before clearing device logcat so end-of-session
+        full-funnel verifiers (e.g. ``verify_ad_format``) do not lose earlier stages.
+        """
         from phone_pilot.android.adb.logcat import clear_logcat
 
-        return clear_logcat(self._device_serial)
+        archived = 0
+        if archive:
+            try:
+                snapshot = self.read_log(lines=archive_lines)
+                archived = self._append_session_log_text(snapshot)
+            except Exception:
+                pass
+
+        res = clear_logcat(self._device_serial)
+        if isinstance(res, dict):
+            res = {
+                **res,
+                "archived_lines": archived,
+                "session_buffer_lines": len(getattr(self, "_session_log_buffer", ())),
+            }
+        return res
 
     def dump_log(self, path: str, **kwargs) -> dict:
         """Export logcat to a file on host."""

@@ -133,6 +133,7 @@ from phone_pilot.mcp._page_state_tools import *  # noqa: E402, F401, F403
 from phone_pilot.mcp._script_record_tools import *  # noqa: E402, F401, F403
 from phone_pilot.mcp._discovery_tools import *  # noqa: E402, F401, F403
 from phone_pilot.mcp._mock_tools import *  # noqa: E402, F401, F403
+from phone_pilot.mcp._evolution_tools import *  # noqa: E402, F401, F403
 
 # ---------------------------------------------------------------------------
 # Layered tool loading — hide extended tools to reduce agent context overhead.

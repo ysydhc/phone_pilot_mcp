@@ -49,6 +49,7 @@ def _safe_invalidate_ui(tool_name: str, kwargs: dict, result: Any) -> None:
 
     - 非 action 工具：跳过。
     - result.ok=False：跳过（失败动作不改变 UI）。
+    - result.page_state_updated=True：跳过（工具内部已刷新动作后的快照）。
     - 无 serial：跳过（无法定位缓存 key）。
     """
     if tool_name not in _ACTION_INVALIDATES_UI:
@@ -56,6 +57,8 @@ def _safe_invalidate_ui(tool_name: str, kwargs: dict, result: Any) -> None:
     if not isinstance(result, dict):
         return
     if not result.get("ok", True):
+        return
+    if result.get("page_state_updated") is True:
         return
 
     serial = result.get("device_serial") or kwargs.get("device_serial")

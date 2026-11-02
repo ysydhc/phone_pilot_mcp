@@ -6,10 +6,118 @@ Extracted from server.py for modularity.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import io
+from typing import Any, Optional
 
+from phone_pilot.core import ui_snapshot_cache
 from phone_pilot.mcp.server import mcp
 from phone_pilot.mcp._helpers import get_driver, _resolve_device_serial
+
+
+PAGE_ELEMENTS_CACHE_TTL_S: float = 30.0
+
+
+def _cache_page_elements(
+    plat: str,
+    serial: str,
+    include_invisible: bool,
+    elements: list[dict],
+    scrollable: list[dict],
+    texts: list[str],
+) -> None:
+    """Cache collected page elements with a 30s TTL for subsequent tap_element calls."""
+    if not serial:
+        return
+    ui_snapshot_cache.put_snapshot(
+        (plat, serial, "page_elements", bool(include_invisible)),
+        (elements, scrollable, texts),
+        ttl_s=PAGE_ELEMENTS_CACHE_TTL_S,
+    )
+
+
+def _get_cached_page_elements(
+    plat: str,
+    serial: str,
+    include_invisible: bool,
+) -> Optional[tuple[list[dict], list[dict], list[str]]]:
+    """Retrieve cached (elements, scrollable, texts) if still valid."""
+    if not serial:
+        return None
+    return ui_snapshot_cache.get_snapshot(
+        (plat, serial, "page_elements", bool(include_invisible))
+    )
+
+
+def _encode_screenshot_b64(
+    img_bytes: bytes,
+    compress: bool = True,
+    max_side: int = 1080,
+    quality: int = 75,
+) -> str:
+    """Encode screenshot bytes to base64, optionally downscaling and compressing as JPEG."""
+    if not compress:
+        return base64.b64encode(img_bytes).decode("ascii")
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(img_bytes)) as img:
+            rgb_img = img.convert("RGB")
+            w, h = rgb_img.size
+            if max(w, h) > max_side and max(w, h) > 0:
+                scale = max_side / float(max(w, h))
+                new_w = max(1, int(round(w * scale)))
+                new_h = max(1, int(round(h * scale)))
+                resample = getattr(
+                    getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC
+                )
+                rgb_img = rgb_img.resize((new_w, new_h), resample)
+            out = io.BytesIO()
+            rgb_img.save(out, format="JPEG", quality=quality)
+            return base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception:
+        return base64.b64encode(img_bytes).decode("ascii")
+
+
+def _build_post_action_page_state(
+    driver: Any,
+    plat: str,
+    serial: str,
+    include_invisible: bool = False,
+) -> dict:
+    """Collect post-action page state and refresh the 30s page_elements snapshot."""
+    activity = None
+    try:
+        if hasattr(driver, "ui") and hasattr(driver.ui, "get_current_activity"):
+            act = driver.ui.get_current_activity()
+            if isinstance(act, dict) or act is None or not hasattr(driver, "screen"):
+                activity = act
+            else:
+                scr_act = driver.screen.get_current_activity()
+                activity = scr_act if isinstance(scr_act, dict) else act
+        elif hasattr(driver, "screen") and hasattr(driver.screen, "get_current_activity"):
+            activity = driver.screen.get_current_activity()
+    except Exception:
+        try:
+            activity = driver.screen.get_current_activity()
+        except Exception:
+            activity = None
+
+    elements, scrollable, all_texts = _collect_page_elements(
+        driver, include_invisible=include_invisible
+    )
+    _cache_page_elements(
+        plat, serial, include_invisible, elements, scrollable, all_texts
+    )
+    return {
+        "activity": activity,
+        "elements": elements,
+        "element_count": len(elements),
+        "elements_count": len(elements),
+        "scrollable_areas": scrollable,
+        "all_texts": all_texts,
+    }
 
 
 # =============================================================================
@@ -189,6 +297,8 @@ async def phone_get_page_state(
     include_invisible: bool = False,
     include_screenshot: bool = False,
     annotate_elements: bool = False,
+    focus: str = "",
+    compress_screenshot: bool = True,
 ) -> dict:
     """获取当前页面完整状态快照（LLM 最优交互工具）。
     Get complete page state snapshot in one call — optimized for LLM decision-making.
@@ -199,6 +309,8 @@ async def phone_get_page_state(
         include_invisible: 是否包含不可见元素，默认 False / Include invisible elements
         include_screenshot: 是否返回 base64 截图，默认 False / Include base64 screenshot
         annotate_elements: 是否返回元素标注截图，默认 False / Include annotated screenshot with element boxes and indices
+        focus: 可选聚焦关键词或正则，非空时对返回元素做语义投影压缩 / Optional focus query or regex for semantic projection
+        compress_screenshot: 是否对返回截图做缩放与 JPEG 压缩，默认 True / Compress screenshot as JPEG, default True
 
     Returns / 返回值:
         dict: {
@@ -256,9 +368,12 @@ async def phone_get_page_state(
         except Exception:
             width, height = 0, 0
 
-        # 3. Collect elements via shared helper
+        # 3. Collect elements via shared helper and cache for 30s
         elements, scrollable_areas, all_texts = _collect_page_elements(
             driver, include_invisible=include_invisible
+        )
+        _cache_page_elements(
+            plat, serial, include_invisible, elements, scrollable_areas, all_texts
         )
 
         # 4. Screenshot (raw and/or annotated)
@@ -270,7 +385,10 @@ async def phone_get_page_state(
         if need_screenshot:
             try:
                 png_bytes = driver.screen.screenshot()
-                screenshot_b64 = base64.b64encode(png_bytes).decode("ascii")
+                if include_screenshot and png_bytes is not None:
+                    screenshot_b64 = _encode_screenshot_b64(
+                        png_bytes, compress=compress_screenshot
+                    )
             except Exception:
                 pass
 
@@ -281,11 +399,19 @@ async def phone_get_page_state(
                 )
 
                 annotated_png = annotate_elements_on_screenshot(png_bytes, elements)
-                annotated_b64 = base64.b64encode(annotated_png).decode("ascii")
+                annotated_b64 = _encode_screenshot_b64(
+                    annotated_png, compress=compress_screenshot
+                )
             except Exception:
-                pass
+                if screenshot_b64 is None:
+                    try:
+                        screenshot_b64 = _encode_screenshot_b64(
+                            png_bytes, compress=compress_screenshot
+                        )
+                    except Exception:
+                        pass
 
-        return {
+        result = {
             "ok": True,
             "device_serial": serial,
             "platform": plat,
@@ -298,6 +424,16 @@ async def phone_get_page_state(
             "screenshot_base64": screenshot_b64,
             "screenshot_annotated_base64": annotated_b64,
         }
+        if focus and focus.strip():
+            from phone_pilot.core.ui.projection import project_page_state
+
+            projected = project_page_state(result, focus=focus, compact=True)
+            projected["device_serial"] = serial
+            projected["platform"] = plat
+            projected["screenshot_base64"] = screenshot_b64
+            projected["screenshot_annotated_base64"] = annotated_b64
+            return projected
+        return result
 
     except Exception as e:
         return {"ok": False, "error": str(e), "device_serial": serial}
@@ -309,6 +445,8 @@ async def phone_tap_element(
     device_serial: str = "",
     platform: str = "auto",
     wait_ms: int = 500,
+    include_invisible: bool = False,
+    return_page_state: bool = False,
 ) -> dict:
     """通过元素编号点击页面元素（配合 phone_get_page_state 使用）。
     Tap a page element by its index from phone_get_page_state.
@@ -318,14 +456,16 @@ async def phone_tap_element(
         device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
         platform: "android" | "harmony" | "auto" / Platform type
         wait_ms: 点击后等待毫秒数，默认 500 / Wait after tap in ms, default 500
+        include_invisible: 是否包含不可见元素，默认 False / Include invisible elements
+        return_page_state: 点击后是否直接采集并返回新页面状态，默认 False / Return post-tap page state
 
     Returns / 返回值:
-        dict: {"ok": True, "index": int, "center": [x, y], "label": str, "type": str}
+        dict: {"ok": True, "index": int, "center": [x, y], "label": str, "type": str, "snapshot_hit": bool}
         或 {"ok": False, "error": str}
 
     Notes / 特殊逻辑:
-        - 先 dump UI → 用与 phone_get_page_state 相同的过滤/排序逻辑构建 elements 列表
-        - 取 elements[index] 的中心坐标进行点击
+        - 优先复用 30s 内的 phone_get_page_state 元素快照（snapshot_hit=True）
+        - 快照未命中或越界时回退实时 dump UI（snapshot_hit=False）
         - index 越界时返回 error="index_out_of_range"
     """
     resolved_serial, resolved_platform, err = _resolve_device_serial(
@@ -340,8 +480,15 @@ async def phone_tap_element(
     try:
         driver = get_driver(serial, plat)
 
-        # Collect elements with same logic as phone_get_page_state
-        elements, _scrollable, _texts = _collect_page_elements(driver)
+        cached = _get_cached_page_elements(plat, serial, include_invisible)
+        if cached is not None and 0 <= index < len(cached[0]):
+            elements = cached[0]
+            snapshot_hit = True
+        else:
+            elements, _scrollable, _texts = _collect_page_elements(
+                driver, include_invisible=include_invisible
+            )
+            snapshot_hit = False
 
         if index < 0 or index >= len(elements):
             return {
@@ -357,14 +504,13 @@ async def phone_tap_element(
         elem = elements[index]
         cx, cy = elem["center"]
 
-        # Tap
-        import time as _time
+        # Tap and immediately invalidate pre-tap UI snapshot
+        tap_result = driver.input.tap(cx, cy)
+        ui_snapshot_cache.invalidate_device_ui(serial, platform=plat)
 
-        driver.input.tap(cx, cy)
-        if wait_ms > 0:
-            _time.sleep(wait_ms / 1000.0)
+        await asyncio.sleep(max(wait_ms, 0) / 1000.0)
 
-        return {
+        res: dict[str, Any] = {
             "ok": True,
             "device_serial": serial,
             "platform": plat,
@@ -372,7 +518,18 @@ async def phone_tap_element(
             "center": [cx, cy],
             "label": elem.get("label", ""),
             "type": elem.get("type", "view"),
+            "snapshot_hit": snapshot_hit,
         }
+
+        tap_ok = tap_result.get("ok", True) if isinstance(tap_result, dict) else True
+        if return_page_state and tap_ok:
+            post_state = _build_post_action_page_state(
+                driver, plat, serial, include_invisible=include_invisible
+            )
+            res["page_state"] = post_state
+            res["page_state_updated"] = True
+
+        return res
 
     except Exception as e:
         return {"ok": False, "error": str(e), "device_serial": serial}

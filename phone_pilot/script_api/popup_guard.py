@@ -59,6 +59,40 @@ class PopupRule:
 # ---------------------------------------------------------------------------
 
 DEFAULT_RULES: list[PopupRule] = [
+    # 系统 ANR / 崩溃弹窗 / System ANR & crash dialogs
+    PopupRule(
+        name="system_anr_crash",
+        detect_texts=[
+            "无响应",
+            "没有响应",
+            "屡次停止运行",
+            "已停止运行",
+            "关闭应用",
+            "isn't responding",
+            "keeps stopping",
+            "has stopped",
+            "Close app",
+        ],
+        dismiss_texts=[
+            "关闭应用",
+            "关闭",
+            "Close app",
+            "Close",
+            "确定",
+            "OK",
+        ],
+        dismiss_resource_ids=[
+            "android:id/aerr_close",
+            "android:id/button1",
+        ],
+        detect_class_names=["AlertDialog"],
+        detect_resource_ids=[
+            "android:id/aerr_close",
+            "android:id/aerr_wait",
+            "android:id/aerr_restart",
+        ],
+        priority=110,
+    ),
     # 系统权限弹窗 / System permission dialogs
     PopupRule(
         name="system_permission",
@@ -238,13 +272,16 @@ _DIALOG_RESOURCE_IDS = {
     "android:id/button3",
     "android:id/parentPanel",
     "android:id/contentPanel",
+    "android:id/aerr_close",
+    "android:id/aerr_wait",
+    "android:id/aerr_restart",
     "com.ohos.permissionmanager:id/permission_allow_button",
     "com.ohos.permissionmanager:id/permission_message",
 }
 
 # Android Window 层级检测关键字
 _DIALOG_WINDOW_PATTERNS = re.compile(
-    r"(Dialog|PopupWindow|AlertDialog|BottomSheet|Toast|permission)",
+    r"(Dialog|PopupWindow|AlertDialog|BottomSheet|Toast|permission|Application Not Responding|Application Error)",
     re.IGNORECASE,
 )
 

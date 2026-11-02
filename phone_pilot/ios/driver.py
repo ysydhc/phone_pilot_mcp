@@ -19,6 +19,7 @@ import pathlib
 import subprocess
 from typing import Optional
 
+from phone_pilot.core import ui_snapshot_cache
 from phone_pilot.core.protocols import (
     AppDriver,
     InputDriver,
@@ -33,6 +34,10 @@ from phone_pilot.ios.ui import automator
 from phone_pilot.ios.ui import finder
 
 logger = logging.getLogger(__name__)
+
+
+class _EmptyWdaSourceError(RuntimeError):
+    pass
 
 
 def _wda_call(serial: str, fn):
@@ -123,7 +128,10 @@ class iOSInputDriver:
             client.tap(_to_pt(x, scale), _to_pt(y, scale))
             return {"ok": True, "x": int(x), "y": int(y), "engine": "wda"}
 
-        return _wda_call(self._serial, _do)
+        res = _wda_call(self._serial, _do)
+        if isinstance(res, dict) and res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def swipe(
         self,
@@ -154,7 +162,10 @@ class iOSInputDriver:
                 "engine": "wda",
             }
 
-        return _wda_call(self._serial, _do)
+        res = _wda_call(self._serial, _do)
+        if isinstance(res, dict) and res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def long_press(self, x: int, y: int, duration_ms: int = 500) -> dict:
         """Long press at coordinates (physical pixels) via WDA tap_hold."""
@@ -164,7 +175,10 @@ class iOSInputDriver:
             client.tap_hold(_to_pt(x, scale), _to_pt(y, scale), duration_ms / 1000.0)
             return {"ok": True, "x": int(x), "y": int(y), "engine": "wda"}
 
-        return _wda_call(self._serial, _do)
+        res = _wda_call(self._serial, _do)
+        if isinstance(res, dict) and res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def input_text(self, text: str, enter: bool = False) -> dict:
         """Input text into the focused field via WDA send_keys."""
@@ -178,7 +192,10 @@ class iOSInputDriver:
                 return _err("no_active_input_field", detail=str(exc))
             return {"ok": True, "text": text, "engine": "wda"}
 
-        return _wda_call(self._serial, _do)
+        res = _wda_call(self._serial, _do)
+        if isinstance(res, dict) and res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def keyevent(self, keycode: str) -> dict:
         """Send a hardware-button key event mapped to WDA pressButton."""
@@ -190,7 +207,10 @@ class iOSInputDriver:
             client.press(button)
             return {"ok": True, "keycode": keycode, "button": button, "engine": "wda"}
 
-        return _wda_call(self._serial, _do)
+        res = _wda_call(self._serial, _do)
+        if isinstance(res, dict) and res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
 
 # ---------------------------------------------------------------------------
@@ -349,15 +369,23 @@ class iOSUIDriver:
                     pass
             return client.source(format="json")
 
-        result = _wda_call(self._serial, _do)
-        if isinstance(result, str):
-            return result
-        if isinstance(result, dict) and "type" in result:
-            import json as _json
+        def _compute() -> str:
+            result = _wda_call(self._serial, _do)
+            if isinstance(result, dict) and "type" in result:
+                import json as _json
 
-            return _json.dumps(result)
-        logger.debug("dump source failed: %s", result)
-        return ""
+                result = _json.dumps(result)
+            if not isinstance(result, str) or not result:
+                logger.debug("dump source failed: %s", result)
+                raise _EmptyWdaSourceError("empty wda source")
+            return result
+
+        try:
+            return ui_snapshot_cache.get_or_compute(
+                ("ios", self._serial, "wda_source"), _compute
+            )
+        except _EmptyWdaSourceError:
+            return ""
 
     def dump_ui_hierarchy(self) -> str:
         """Dump current UI hierarchy as a WDA JSON source string."""
@@ -461,7 +489,10 @@ class iOSAppDriver:
             return _err("launch_failed", package=package, detail=str(exc))
         if proc.returncode != 0:
             return _err("launch_failed", package=package, detail=proc.stderr or "")
-        return {"ok": True, "package": package, "engine": engine}
+        res = {"ok": True, "package": package, "engine": engine}
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def force_stop(self, package: str) -> dict:
         """Force stop an app. Form-factor split (simctl terminate / pmd kill)."""
@@ -476,11 +507,17 @@ class iOSAppDriver:
             return _err("force_stop_failed", package=package, detail=str(exc))
         if proc.returncode != 0:
             return _err("force_stop_failed", package=package, detail=proc.stderr or "")
-        return {"ok": True, "package": package, "engine": engine}
+        res = {"ok": True, "package": package, "engine": engine}
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def clear_data(self, package: str) -> dict:
         """Clear application data. iOS v1: not_supported (no direct API; see design §4.4)."""
-        return _err("not_supported", package=package)
+        res = _err("not_supported", package=package)
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def install_app(self, app_path: str) -> dict:
         """Install .app (simulator) or .ipa (real device). Form-factor split."""
@@ -501,7 +538,10 @@ class iOSAppDriver:
             return _err("uninstall_failed", package=package, detail=str(exc))
         if proc.returncode != 0:
             return _err("uninstall_failed", package=package, detail=proc.stderr or "")
-        return {"ok": True, "package": package, "engine": engine}
+        res = {"ok": True, "package": package, "engine": engine}
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def uninstall_app(self, package: str) -> dict:
         """Uninstall app by bundle ID (alias for uninstall)."""
@@ -537,6 +577,7 @@ class iOSDriver:
         if not device_serial:
             raise ValueError("device_serial is required")
         self._device_serial = device_serial
+        self._serial = device_serial
         self._input = iOSInputDriver(device_serial)
         self._screen = iOSScreenDriver(device_serial)
         self._ui = iOSUIDriver(device_serial)
@@ -593,7 +634,10 @@ class iOSDriver:
             return {"ok": True, "engine": "wda"}
 
         result = _wda_call(self._device_serial, _do)
-        return result if isinstance(result, dict) else _err("go_home_failed")
+        res = result if isinstance(result, dict) else _err("go_home_failed")
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def go_back(self) -> dict:
         """
@@ -622,7 +666,10 @@ class iOSDriver:
             return res
 
         result = _wda_call(self._device_serial, _do)
-        return result if isinstance(result, dict) else _err("go_back_failed")
+        res = result if isinstance(result, dict) else _err("go_back_failed")
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def unlock(self, pin: Optional[str] = None) -> dict:
         """Wake + unlock device screen via WDA (pin entry not supported in v1)."""
@@ -632,7 +679,10 @@ class iOSDriver:
             return {"ok": True, "engine": "wda"}
 
         result = _wda_call(self._device_serial, _do)
-        return result if isinstance(result, dict) else _err("unlock_failed")
+        res = result if isinstance(result, dict) else _err("unlock_failed")
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def lock_screen(self) -> dict:
         """Lock screen via WDA."""
@@ -642,7 +692,10 @@ class iOSDriver:
             return {"ok": True, "engine": "wda"}
 
         result = _wda_call(self._device_serial, _do)
-        return result if isinstance(result, dict) else _err("lock_failed")
+        res = result if isinstance(result, dict) else _err("lock_failed")
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def clear_background(self) -> dict:
         """Best-effort clear background apps. v1: not_supported."""
@@ -703,7 +756,10 @@ class iOSDriver:
             return {"ok": True, "uri": uri, "engine": "wda"}
 
         result = _wda_call(self._device_serial, _do)
-        return result if isinstance(result, dict) else _err("open_deeplink_failed")
+        res = result if isinstance(result, dict) else _err("open_deeplink_failed")
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
 
     def launch_from_home(self, app_name: str, **kwargs) -> dict:
         """Launch app from home screen (delegates to finder)."""

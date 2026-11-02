@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from phone_pilot.core import ui_snapshot_cache
 from phone_pilot.mcp.server import mcp
 from phone_pilot.mcp._helpers import get_driver, _with_device
 
@@ -103,10 +104,12 @@ def _phone_tap_text_sync(
         cx = elem.get("center_x") or elem.get("center", [0, 0])[0]
         cy = elem.get("center_y") or elem.get("center", [0, 0])[1]
 
-        driver.input.tap(cx, cy, wait_s=wait_s)
+        tap_res = driver.input.tap(cx, cy, wait_s=wait_s)
+        ui_snapshot_cache.invalidate_device_ui(device_serial, platform=platform)
+        tap_ok = tap_res.get("ok", True) if isinstance(tap_res, dict) else True
 
         return {
-            "ok": True,
+            "ok": bool(tap_ok),
             "text": text,
             "match_mode": match_mode,
             "matched_count": len(elements),
@@ -129,6 +132,8 @@ async def phone_tap_text(
     match_mode: str = "contains",
     index: int = 0,
     wait_s: float = 0.5,
+    return_page_state: bool = False,
+    wait_ms: int = 500,
 ) -> dict:
     """通过文本查找 UI 元素并点击（find + tap 合一）。
     Find a UI element by text and tap it.
@@ -140,12 +145,14 @@ async def phone_tap_text(
         match_mode: "exact" 精确匹配 | "contains" 包含匹配（默认）/ Match mode
         index: 匹配到多个元素时点击第几个（0-based，默认 0）/ Which match to tap
         wait_s: 点击后等待秒数，默认 0.5 / Wait seconds after tap
+        return_page_state: 点击后是否采集并返回新页面状态，默认 False / Return post-tap page state
+        wait_ms: return_page_state=True 时点击后额外等待毫秒数，默认 500 / Wait ms before post-tap page state
 
     Returns / 返回值:
         dict: {"ok": True, "text", "center_x", "center_y", "matched_count", ...}
         或 {"ok": False, "error": str}
     """
-    return await asyncio.to_thread(
+    res = await asyncio.to_thread(
         _phone_tap_text_sync,
         device_serial,
         text,
@@ -154,6 +161,16 @@ async def phone_tap_text(
         index,
         wait_s,
     )
+    if return_page_state and res.get("ok", False):
+        await asyncio.sleep(max(wait_ms, 0) / 1000.0)
+        from phone_pilot.mcp._page_state_tools import _build_post_action_page_state
+
+        driver = get_driver(device_serial, platform)
+        res["page_state"] = _build_post_action_page_state(
+            driver, platform, device_serial
+        )
+        res["page_state_updated"] = True
+    return res
 
 
 @mcp.tool()

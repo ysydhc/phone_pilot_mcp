@@ -293,6 +293,7 @@ def find_text(
     ocr_case_sensitive: bool = False,
     ocr_psm: int = 6,
     use_ocr: bool = True,
+    use_vision: bool = False,
     retry_interval_ms: int = 1000,
     retry_attempts: int = 3,
     box: Optional[Box] = None,
@@ -519,12 +520,91 @@ def find_text(
                         return hit
                     _report_heal_outcome(ctx, heal_info, False)
             time.sleep(max(0, int(retry_interval_ms)) / 1000.0)
+    # Tier 3: 视觉定位兜底 / Multimodal Vision Grounding Fallback
+    if use_vision:
+        vision_hit = find_vision(ctx, raw_text, _silent_fail=True)
+        if vision_hit:
+            ctx._observe("find_text", f"'{raw_text}' 通过视觉定位兜底命中", element=vision_hit)
+            return vision_hit
     # Record the failed attempt (skip if called internally, e.g. from scroll_to_find)
     if not _silent_fail:
         ctx._observe(
             "find_text", f"'{raw_text}' 未找到 (重试 {attempts} 次)", status="fail"
         )
     return None
+
+
+def find_vision(
+    ctx: ScriptContext,
+    target_prompt: str,
+    *,
+    client: Optional[Any] = None,
+    _silent_fail: bool = False,
+) -> Optional[UIElement]:
+    """通过多模态视觉大模型定位屏幕上的元素（黑盒/WebView/游戏通用兜底）。
+    Find element on screen via VLM multimodal vision grounding.
+
+    若未配置 API Key，将安全跳过并返回 None，不抛出异常。
+    If API is not configured, gracefully skips and returns None without raising errors.
+
+    Parameters / 参数:
+        ctx: 脚本执行上下文 / Script execution context
+        target_prompt: 目标视觉语义描述 / Target visual semantic description
+        client: 可选自定义 VisionGroundingClient / Optional custom client
+        _silent_fail: 是否静默失败 / Suppress failure observation log
+
+    Returns / 返回值:
+        UIElement: 找到的元素 / Found element
+        None: 未找到或 API 未配置 / None if not found or API unconfigured
+    """
+    from phone_pilot.extensions.vision.grounding import VisionGroundingClient
+
+    grounding_client = client or VisionGroundingClient()
+    if not grounding_client.is_available():
+        if not _silent_fail:
+            ctx._observe("find_vision", f"'{target_prompt}' 视觉API未配置，已跳过", status="skip")
+        return None
+
+    try:
+        screenshot_bytes = ctx.driver.screen.screenshot_bytes()
+        screen_size = ctx.driver.screen.get_screen_size()
+    except Exception as e:
+        if not _silent_fail:
+            ctx._observe("find_vision", f"截图失败: {e}", status="fail")
+        return None
+
+    result = grounding_client.ground(screenshot_bytes, target_prompt, screen_size)
+    if not result.ok or not result.bounds:
+        if not _silent_fail:
+            ctx._observe("find_vision", f"'{target_prompt}' 未定位到 ({result.reason})", status="fail")
+        return None
+
+    x1, y1, x2, y2 = result.bounds
+    box_dict = {"x": x1, "y": y1, "w": max(1, x2 - x1), "h": max(1, y2 - y1)}
+    locator = {
+        "type": "vision",
+        "target_prompt": target_prompt,
+        "normalized_box": result.normalized_box,
+        "confidence": result.confidence,
+    }
+
+    elem = _ui_element_from_box(
+        ctx,
+        box_dict,
+        kind="vision",
+        query=target_prompt,
+        method="vlm_grounding",
+        text=result.label or target_prompt,
+        locator=locator,
+        meta={
+            "normalized_box": result.normalized_box,
+            "confidence": result.confidence,
+            "grounding_reason": result.reason,
+        },
+    )
+
+    ctx._observe("find_vision", f"视觉定位命中 '{target_prompt}': {result.bounds}", element=elem)
+    return elem
 
 
 def find_text_list(

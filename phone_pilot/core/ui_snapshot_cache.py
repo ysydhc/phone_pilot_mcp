@@ -37,6 +37,38 @@ _cache: dict[tuple[Hashable, ...], "CacheEntry"] = {}
 class CacheEntry:
     value: Any
     created_at: float
+    ttl_s: float = DEFAULT_UI_CACHE_TTL_S
+
+
+def put_snapshot(
+    key: tuple[Hashable, ...],
+    value: Any,
+    *,
+    ttl_s: float = DEFAULT_UI_CACHE_TTL_S,
+) -> None:
+    """直接写入缓存条目并指定条目级 TTL。"""
+    with _lock:
+        if len(_cache) >= _MAX_CACHE_ENTRIES:
+            _evict_expired_or_oldest()
+        _cache[key] = CacheEntry(value=value, created_at=time.monotonic(), ttl_s=ttl_s)
+
+
+def get_snapshot(
+    key: tuple[Hashable, ...],
+    *,
+    ttl_s: float | None = None,
+) -> Any | None:
+    """读取未过期的缓存条目；若不存在或已过期则返回 None。"""
+    now = time.monotonic()
+    with _lock:
+        entry = _cache.get(key)
+        if entry is None:
+            return None
+        effective_ttl = ttl_s if ttl_s is not None else entry.ttl_s
+        if (now - entry.created_at) <= effective_ttl:
+            return entry.value
+        _cache.pop(key, None)
+        return None
 
 
 def get_or_compute(
@@ -62,8 +94,10 @@ def get_or_compute(
     now = time.monotonic()
     with _lock:
         entry = _cache.get(key)
-        if entry is not None and (now - entry.created_at) <= ttl_s:
-            return entry.value  # type: ignore[return-value]
+        if entry is not None:
+            effective_ttl = ttl_s if ttl_s != DEFAULT_UI_CACHE_TTL_S else entry.ttl_s
+            if (now - entry.created_at) <= effective_ttl:
+                return entry.value  # type: ignore[return-value]
 
     value = compute()
 
@@ -71,16 +105,16 @@ def get_or_compute(
         # Evict expired entries and enforce max size to prevent unbounded growth.
         if len(_cache) >= _MAX_CACHE_ENTRIES:
             _evict_expired_or_oldest()
-        _cache[key] = CacheEntry(value=value, created_at=time.monotonic())
+        _cache[key] = CacheEntry(value=value, created_at=time.monotonic(), ttl_s=ttl_s)
     return value  # type: ignore[return-value]
 
 
 def _evict_expired_or_oldest() -> None:
     """清理过期条目；如仍超限，淘汰最旧的。调用方需持锁。"""
     now = time.monotonic()
-    # First pass: drop expired entries.
+    # First pass: drop expired entries using each entry's own ttl_s.
     expired = [
-        k for k, v in _cache.items() if (now - v.created_at) > DEFAULT_UI_CACHE_TTL_S
+        k for k, v in _cache.items() if (now - v.created_at) > v.ttl_s
     ]
     for k in expired:
         _cache.pop(k, None)

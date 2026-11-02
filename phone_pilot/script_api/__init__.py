@@ -16,7 +16,7 @@ from phone_pilot.core.run_store import RunSession
 from .context import ScriptContext, RetryExhausted
 
 # ---- 重新导出：查找 API ----
-from .find import find_text, find_image, find_text_list, find_image_list
+from .find import find_text, find_image, find_text_list, find_image_list, find_vision
 
 # ---- 重新导出：操作 API ----
 from .actions import (
@@ -178,6 +178,7 @@ __all__ = [
     "find_image_list",
     "find_text",
     "find_text_list",
+    "find_vision",
     # 截图 & 滑动
     "screenshot",
     "screenshot_annotated",

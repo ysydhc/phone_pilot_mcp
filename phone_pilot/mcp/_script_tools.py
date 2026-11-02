@@ -20,7 +20,7 @@ from phone_pilot.mcp._helpers import (
 )
 from phone_pilot.script_api.runner import scroll_to_find
 from phone_pilot.script_api.popup_guard import PopupGuard
-from phone_pilot.script_api.find import find_text
+from phone_pilot.script_api.find import find_text, find_vision
 from phone_pilot.script_api.actions import launch_from_home
 from phone_pilot.script_api.context import RetryExhausted
 
@@ -327,6 +327,7 @@ def _phone_smart_find_sync(
     exact: bool,
     try_dismiss_popup: bool,
     platform: str,
+    use_vision: bool = False,
 ) -> dict:
     """Sync body for phone_smart_find."""
     resolved, plat, err = _resolve_device_serial(
@@ -337,11 +338,25 @@ def _phone_smart_find_sync(
         return err
     try:
         ctx = _make_script_context(resolved, plat)
-        elem = find_text(ctx, text, use_ocr=use_ocr, exact=exact, retry_attempts=1)
+        elem = find_text(
+            ctx,
+            text,
+            use_ocr=use_ocr,
+            exact=exact,
+            retry_attempts=1,
+            use_vision=use_vision,
+        )
         # 首次未找到且启用弹窗重试时，尝试关闭弹窗再查找 / Retry after dismiss if not found
         if elem is None and try_dismiss_popup:
             PopupGuard(ctx).check_and_dismiss()
-            elem = find_text(ctx, text, use_ocr=use_ocr, exact=exact, retry_attempts=1)
+            elem = find_text(
+                ctx,
+                text,
+                use_ocr=use_ocr,
+                exact=exact,
+                retry_attempts=1,
+                use_vision=use_vision,
+            )
         if elem:
             center = (
                 elem.center()
@@ -364,9 +379,9 @@ def _phone_smart_find_sync(
                 "device_serial": resolved,
                 "platform": plat,
             }
-        return {"ok": False, "error": "not_found", "device_serial": resolved}
+        return {"ok": False, "error": "not_found", "device_serial": resolved, "platform": plat}
     except Exception as e:
-        return {"ok": False, "error": str(e), "device_serial": resolved}
+        return {"ok": False, "error": str(e), "device_serial": resolved, "platform": plat}
 
 
 @mcp.tool()
@@ -377,9 +392,10 @@ async def phone_smart_find(
     exact: bool = False,
     try_dismiss_popup: bool = True,
     platform: str = "auto",
+    use_vision: bool = False,
 ) -> dict:
-    """智能查找：UIA + OCR + 弹窗重试。
-    Smart find: UIA, OCR, and popup retry.
+    """智能查找：UIA + OCR + 弹窗重试 + 可选视觉定位兜底。
+    Smart find: UIA, OCR, popup retry, and optional vision grounding fallback.
 
     Parameters / 参数:
         text: 要查找的文本 / Text to search for
@@ -388,6 +404,7 @@ async def phone_smart_find(
         exact: 精确匹配 / Exact match
         try_dismiss_popup: 首次未找到时尝试关闭弹窗再查找 / Dismiss popup and retry if not found
         platform: 平台类型 / Platform type
+        use_vision: 是否在 UIA/OCR 失败后启用多模态视觉定位兜底 / Enable multimodal vision grounding fallback
 
     Returns / 返回值:
         dict: {"ok": True, "center": [x,y], "bounds": [...], "text": str}
@@ -400,6 +417,94 @@ async def phone_smart_find(
         use_ocr,
         exact,
         try_dismiss_popup,
+        platform,
+        use_vision,
+    )
+
+
+def _phone_vision_find_sync(
+    device_serial: str | None,
+    prompt: str,
+    platform: str,
+) -> dict:
+    """Sync body for phone_vision_find."""
+    resolved, plat, err = _resolve_device_serial(
+        device_serial if device_serial and str(device_serial).strip() else None,
+        platform,
+    )
+    if err:
+        return err
+    try:
+        from phone_pilot.extensions.vision.grounding import VisionGroundingClient
+
+        client = VisionGroundingClient()
+        if not client.is_available():
+            return {
+                "ok": False,
+                "error": "vision_api_not_configured",
+                "hint": "Set PHONE_PILOT_VISION_API_KEY environment variable to enable multimodal vision grounding.",
+                "device_serial": resolved,
+                "platform": plat,
+            }
+
+        ctx = _make_script_context(resolved, plat)
+        elem = find_vision(ctx, prompt, client=client)
+        if elem:
+            center = (
+                elem.center()
+                if hasattr(elem, "center") and callable(elem.center)
+                else None
+            )
+            bounds = (
+                elem.bounds()
+                if hasattr(elem, "bounds") and callable(elem.bounds)
+                else None
+            )
+            display_text = getattr(elem, "display_text", None) or getattr(
+                elem, "text", str(elem)
+            )
+            return {
+                "ok": True,
+                "center": list(center) if center else None,
+                "bounds": list(bounds) if bounds else None,
+                "text": display_text,
+                "device_serial": resolved,
+                "platform": plat,
+            }
+        return {
+            "ok": False,
+            "error": "not_found",
+            "device_serial": resolved,
+            "platform": plat,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e), "device_serial": resolved, "platform": plat}
+
+
+@mcp.tool()
+async def phone_vision_find(
+    prompt: str,
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """多模态视觉定位查找：直接通过自然语言语义定位界面元素（如'右上角跳过按钮'、'TAP TO START'）。
+    Multimodal vision grounding: locate element by visual prompt (e.g. 'close X button', 'skip ad button').
+
+    若未配置 API Key，将安全返回 error='vision_api_not_configured'。
+
+    Parameters / 参数:
+        prompt: 目标视觉语义描述 / Target visual semantic description
+        device_serial: 设备序列号 / Device serial
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "center": [x,y], "bounds": [x1,y1,x2,y2], "text": str}
+        或 {"ok": False, "error": "vision_api_not_configured" | "not_found"}
+    """
+    return await asyncio.to_thread(
+        _phone_vision_find_sync,
+        device_serial or None,
+        prompt,
         platform,
     )
 

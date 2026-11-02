@@ -54,9 +54,16 @@ phone_pilot/
 │   ├── resource.py          # @res: 资源缓存管理
 │   ├── verify.py            # 验证引擎（多维度断言 + 证据收集）
 │   ├── checkpoint.py        # 屏幕状态检查点（保存/对比）
+│   ├── guard/
+│   │   └── freshness_checker.py # 构建物与进程新鲜度看门狗（Pre-E2E Gate）
+│   ├── actions/
+│   │   └── ad_domain_actions.py # 商业化 5 大广告形态生命周期与单调性校验
 │   └── ui/
 │       ├── chain.py         # UIChain 流式 API
-│       ├── graph.py         # UIGraph DAG 拓扑引擎
+│       ├── graph.py         # UIGraph DAG 引擎 + UIKnowledgeGraph 动态认知图谱
+│       ├── knowledge_base.py# 图谱 JSON 持久化存储
+│       ├── navigator.py     # UINavigator 最短路径寻路与三级自愈引擎
+│       ├── projection.py    # SemanticProjector 语义投影与上下文降噪
 │       └── element.py       # UIElement 数据模型
 ├── extensions/              # 平台无关的扩展
 │   ├── vision/              # 图像处理（模板匹配）
@@ -166,6 +173,12 @@ phone_get_notifications(device_serial)
 phone_toggle_wifi(device_serial, enabled=False)
 phone_execute_shell(device_serial, command="dumpsys battery")
 phone_get_device_info(device_serial)
+
+# 架构演进与认知自愈工具（Pre-E2E 门禁 / 语义投影 / 动态图谱 / 商业化广告验证）
+phone_check_freshness(source_dir="src", binary_path="app.apk", symbol_name="loadAd")
+phone_get_focused_state(device_serial, focus="Rewarded Video", max_elements=15)
+phone_navigate_to(target_node_id="page:ad_entry", graph_path=".recordings/ui_graphs/demo.json")
+phone_verify_ad_format(ad_format="reward_video", placement_id="plc_001")
 ```
 
 `phone_get_page_state` 是 LLM 交互的核心工具：一次调用获取当前页面的 Activity、所有可交互元素（带编号和坐标）、可滚动区域和全部文本。设置 `annotate_elements=True` 会在截图上叠加元素编号和边框标注，LLM 看图后可直接用 `phone_tap_element(index=3)` 点击目标元素，无需多次往返查询。

@@ -233,11 +233,22 @@ class ScriptContext:
         self.platform = self._driver.platform
 
         # Clear logcat buffer so this run only sees its own logs (best-effort).
+        # Use archive=False on initial startup so pre-session logs are not archived.
         if self.clear_logcat_on_start:
             try:
-                self._driver.clear_log()
+                self._driver.clear_log(archive=False)
+            except TypeError:
+                try:
+                    self._driver.clear_log()
+                except Exception:
+                    pass
             except Exception:
                 pass
+            if hasattr(self._driver, "reset_session_log"):
+                try:
+                    self._driver.reset_session_log()
+                except Exception:
+                    pass
 
         # Auto-infer script_name from sys.argv if not set
         if not self.script_name:
