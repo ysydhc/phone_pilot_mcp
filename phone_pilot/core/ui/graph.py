@@ -710,6 +710,106 @@ class UIKnowledgeGraph:
             )
         return payload
 
+    def to_mermaid(self, root_node_id: Optional[str] = None) -> str:
+        """导出为 Mermaid 有向图 / 流程图描述文本。"""
+        lines = ["graph TD"]
+        if not self.nodes:
+            lines.append("    EmptyGraph[\"空图谱 (无页面节点)\"]")
+            return "\n".join(lines)
+
+        # 节点定义
+        for nid, node in sorted(self.nodes.items(), key=lambda x: x[0]):
+            act = node.activity_or_vc.split(".")[-1].split("/")[-1] if node.activity_or_vc else ""
+            label = f"{nid} ({act})" if act else nid
+            safe_label = label.replace('"', "'")
+            lines.append(f'    {nid}["{safe_label}"]')
+
+        # 边定义
+        for edge in self.edges:
+            crit = edge.trigger_criteria or {}
+            label_parts: list[str] = []
+            for k in ("text", "label", "resource_id", "content_desc"):
+                if k in crit and crit[k]:
+                    label_parts.append(str(crit[k]))
+                    break
+            action_desc = f"{edge.action_type}: {label_parts[0]}" if label_parts else edge.action_type
+            rate_pct = f"{int(round(edge.success_rate * 100))}%"
+            edge_label = f"{action_desc} ({rate_pct})".replace('"', "'")
+            lines.append(f'    {edge.source_id} -->|"{edge_label}"| {edge.target_id}')
+
+        return "\n".join(lines)
+
+    def to_mindmap_dict(self, root_node_id: Optional[str] = None) -> dict[str, Any]:
+        """导出为脑图/树形结构的字典（可供 ECharts Tree、Markmap 或前端渲染）。"""
+        if not self.nodes:
+            return {"id": "root", "name": "应用页面脑图 (空)", "children": []}
+
+        # 选取根节点
+        root_id = root_node_id
+        if not root_id or root_id not in self.nodes:
+            # 优先寻找入度为 0 的节点或名称包含 main/home 的节点
+            target_ids = {e.target_id for e in self.edges}
+            candidates = [nid for nid in self.nodes if nid not in target_ids]
+            if candidates:
+                root_id = candidates[0]
+            else:
+                for nid in self.nodes:
+                    if "main" in nid.lower() or "home" in nid.lower():
+                        root_id = nid
+                        break
+                if not root_id:
+                    root_id = next(iter(self.nodes.keys()))
+
+        adj: dict[str, list[UIEdge]] = {}
+        for edge in self.edges:
+            adj.setdefault(edge.source_id, []).append(edge)
+
+        visited: set[str] = set()
+
+        def build_tree(current_id: str, depth: int = 0) -> dict[str, Any]:
+            node = self.nodes.get(current_id)
+            act = node.activity_or_vc.split(".")[-1].split("/")[-1] if node and node.activity_or_vc else ""
+            display_name = f"{current_id} ({act})" if act else current_id
+            
+            tree_node: dict[str, Any] = {
+                "id": current_id,
+                "name": display_name,
+                "activity": node.activity_or_vc if node else "",
+                "interactive_count": len(node.interactive_elements) if node else 0,
+                "children": [],
+            }
+            if current_id in visited or depth > 10:
+                # 出现回路时标明循环引用，截断展开
+                tree_node["is_loop"] = True
+                return tree_node
+
+            visited.add(current_id)
+            for edge in adj.get(current_id, []):
+                child_tree = build_tree(edge.target_id, depth + 1)
+                crit = edge.trigger_criteria or {}
+                crit_text = str(crit.get("text") or crit.get("label") or crit.get("resource_id") or "")
+                child_tree["edge"] = {
+                    "action_type": edge.action_type,
+                    "target_text": crit_text,
+                    "success_rate": edge.success_rate,
+                }
+                tree_node["children"].append(child_tree)
+
+            return tree_node
+
+        tree_root = build_tree(root_id)
+
+        # 检查是否有未连通的孤立子图，挂载到全局虚拟根下（若有多分支）
+        unvisited = [nid for nid in self.nodes if nid not in visited]
+        if unvisited:
+            return {
+                "id": "__app_mindmap_root__",
+                "name": "应用主导航网络",
+                "children": [tree_root] + [build_tree(unid) for unid in unvisited[:5]],
+            }
+
+        return tree_root
+
     @classmethod
     def load_graph_json(
         cls, source: Union[str, pathlib.Path, dict[str, Any]]

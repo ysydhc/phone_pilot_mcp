@@ -96,6 +96,20 @@ def _phone_list_devices_sync() -> dict:
     except Exception:
         pass
 
+    # Attach concurrency lock status for each device
+    try:
+        from phone_pilot.core.device_lease import get_device_lock_status
+
+        for entry in result:
+            s = entry.get("serial")
+            if s:
+                st = get_device_lock_status(s)
+                entry["locked"] = bool(st.get("locked"))
+                if st.get("locked"):
+                    entry["lock_info"] = st.get("lock_info")
+    except Exception:
+        pass
+
     return {"ok": True, "devices": result}
 
 
@@ -532,3 +546,213 @@ async def phone_get_screen_size(
         或 {"ok": False, "error": str}
     """
     return await asyncio.to_thread(_phone_get_screen_size_sync, device_serial, platform)
+
+
+# ---------------------------------------------------------------------------
+# Device Concurrency / Lease Tools (Multi-Agent & Multi-Project Coordination)
+# ---------------------------------------------------------------------------
+
+
+def _phone_device_lock_status_sync(
+    device_serial: Optional[str] = None, platform: str = "auto"
+) -> dict:
+    resolved, plat, err = _resolve_device_serial(device_serial, platform)
+    if err:
+        return err
+
+    from phone_pilot.core.device_lease import get_device_lock_status
+
+    st = get_device_lock_status(resolved)
+    st["device_serial"] = resolved
+    st["platform"] = plat
+    return st
+
+
+@mcp.tool()
+async def phone_device_lock_status(
+    device_serial: Optional[str] = None,
+    platform: str = "auto",
+) -> dict:
+    """查询指定移动设备的并发独占锁状态（用于多 Agent/多项目共享设备协同）。
+    Check the concurrency lease/lock status of a mobile device.
+
+    Parameters / 参数:
+        device_serial: 设备序列号（缺省时自动解析或读取 PHONE_PILOT_DEVICE_SERIAL 环境变量）
+        platform: 平台类型（android / harmony / ios / auto）
+
+    Returns / 返回值:
+        dict: {
+            "ok": True,
+            "device_serial": "xxx",
+            "locked": bool,
+            "lock_info": {
+                "session_id": "...",
+                "holder_name": "...",
+                "purpose": "...",
+                "remaining_s": 95.5,
+                "expires_at": ...
+            }
+        }
+    """
+    return await asyncio.to_thread(
+        _phone_device_lock_status_sync, device_serial, platform
+    )
+
+
+def _phone_device_acquire_lock_sync(
+    device_serial: Optional[str] = None,
+    session_id: Optional[str] = None,
+    purpose: str = "",
+    ttl_s: float = 120.0,
+    wait_timeout_s: float = 10.0,
+    platform: str = "auto",
+) -> dict:
+    resolved, plat, err = _resolve_device_serial(device_serial, platform)
+    if err:
+        return err
+
+    from phone_pilot.core.device_lease import acquire_device_lock
+
+    res = acquire_device_lock(
+        serial=resolved,
+        session_id=session_id,
+        purpose=purpose,
+        ttl_s=ttl_s,
+        wait_timeout_s=wait_timeout_s,
+    )
+    res["platform"] = plat
+    return res
+
+
+@mcp.tool()
+async def phone_device_acquire_lock(
+    device_serial: Optional[str] = None,
+    session_id: Optional[str] = None,
+    purpose: str = "",
+    ttl_s: float = 120.0,
+    wait_timeout_s: float = 10.0,
+    platform: str = "auto",
+) -> dict:
+    """申请移动设备的独占排他锁（推荐在多 Agent 或多项目端到端验证前调用）。
+    Acquire exclusive lease lock on a mobile device before running verification.
+
+    Parameters / 参数:
+        device_serial: 设备序列号（缺省时自动解析或读取环境变量）
+        session_id: 会话标识（若省略则自动生成并在返回值中携带）
+        purpose: 本次验证的业务目标或项目说明（例如 'order-checkout E2E verification'）
+        ttl_s: 租约超时时间（秒，默认 120s，超时后自动释放以防 Agent 崩溃死锁）
+        wait_timeout_s: 锁被占用时的排队等待超时时间（秒，默认 10s，0 表示非阻塞立即返回）
+        platform: 平台类型（android / harmony / ios / auto）
+
+    Returns / 返回值:
+        dict: 成功时 {"ok": True, "acquired": True, "device_serial": ..., "session_id": ..., "lock_info": ...}
+              被占用排队超时 {"ok": False, "error": "device_busy", "current_holder": ...}
+    """
+    return await asyncio.to_thread(
+        _phone_device_acquire_lock_sync,
+        device_serial,
+        session_id,
+        purpose,
+        ttl_s,
+        wait_timeout_s,
+        platform,
+    )
+
+
+def _phone_device_release_lock_sync(
+    device_serial: Optional[str] = None,
+    session_id: Optional[str] = None,
+    force: bool = False,
+    platform: str = "auto",
+) -> dict:
+    resolved, plat, err = _resolve_device_serial(device_serial, platform)
+    if err:
+        return err
+
+    from phone_pilot.core.device_lease import release_device_lock
+
+    res = release_device_lock(
+        serial=resolved,
+        session_id=session_id,
+        force=force,
+    )
+    res["platform"] = plat
+    return res
+
+
+@mcp.tool()
+async def phone_device_release_lock(
+    device_serial: Optional[str] = None,
+    session_id: Optional[str] = None,
+    force: bool = False,
+    platform: str = "auto",
+) -> dict:
+    """释放移动设备的独占排他锁。
+    Release exclusive lease lock on a mobile device.
+
+    Parameters / 参数:
+        device_serial: 设备序列号（缺省时自动解析或读取环境变量）
+        session_id: 获取锁时返回的 session_id（非本人锁无法释放，除非 force=True）
+        force: 是否强制释放（管理员或排障接管时使用，默认 False）
+        platform: 平台类型（android / harmony / ios / auto）
+
+    Returns / 返回值:
+        dict: {"ok": True, "released": True, "device_serial": ..., ...}
+    """
+    return await asyncio.to_thread(
+        _phone_device_release_lock_sync,
+        device_serial,
+        session_id,
+        force,
+        platform,
+    )
+
+
+def _phone_device_renew_lock_sync(
+    device_serial: Optional[str] = None,
+    session_id: str = "",
+    ttl_s: float = 120.0,
+    platform: str = "auto",
+) -> dict:
+    resolved, plat, err = _resolve_device_serial(device_serial, platform)
+    if err:
+        return err
+
+    from phone_pilot.core.device_lease import renew_device_lock
+
+    res = renew_device_lock(
+        serial=resolved,
+        session_id=session_id,
+        ttl_s=ttl_s,
+    )
+    res["platform"] = plat
+    return res
+
+
+@mcp.tool()
+async def phone_device_renew_lock(
+    session_id: str,
+    device_serial: Optional[str] = None,
+    ttl_s: float = 120.0,
+    platform: str = "auto",
+) -> dict:
+    """为当前持有的设备独占锁续期（防止耗时长的测试过程中租约过期）。
+    Renew/extend lease duration of an actively held device lock.
+
+    Parameters / 参数:
+        session_id: 获取锁时的 session_id
+        device_serial: 设备序列号
+        ttl_s: 延长有效时间（秒，默认 120s）
+        platform: 平台类型（android / harmony / ios / auto）
+
+    Returns / 返回值:
+        dict: {"ok": True, "renewed": True, "lock_info": ...}
+    """
+    return await asyncio.to_thread(
+        _phone_device_renew_lock_sync,
+        device_serial,
+        session_id,
+        ttl_s,
+        platform,
+    )
+

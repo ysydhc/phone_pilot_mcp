@@ -8,8 +8,11 @@ and proxy connectivity verification.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import socket
+import subprocess
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -64,3 +67,93 @@ def check_proxy_reachable(host_ip: str, port: int, timeout: float = 1.0) -> bool
         return True
     except Exception:
         return False
+
+
+class IProxyManager:
+    """
+    Manager for iOS iproxy tunnel processes with automatic GC / cleanup.
+    Tracks active port forwards to avoid orphan process leaks and port collisions.
+    """
+
+    _tunnels: dict[tuple[str, int], subprocess.Popen] = {}
+    _lock = threading.Lock()
+
+    @classmethod
+    def start_tunnel(
+        cls,
+        udid: str,
+        local_port: int,
+        remote_port: int,
+    ) -> dict:
+        """Start an iproxy tunnel forwarding local_port to remote_port on udid."""
+        import shutil
+
+        key = (udid, local_port)
+        with cls._lock:
+            # Clean up any existing tunnel on the same port
+            cls.stop_tunnel(udid, local_port)
+
+            exe = shutil.which("iproxy")
+            if not exe:
+                return {
+                    "ok": False,
+                    "error": "iproxy_executable_not_found",
+                    "hint": "Install libimobiledevice via 'brew install libimobiledevice'",
+                }
+
+            try:
+                proc = subprocess.Popen(
+                    [exe, str(local_port), str(remote_port), "-u", udid],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+                cls._tunnels[key] = proc
+                return {
+                    "ok": True,
+                    "udid": udid,
+                    "local_port": local_port,
+                    "remote_port": remote_port,
+                    "pid": proc.pid,
+                }
+            except Exception as exc:
+                logger.error("Failed to spawn iproxy tunnel: %s", exc)
+                return {"ok": False, "error": str(exc)}
+
+    @classmethod
+    def stop_tunnel(cls, udid: str, local_port: int) -> dict:
+        """Stop and garbage-collect a specific iproxy tunnel."""
+        key = (udid, local_port)
+        with cls._lock:
+            proc = cls._tunnels.pop(key, None)
+            if proc is not None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=2.0)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                return {"ok": True, "stopped": True, "local_port": local_port}
+        return {"ok": True, "stopped": False, "local_port": local_port}
+
+    @classmethod
+    def cleanup_all(cls) -> int:
+        """Terminate all active iproxy tunnels."""
+        stopped = 0
+        with cls._lock:
+            for (udid, lport), proc in list(cls._tunnels.items()):
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=1.0)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                stopped += 1
+            cls._tunnels.clear()
+        return stopped
+
+
+atexit.register(IProxyManager.cleanup_all)

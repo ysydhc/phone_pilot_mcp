@@ -38,6 +38,7 @@ CORE_TOOLS: frozenset[str] = frozenset(
         # Navigation
         "phone_go_back",
         "phone_go_home",
+        "phone_go_recents",
         # Smart find
         "phone_smart_find",
         # Script execution
@@ -57,6 +58,10 @@ EXTENDED_CATEGORIES: dict[str, list[str]] = {
         "phone_get_device_info",
         "phone_build_device_profile",
         "phone_export_device_info_md",
+        "phone_device_acquire_lock",
+        "phone_device_release_lock",
+        "phone_device_renew_lock",
+        "phone_device_lock_status",
     ],
     "input": [
         "phone_long_press",
@@ -129,6 +134,14 @@ EXTENDED_CATEGORIES: dict[str, list[str]] = {
         "phone_record_script_stop",
         "phone_replay_trace",
     ],
+    "graph": [
+        "phone_explore_app",
+        "phone_generate_dashboard",
+        "phone_navigate_to",
+        "phone_record_transition",
+        "phone_save_ui_graph",
+        "phone_load_ui_graph",
+    ],
     "mock": [
         "phone_mock_start",
         "phone_mock_stop",
@@ -151,6 +164,7 @@ CATEGORY_DESCRIPTIONS: dict[str, str] = {
     "logcat": "Log capture & assertions: start/stop/search, since-timestamp, ordered sequence assert / 日志捕获与断言：启停搜索、时间点过滤、有序序列验证",
     "advanced": "Advanced: verify, memory analysis, file transfer, clipboard, notifications, network, shell, resources, monkey / 高级：验证、内存、文件传输、剪贴板、通知、网络、Shell、资源、Monkey",
     "script_record": "Record an MCP session into a runnable script_api script, or replay a captured trace / 录制 MCP 操作生成 script_api 脚本，或回放 trace",
+    "graph": "App UI graph exploration & navigation: one-click explore, topological navigation, graph save/load / 应用 UI 记忆图谱：一键应用探索、拓扑寻路与脑图生成",
     "mock": "本地网络打桩 mock server:动态写规则、查命中、判断 App 是否切换 / Local network mock server: set rules, inspect hits, assert app switched",
 }
 

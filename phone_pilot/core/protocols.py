@@ -194,6 +194,10 @@ class DeviceDriver(Protocol):
         """Press back button."""
         ...
 
+    def go_recents(self) -> dict:
+        """Navigate to recent apps / task switcher screen."""
+        ...
+
     def unlock(self, pin: Optional[str] = None) -> dict:
         """Wake + unlock device screen."""
         ...

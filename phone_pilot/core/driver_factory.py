@@ -8,6 +8,7 @@ and returns the appropriate driver instance.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from phone_pilot.core.protocols import DeviceDriver
@@ -174,7 +175,12 @@ def _first_adb_device() -> Optional[str]:
             delay_s=0,
             log_output=False,
         )
+        target_serial = os.environ.get("ANDROID_SERIAL") or os.environ.get("PHONE_PILOT_DEVICE")
         devices = parse_adb_devices(proc.stdout or "")
+        if target_serial:
+            for d in devices:
+                if d.get("state") == "device" and d.get("serial") == target_serial:
+                    return target_serial
         for d in devices:
             if d.get("state") == "device" and d.get("serial"):
                 return d.get("serial")

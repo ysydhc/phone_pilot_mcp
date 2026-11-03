@@ -182,7 +182,10 @@ def dump_ui_xml(
         proc1 = CommandRunner.run(
             cmd1, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0
         )
-        out1 = (proc1.stdout or "").strip()
+        out1 = proc1.stdout or ""
+        if isinstance(out1, bytes):
+            out1 = out1.decode("utf-8", errors="replace")
+        out1 = out1.strip()
         if "<hierarchy" in out1:
             _tty_dump_supported[device_serial] = True
             idx = out1.find("<hierarchy")
@@ -202,7 +205,10 @@ def dump_ui_xml(
     proc2 = CommandRunner.run(
         cmd2, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0
     )
-    out2 = (proc2.stdout or "").strip()
+    out2 = proc2.stdout or ""
+    if isinstance(out2, bytes):
+        out2 = out2.decode("utf-8", errors="replace")
+    out2 = out2.strip()
 
     if "null root node" in out2.lower():
         if force_home:
@@ -217,7 +223,10 @@ def dump_ui_xml(
         proc2 = CommandRunner.run(
             cmd2, check=False, delay_s=0.0, log_output=False, silent=True, timeout_s=6.0
         )
-        out2 = (proc2.stdout or "").strip()
+        out2 = proc2.stdout or ""
+    if isinstance(out2, bytes):
+        out2 = out2.decode("utf-8", errors="replace")
+    out2 = out2.strip()
     m = _DUMP_PATH_RE.search(out2)
     dump_path = m.group(1) if m else "/sdcard/window_dump.xml"
 
@@ -231,6 +240,8 @@ def dump_ui_xml(
         timeout_s=6.0,
     )
     xml = proc3.stdout or ""
+    if isinstance(xml, bytes):
+        xml = xml.decode("utf-8", errors="replace")
     if "<hierarchy" not in xml:
         return {
             "ok": False,

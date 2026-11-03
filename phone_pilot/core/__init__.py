@@ -55,6 +55,15 @@ from phone_pilot.core.resource import (
     res_list,
     res_resolve,
 )
+from phone_pilot.core.device_lease import (
+    DeviceLeaseManager,
+    LockInfo,
+    acquire_device_lock,
+    device_lease,
+    get_device_lock_status,
+    release_device_lock,
+    renew_device_lock,
+)
 
 __all__ = [
     # Protocols
@@ -101,4 +110,12 @@ __all__ = [
     "res_get",
     "res_list",
     "res_resolve",
+    # Device lease & lock
+    "DeviceLeaseManager",
+    "LockInfo",
+    "acquire_device_lock",
+    "device_lease",
+    "get_device_lock_status",
+    "release_device_lock",
+    "renew_device_lock",
 ]

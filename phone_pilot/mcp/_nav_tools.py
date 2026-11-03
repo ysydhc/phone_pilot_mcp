@@ -64,6 +64,29 @@ async def phone_go_back(
 
 
 @mcp.tool()
+async def phone_go_recents(
+    device_serial: str = "",
+    platform: str = "auto",
+) -> dict:
+    """打开多任务/最近应用列表。
+    Open recent apps / task switcher.
+
+    Parameters / 参数:
+        device_serial: 设备序列号，空则自动检测 / Device serial, auto-detect if empty
+        platform: 平台类型 / Platform type
+
+    Returns / 返回值:
+        dict: {"ok": True, "platform": str} 或 {"ok": False, "error": str}
+    """
+    return await asyncio.to_thread(
+        _with_device,
+        lambda s, p: get_driver(s, p).go_recents(),
+        device_serial or None,
+        platform,
+    )
+
+
+@mcp.tool()
 async def phone_unlock(
     device_serial: str = "",
     pin: str = "",

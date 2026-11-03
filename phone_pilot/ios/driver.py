@@ -705,6 +705,21 @@ class iOSDriver:
             ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
         return res
 
+    def go_recents(self) -> dict:
+        """Navigate to App Switcher / recent apps screen."""
+
+        def _do(client):
+            w, h = self._screen.get_screen_size()
+            # swipe up from bottom center and pause
+            client.swipe(w // 2, h - 10, w // 2, int(h * 0.6), 0.5)
+            return {"ok": True, "engine": "wda_gesture"}
+
+        result = _wda_call(self._device_serial, _do)
+        res = result if isinstance(result, dict) else _err("go_recents_failed")
+        if res.get("ok"):
+            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+        return res
+
     def unlock(self, pin: Optional[str] = None) -> dict:
         """Wake + unlock device screen via WDA (pin entry not supported in v1)."""
 

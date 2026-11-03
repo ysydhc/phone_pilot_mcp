@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from phone_pilot.core.protocols import DeviceDriver
@@ -58,6 +59,7 @@ def _with_device(
     fn,
     device_serial: str | None,
     platform: str,
+    check_lock: bool = True,
 ) -> dict:
     """Common device resolution + error wrapping helper."""
     resolved, plat, err = _resolve_device_serial(
@@ -66,6 +68,38 @@ def _with_device(
     )
     if err:
         return err
+
+    # Concurrency guard: check if device is leased/locked by another session
+    if check_lock and resolved:
+        try:
+            from phone_pilot.core.device_lease import get_device_lock_status
+
+            st = get_device_lock_status(resolved)
+            if st.get("locked"):
+                lock_info = st.get("lock_info", {})
+                lock_session = lock_info.get("session_id")
+                caller_session = os.getenv("PHONE_PILOT_SESSION_ID")
+                # Strict enforcement or session mismatch
+                strict = os.getenv("PHONE_PILOT_STRICT_LOCK", "1").lower() in ("1", "true", "yes")
+                if strict and (not caller_session or caller_session != lock_session):
+                    return {
+                        "ok": False,
+                        "error": "device_busy_locked",
+                        "device_serial": resolved,
+                        "platform": plat,
+                        "locked_by": lock_info.get("holder_name"),
+                        "purpose": lock_info.get("purpose"),
+                        "remaining_s": lock_info.get("remaining_s"),
+                        "session_id": lock_session,
+                        "note": (
+                            f"设备 [{resolved}] 当前被 [{lock_info.get('holder_name')}] 独占锁定中 "
+                            f"(剩余 {lock_info.get('remaining_s')}s，用途: {lock_info.get('purpose')})。"
+                            f"请稍候重试或通过 phone_device_acquire_lock 排队申请设备锁。"
+                        ),
+                    }
+        except Exception:
+            pass
+
     try:
         result = fn(resolved, plat)
         result.setdefault("device_serial", resolved)
@@ -137,7 +171,18 @@ def _resolve_device_serial(
     from phone_pilot.android.adb.utils import ensure_adb_env
 
     ensure_adb_env()
+
+    # Prioritize environment variable binding if device_serial is not passed
+    if not device_serial or not str(device_serial).strip():
+        env_serial = os.getenv("PHONE_PILOT_DEVICE_SERIAL")
+        if env_serial and env_serial.strip():
+            device_serial = env_serial.strip()
+
     platform = (platform or "auto").strip().lower()
+    if platform == "auto":
+        env_platform = os.getenv("PHONE_PILOT_PLATFORM")
+        if env_platform and env_platform.strip():
+            platform = env_platform.strip().lower()
 
     android_serials = _scan_android_serials() if platform in ("android", "auto") else []
     harmony_serials = _scan_harmony_serials() if platform in ("harmony", "auto") else []

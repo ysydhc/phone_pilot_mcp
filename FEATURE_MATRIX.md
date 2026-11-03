@@ -20,6 +20,8 @@ Phone Pilot 采用分层解耦的跨平台驱动体系：
 | :--- | :--- | :---: | :---: | :---: | :--- |
 | **设备与会话管理** | 设备连接与状态探测 | ✅ | ✅ | ✅ | ADB / HDC / idb companion |
 | | 多进程并发与会话锁 | ✅ | ✅ | ✅ | 鸿蒙采用基于进程与句柄的 `HarmonySessionLock`；iOS 采用 WDA Session 复用 |
+| | **多 Agent 设备租约锁** | ✅ | ✅ | ✅ | 跨进程内核级文件锁 (`fcntl.flock`) + TTL 租约防死锁 + PID 存活检测；支持排队加锁、续期与强占防护 |
+| | 环境变量设备优先绑定 | ✅ | ✅ | ✅ | 优先通过 `PHONE_PILOT_DEVICE_SERIAL` / `PHONE_PILOT_PLATFORM` 绑定专属设备，避免多项目串扰 |
 | | 息屏自动唤醒与点亮 | ✅ | ✅ | ✅ | 鸿蒙 `power_shell` + `input keyevent 26` 自愈；iOS `idb press-button POWER` |
 | | 屏幕截图与尺寸探测 | ✅ | ✅ | ✅ | 统一返回 PNG 二进制与 `(width, height)` |
 | | MockServer 反向代理 | ✅ | ⚠️ 方案支持 | ✅ | Android 原生 `adb reverse`；iOS 采用 `iproxy` + 动态端口映射平替 |
@@ -33,7 +35,12 @@ Phone Pilot 采用分层解耦的跨平台驱动体系：
 | | 滑动与手势 (`phone_swipe`) | ✅ | ✅ | ✅ | 支持指定起始坐标与耗时 |
 | | 编号快速点击 (`tap_element`) | ✅ | ✅ | ✅ | 结合 `phone_get_page_state` 的编号直接命中并点击 |
 | | 应用启动与强停 (`launch/stop`) | ✅ | ✅ | ✅ | Android Intent / 鸿蒙 AA 命令行 / iOS Bundle ID Launch |
-| | 导航按键 (`go_home` / `go_back`) | ✅ | ✅ | ✅ | Android Keycode / 鸿蒙模拟键值 / iOS SpringBoard 对应手势与按钮 |
+| | 导航按键 (`go_home` / `go_back` / `go_recents`) | ✅ | ✅ | ✅ | Android Keycode 187 / 鸿蒙底端上滑手势降级 / iOS SpringBoard 上滑悬停唤出 App Switcher |
+| **页面认知图谱与漫游** | 拓扑寻路与三级自愈 (`navigate_to`) | ✅ | ✅ | ✅ | 基于 UIKnowledgeGraph Dijkstra 最短路径规划与弹窗/滚动/重排自愈 |
+| | 一键应用探索脑图 (`explore_app`) | ✅ | ✅ | ✅ | 启发式自动漫游、敏感破坏性动作过滤、BFS 页面入图与回溯，生成 Mermaid/Mindmap |
+| | 图谱持久化与状态转移 (`record/save/load`) | ✅ | ✅ | ✅ | 记录动作触发标准与成功率边权重，无缝序列化为标准化 JSON |
+| **打分系统与可视化看板** | 端侧执行质量打分 (`score_engine`) | ✅ | ✅ | ✅ | 四维度（正确性 40%、有效性 30%、时延 20%、自愈代价 10%）100 分制质量量化打分 |
+| | 交互式数据看板 (`dashboard`) | ✅ | ✅ | ✅ | 自包含 HTML 看板，呈现 KPI 卡片、三端对比、健康度矩阵、慢调用与应用脑图联动 |
 | **智能查找与视觉定位** | 文本智能查找 (`smart_find`) | ✅ | ✅ | ✅ | UIA 树查找 -> OCR 降级 -> 多模态视觉兜底三层漏斗 |
 | | 多模态视觉定位 (`vision_find`)| ✅ | ✅ | ✅ | VLM 零样本视觉定位；未配置 API 时静默安全跳过 |
 | | 滚动查找 (`scroll_to_find`) | ✅ | ✅ | ✅ | 基于方向滑动与步进重试 |
@@ -57,6 +64,8 @@ Phone Pilot 采用分层解耦的跨平台驱动体系：
    - `tests/test_mock_reverse.py` (iOS 反向代理平替与联动验证)
    - `tests/test_mcp_helpers_ios.py` (iOS MCP 工具全量路由与设备绑定)
    - `tests/ios/test_ios_popup_guard.py` (iOS SpringBoard 弹窗规则与否定词防御)
-3. **Cross-Platform / Vision**:
+3. **Cross-Platform / Vision / Concurrency**:
+   - `tests/test_device_lease.py` (跨进程设备租约、TTL自动过期、重入更新与上下文管理器)
+   - `tests/test_device_mcp_lock.py` (MCP 设备锁工具链路、环境变量绑定优先、并发写操作软拦截)
    - `tests/test_mcp_vision_tools.py` (跨平台多模态视觉 MCP 工具路由)
    - `tests/test_vision_find.py` (跨平台视觉查找与 Tier 3 兜底链条)

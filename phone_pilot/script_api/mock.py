@@ -86,8 +86,9 @@ def mock_server_start(
         actual_data_port: int = server.data_port
         actual_ctrl_port: int = server.ctrl_port
 
+        serial = ctx.device_serial or getattr(getattr(ctx, "driver", None), "device_serial", "")
         reverse = ReverseManager(
-            ctx.device_serial or "", platform=getattr(ctx, "platform", "android")
+            serial, platform=getattr(ctx, "platform", "android")
         )
         rev_result = reverse.setup(actual_data_port)
         if not rev_result.get("ok"):

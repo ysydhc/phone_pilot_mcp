@@ -7,7 +7,10 @@ tool categories and dynamically activate them at runtime.
 from __future__ import annotations
 
 
-from mcp.server.fastmcp import Context
+try:
+    from mcp.server.mcpserver import Context  # type: ignore
+except ImportError:
+    from mcp.server.fastmcp import Context  # type: ignore
 
 from phone_pilot.mcp.server import mcp
 from phone_pilot.mcp._tool_registry import (

@@ -54,6 +54,15 @@ The server is split by domain. `server.py` creates the single `FastMCP` instance
 - **Layered tool loading** (`_tool_registry.py`): ~15 `CORE_TOOLS` are always visible; the rest are hidden after startup to cut agent context overhead (~10K→~2.3K tokens) and exposed on demand via the `phone_discover_tools` meta-tool / `activate_category`. Set `PHONE_PILOT_LOAD_ALL_TOOLS=1` to register everything (used by tests). When adding a new tool, also add its name to `CORE_TOOLS` or the appropriate `EXTENDED_CATEGORIES` entry, otherwise it stays hidden in layered mode.
 - `tool_contracts.py` holds shared schema/response contract definitions. `_state.py` holds shared mutable state (recording/logcat) guarded by `_state_lock`.
 - **Response contract**: every `phone_*` tool returns a `dict`. Success → `{"ok": True, ...}`; failure → `{"ok": False, "error": str, ...}`. Never raise out of a tool. `_with_device` in `_helpers.py` wraps tool bodies to resolve the serial and convert exceptions into this envelope.
+- **Multi-Agent device concurrency & lease lock (`core/device_lease.py`)**:
+  - When multiple agents work concurrently on different projects sharing mobile devices, agents MUST avoid colliding on the same device.
+  - Device resolution in `_helpers.py` automatically checks `PHONE_PILOT_DEVICE_SERIAL` environment variable first, allowing per-project device binding (e.g. binding different emulator ports or dedicated test phones).
+  - MCP tools for device locking: `phone_device_acquire_lock`, `phone_device_release_lock`, `phone_device_renew_lock`, `phone_device_lock_status`.
+  - When locked, other agents attempting write actions are guarded and rejected with `device_busy_locked` unless matching `session_id` or `PHONE_PILOT_SESSION_ID`.
+  - Standard verification workflow for agents:
+    1. Acquire lock: `phone_device_acquire_lock(device_serial, session_id=..., purpose=..., ttl_s=120, wait_timeout_s=10)`
+    2. Perform verification steps (e.g. `phone_get_page_state`, `phone_tap_element`)
+    3. Release lock upon completion: `phone_device_release_lock(device_serial, session_id=...)`
 - `phone_get_page_state` is the LLM-first tool: one call returns Activity, numbered interactive elements with coordinates, scrollable regions, and all text. With `annotate_elements=True` it overlays element numbers on the screenshot so the agent can call `phone_tap_element(index=N)`.
 - **Session recording → script (`_recorder.py` + `_script_record_tools.py`)**: `server.py` wraps `mcp.tool` via `install_recording_hook` *before* tool modules import, so every registered tool reports its calls. `phone_record_script_start` / `phone_record_script_stop` capture whitelisted **action** tools (tap/swipe/input/launch/…; pure queries like `phone_get_page_state` are excluded) and `stop` returns a runnable `script_api` script generated from the `CODEGEN` map (MCP tool name → script_api source line). `phone_replay_trace` re-executes a captured trace. The hook is a no-op unless recording is active, and recording failures never break a tool call. When adding a new action tool that should be recordable, add a `CODEGEN` entry for it.
 

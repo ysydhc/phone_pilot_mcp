@@ -229,10 +229,10 @@ class HarmonyScreenDriver:
         return size
 
     def start_screenrecord(self, path: str, **kwargs) -> dict:
-        """Start screen recording via hmdriver2.
+        """Start screen recording via hmdriver2 or HDC uitest.
 
         Returns dict with ``remote_path`` (on HarmonyOS, recording is
-        managed by hmdriver2 internally; ``remote_path`` matches ``path``).
+        managed by hmdriver2 or pulled from device upon stop).
         """
         try:
             hm = _get_hm(self._serial)
@@ -244,11 +244,32 @@ class HarmonyScreenDriver:
                 "engine": "hmdriver2",
             }
         except Exception as exc:
-            return {
-                "ok": False,
-                "error": f"screenrecord_failed: {exc}",
-                "path": path,
-            }
+            logger.debug("hmdriver2 screenrecord failed, attempting HDC uitest fallback: %s", exc)
+            try:
+                import time
+                from phone_pilot.harmony.hdc.runner import HdcCommandRunner
+                from phone_pilot.harmony.hdc.utils import hdc_prefix
+                remote_path = f"/data/local/tmp/screenrecord_{int(time.time())}.mp4"
+                HdcCommandRunner.run(
+                    hdc_prefix(self._serial) + ["shell", f"uitest screenRecord {remote_path} &"],
+                    check=False,
+                    timeout_s=5.0,
+                    log_output=False,
+                )
+                self._hdc_record_remote = remote_path
+                self._hdc_record_local = path
+                return {
+                    "ok": True,
+                    "path": path,
+                    "remote_path": remote_path,
+                    "engine": "hdc_uitest",
+                }
+            except Exception as hdc_exc:
+                return {
+                    "ok": False,
+                    "error": f"screenrecord_failed: {exc}; HDC fallback: {hdc_exc}",
+                    "path": path,
+                }
 
     def stop_screenrecord(self) -> dict:
         """Stop current screen recording."""
@@ -257,6 +278,28 @@ class HarmonyScreenDriver:
             hm.screenrecord.stop()
             return {"ok": True, "engine": "hmdriver2"}
         except Exception as exc:
+            if getattr(self, "_hdc_record_remote", None):
+                try:
+                    import time
+                    from phone_pilot.harmony.hdc.runner import HdcCommandRunner
+                    from phone_pilot.harmony.hdc.utils import hdc_prefix, pull_file
+                    HdcCommandRunner.run(
+                        hdc_prefix(self._serial) + ["shell", "pkill -f screenRecord || true"],
+                        check=False,
+                        timeout_s=5.0,
+                        log_output=False,
+                    )
+                    time.sleep(1.0)
+                    pull_file(self._serial, self._hdc_record_remote, self._hdc_record_local)
+                    HdcCommandRunner.run(
+                        hdc_prefix(self._serial) + ["shell", f"rm -f {self._hdc_record_remote}"],
+                        check=False,
+                        log_output=False,
+                    )
+                    self._hdc_record_remote = None
+                    return {"ok": True, "engine": "hdc_uitest"}
+                except Exception as hdc_exc:
+                    return {"ok": False, "error": f"screenrecord_stop_failed: {exc}; HDC: {hdc_exc}"}
             return {"ok": False, "error": f"screenrecord_stop_failed: {exc}"}
 
 
@@ -811,6 +854,23 @@ class HarmonyDriver:
             return {"ok": True, "engine": "hmdriver2"}
         except Exception:
             return self._input.keyevent("BACK")
+
+    def go_recents(self) -> dict:
+        """Navigate to recent apps / task switcher screen."""
+        try:
+            res = self._input.keyevent("KEYCODE_APP_SWITCH")
+            if isinstance(res, dict) and res.get("ok"):
+                return res
+        except Exception:
+            pass
+        try:
+            w, h = self._screen.get_screen_size()
+            start_x, start_y = w // 2, h - 10
+            end_x, end_y = w // 2, int(h * 0.6)
+            res = self._input.swipe(start_x, start_y, end_x, end_y, duration_ms=500)
+            return {"ok": True, "engine": "gesture", **(res if isinstance(res, dict) else {})}
+        except Exception as exc:
+            return {"ok": False, "error": f"go_recents_failed: {exc}"}
 
     def unlock(self, pin: Optional[str] = None) -> dict:
         """Wake + unlock device screen."""

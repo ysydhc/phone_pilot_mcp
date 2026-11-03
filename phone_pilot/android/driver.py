@@ -639,6 +639,16 @@ class AndroidDriver:
         except Exception as e:
             return {"ok": False, "error": f"go_back_failed: {e}"}
 
+    def go_recents(self) -> dict:
+        """Navigate to recent apps / task switcher screen."""
+        try:
+            res = self._input.keyevent("KEYCODE_APP_SWITCH")
+            if isinstance(res, dict) and res.get("ok"):
+                return res
+        except Exception:
+            pass
+        return self._input.keyevent("187")
+
     def unlock(self, pin: Optional[str] = None) -> dict:
         """Wake + unlock device screen."""
         from phone_pilot.android.device.lock import wake_and_unlock

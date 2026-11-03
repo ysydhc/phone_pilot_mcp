@@ -33,18 +33,38 @@ from contextlib import asynccontextmanager
 def _import_fastmcp():
     """
     Import FastMCP from the external `mcp` package.
+    Supports both MCP 1.x (FastMCP) and MCP 2.x (MCPServer).
 
     Note: This project has a local package `phone_pilot.mcp`, which can shadow
     the external `mcp` package on sys.path. We guard against that here.
     """
+    def _lookup_cls():
+        try:
+            from mcp.server import FastMCP  # type: ignore
+            return FastMCP
+        except ImportError:
+            pass
+        try:
+            from mcp.server.mcpserver import MCPServer  # type: ignore
+            return MCPServer
+        except ImportError:
+            pass
+        try:
+            from mcp.server.fastmcp import FastMCP  # type: ignore
+            return FastMCP
+        except ImportError:
+            pass
+        return None
+
     try:
-        from mcp.server import FastMCP  # type: ignore
         import mcp.server as _mcp_server  # type: ignore
 
         mod_path = getattr(_mcp_server, "__file__", "") or ""
         # If it resolves to our local package, fall back to site-packages search.
         if "phone_pilot/mcp" not in mod_path.replace("\\", "/"):
-            return FastMCP
+            cls = _lookup_cls()
+            if cls is not None:
+                return cls
     except Exception:
         pass
 
@@ -70,9 +90,11 @@ def _import_fastmcp():
         ):
             del sys.modules["mcp"]
 
-        from mcp.server import FastMCP as ExternalFastMCP  # type: ignore
+        cls = _lookup_cls()
+        if cls is not None:
+            return cls
 
-        return ExternalFastMCP
+        raise ImportError("Could not import FastMCP or MCPServer from mcp package")
     finally:
         sys.path = original_sys_path
 
@@ -92,9 +114,11 @@ mcp = FastMCP("phone_pilot")
 
 from phone_pilot.mcp._recorder import install_recording_hook  # noqa: E402
 from phone_pilot.mcp._cache_hook import install_cache_invalidation_hook  # noqa: E402
+from phone_pilot.mcp._telemetry_hook import install_telemetry_hook  # noqa: E402
 
 install_recording_hook(mcp)
 install_cache_invalidation_hook(mcp)
+install_telemetry_hook(mcp)
 
 # ---------------------------------------------------------------------------
 # Re-export helpers for backward compatibility (used by __init__.py)

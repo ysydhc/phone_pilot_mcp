@@ -141,6 +141,12 @@ phone_clear_background(device_serial)
 phone_clear_data(device_serial, package="com.example.app")
 phone_open_deeplink(device_serial, uri="myapp://page/detail")
 
+# 多 Agent / 多项目设备并发互斥锁（防止设备踩踏与冲突）
+phone_device_acquire_lock(device_serial, session_id="projA_agent", purpose="验证结账链路", ttl_s=120)
+phone_device_release_lock(device_serial, session_id="projA_agent")
+phone_device_renew_lock(device_serial, session_id="projA_agent", ttl_s=120)
+phone_device_lock_status(device_serial)
+
 # 录屏与日志
 phone_start_recording(device_serial, name="test")
 phone_stop_recording(device_serial)  # 自动拉取到本地
@@ -230,6 +236,85 @@ def main() -> int:
 
 if __name__ == "__main__":
     run_script(main, ctx=ctx)
+```
+
+## 多 Agent / 多项目并发移动设备共享验证规范
+
+当开发者同时进行多个项目的开发与验证，或者多个 Agent 并行执行自动化测试时，移动设备（屏幕焦点与前台应用）是天然的独占资源。如果未加控制，会导致多个 Agent 指令交错、互相切换前台、验证全盘混乱。
+
+Phone Pilot 提供了**“空间隔离（专用设备绑定）”**与**“时间分片（租约互斥锁）”**两层治理方案：
+
+### 1. 空间隔离：通过环境变量绑定专用设备或模拟器端口
+
+在不同项目的根目录或环境变量中配置目标设备，Agent 和 MCP 将优先选取绑定的设备，杜绝串扰：
+
+```bash
+# 项目 A (.env 或 MCP 环境配置)
+PHONE_PILOT_DEVICE_SERIAL=emulator-5554
+PHONE_PILOT_PLATFORM=android
+
+# 项目 B (.env 或 MCP 环境配置)
+PHONE_PILOT_DEVICE_SERIAL=emulator-5556
+PHONE_PILOT_PLATFORM=android
+```
+
+### 2. 时间分片：设备租约互斥锁（Device Concurrency Lease Lock）
+
+如果多个项目共享同一台真实设备或模拟器，Agent 必须遵循 **“加锁 → 验证 → 释放”** 的规范生命周期：
+
+```mermaid
+sequenceDiagram
+    participant AgentA as Agent (项目 A)
+    participant Lock as DeviceLeaseManager
+    participant Phone as Mobile Device
+    participant AgentB as Agent (项目 B)
+
+    AgentA->>Lock: phone_device_acquire_lock(ttl_s=120)
+    Lock-->>AgentA: {ok: True, session_id: "..."}
+    AgentB->>Lock: phone_device_acquire_lock(wait_timeout_s=10)
+    Note over AgentB,Lock: 排队等待或直接报错 device_busy
+    AgentA->>Phone: phone_get_page_state / phone_tap_element
+    Phone-->>AgentA: 正常响应
+    AgentA->>Lock: phone_device_release_lock(session_id)
+    Lock-->>AgentB: 获取到设备锁，开始项目 B 验证
+```
+
+#### 标准 Agent 执行工作流
+
+1. **申请独占锁**：
+   ```json
+   // 调用 phone_device_acquire_lock
+   {
+     "device_serial": "emulator-5554",
+     "session_id": "projA_checkout_verify",
+     "purpose": "Verify order placement flow",
+     "ttl_s": 120,
+     "wait_timeout_s": 10
+   }
+   ```
+2. **安全防踩踏保护**：
+   - 当设备被锁定后，任何其他 session 发起的写操作（点击、滑动、启动应用等）都会被自动拦截并返回错误：`device_busy_locked`，包含当前锁定的持有人与剩余时间。
+3. **完成验证与释放锁**：
+   ```json
+   // 验证完毕后必须释放
+   {
+     "device_serial": "emulator-5554",
+     "session_id": "projA_checkout_verify"
+   }
+   ```
+4. **死锁防护与自动过期（TTL）**：
+   - 锁带有 TTL（默认 120 秒）。若持有锁的 Agent 进程崩溃或异常退出，TTL 到期或检测到进程已不存在后，系统会自动回收锁，后续 Agent 能够安全接管，无需人工干预。
+   - 若测试时间长，可通过 `phone_device_renew_lock` 持续续租。
+
+#### Python 脚本中通过上下文管理器使用
+
+```python
+from phone_pilot.script_api import device_lease, reset_home_screen
+
+# 自动获取独占锁并在退出代码块时自动释放
+with device_lease("emulator-5554", purpose="E2E checkout test", auto_teardown_fn=reset_home_screen):
+    # 执行关键端到端验证...
+    pass
 ```
 
 ## 存储结构

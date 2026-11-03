@@ -99,6 +99,15 @@ from .popup_guard import PopupGuard, PopupRule
 from .self_healer import SelfHealer, HealAction, get_self_healer
 from phone_pilot.core.healing_experience import HealingExperienceStore, HealingRecord
 
+# ---- 重新导出：设备租约互斥 / Device lease & lock ----
+from phone_pilot.core.device_lease import (
+    device_lease,
+    acquire_device_lock,
+    release_device_lock,
+    renew_device_lock,
+    get_device_lock_status,
+)
+
 # ---- 重新导出：私有辅助函数（chain.py / 测试文件通过 api._xxx 访问）----
 from ._helpers import (
     get_screen_size,
@@ -282,4 +291,10 @@ __all__ = [
     "mock_switch_rule",
     "mock_load_seed",
     "mock_assert_switched",
+    # Device lease & lock
+    "device_lease",
+    "acquire_device_lock",
+    "release_device_lock",
+    "renew_device_lock",
+    "get_device_lock_status",
 ]

@@ -169,11 +169,17 @@ class CommandRunner:
                 stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired as e:
+            raw_out = e.stdout or ""
+            if isinstance(raw_out, bytes):
+                raw_out = raw_out.decode("utf-8", errors="replace")
+            raw_err = e.stderr or ""
+            if isinstance(raw_err, bytes):
+                raw_err = raw_err.decode("utf-8", errors="replace")
             proc = subprocess.CompletedProcess(
                 cmd,
                 124,
-                stdout=(e.stdout or ""),
-                stderr=(e.stderr or "") + f"\n[agent] timeout after {timeout_s}s",
+                stdout=raw_out,
+                stderr=raw_err + f"\n[agent] timeout after {timeout_s}s",
             )
         if log_output and not silent:
             if proc.stdout:
