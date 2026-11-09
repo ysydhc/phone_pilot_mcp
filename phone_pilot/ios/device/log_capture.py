@@ -18,12 +18,16 @@ from phone_pilot.ios.pmd import utils as pmd_utils
 _log_captures: dict[str, dict] = {}
 
 
-def _build_cmd(serial: str, *, level: str) -> list[str]:
+def _build_cmd(serial: str, *, level: str, process: str = "") -> list[str]:
     """Build the syslog stream command for the device's form factor."""
     form = pmd_utils.detect_form_factor(serial)
     if form == "simulator":
         exe = pmd_utils.xcrun_executable()
-        return [exe, "simctl", "spawn", serial, "log", "stream"]
+        cmd = [exe, "simctl", "spawn", serial, "log", "stream", "--level", "debug"]
+        proc_kw = (process or "").strip()
+        if proc_kw:
+            cmd += ["--predicate", f'process CONTAINS "{proc_kw}"']
+        return cmd
     # real device (and "unknown" → assume real)
     exe = pmd_utils.pmd_executable()
     cmd = [exe, "syslog"]
@@ -53,14 +57,17 @@ def start_log_capture(
             "platform": "ios",
         }
 
+    proc_kw = process.strip() if process else ""
     out = pathlib.Path(output_path)
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
-        cmd = _build_cmd(serial, level=level)
+        cmd = _build_cmd(serial, level=level, process=proc_kw)
     except (RuntimeError, OSError) as exc:
         return {"ok": False, "error": str(exc), "platform": "ios"}
 
     # Build a grep pipeline for tag/exclude/process filtering (best-effort).
+    # On simulator, `process` is already filtered natively via `log stream --predicate`.
+    is_sim_predicate = "--predicate" in cmd
     filters = []
     include = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     excludes = (
@@ -68,20 +75,23 @@ def start_log_capture(
         if exclude_tags
         else []
     )
-    proc_kw = process.strip() if process else ""
+    need_proc_grep = bool(proc_kw and not is_sim_predicate)
 
     try:
         fh = open(out, "w", encoding="utf-8")
-        if include or excludes or proc_kw:
+        if include or excludes or need_proc_grep:
             import re as _re
 
-            shell_cmd = " ".join(cmd)
+            quoted_parts = [
+                f"'{part}'" if (" " in part or '"' in part) else part for part in cmd
+            ]
+            shell_cmd = " ".join(quoted_parts)
             if include:
                 pat = "|".join(_re.escape(t) for t in include)
                 shell_cmd += f" | grep -E '{pat}'"
             for ex in excludes:
                 shell_cmd += f" | grep -v '{_re.escape(ex)}'"
-            if proc_kw:
+            if need_proc_grep:
                 shell_cmd += f" | grep '{_re.escape(proc_kw)}'"
             proc = subprocess.Popen(
                 shell_cmd, shell=True, stdout=fh, stderr=subprocess.DEVNULL

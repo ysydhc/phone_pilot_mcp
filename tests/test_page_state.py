@@ -233,6 +233,44 @@ def test_tap_text_return_page_state():
     assert res["page_state"]["elements"][0]["label"] == "DetailItem"
 
 
+def test_tap_text_auto_ios_return_page_state_caches_under_ios_key():
+    """phone_tap_text with only iOS device_serial resolves platform='ios' and writes cache under ('ios', serial, ...)."""
+    from phone_pilot.mcp import _helpers
+
+    ui_snapshot_cache.invalidate()
+    ios_udid = "606174FC-4664-48B9-9A9B-061157DC2819"
+    driver = MagicMock()
+    driver.platform = "ios"
+    driver.ui.find_elements.return_value = [{"center_x": 80, "center_y": 120, "text": "Continue"}]
+    driver.input.tap.return_value = {"ok": True}
+    driver.ui.get_current_activity.return_value = {"package": "com.demo.ios", "activity": ""}
+    driver.ui.dump_ui_nodes.return_value = [_make_fake_node("NextScreenBtn")]
+
+    with (
+        patch.object(_helpers, "_scan_android_serials", return_value=[]),
+        patch.object(_helpers, "_scan_harmony_serials", return_value=[]),
+        patch.object(_helpers, "_scan_ios_serials", return_value=[ios_udid]),
+        patch("phone_pilot.mcp._input_tools.get_driver", return_value=driver),
+    ):
+        res = asyncio.run(
+            phone_tap_text(
+                device_serial=ios_udid,
+                text="Continue",
+                wait_s=0.0,
+                return_page_state=True,
+                wait_ms=0,
+            )
+        )
+
+    assert res["ok"] is True
+    assert res["platform"] == "ios"
+    assert res["device_serial"] == ios_udid
+    assert res["page_state_updated"] is True
+    cached = ui_snapshot_cache.get_snapshot(("ios", ios_udid, "page_elements", False))
+    assert cached is not None
+    assert cached[0][0]["label"] == "NextScreenBtn"
+
+
 def test_get_page_state_annotate_only_returns_single_image():
     """B4: include_screenshot=False, annotate_elements=True only populates screenshot_annotated_base64."""
     ui_snapshot_cache.invalidate()

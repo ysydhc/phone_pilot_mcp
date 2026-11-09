@@ -6,8 +6,28 @@ import asyncio
 import pathlib
 
 from phone_pilot.mcp.server import mcp
-from phone_pilot.mcp._helpers import get_skills
+from phone_pilot.mcp._helpers import get_skills, _resolve_device_serial
 from phone_pilot.core.resource import resolve_or_cache_path
+
+
+def _resolve_skills_and_platform(device_serial: str, platform: str):
+    """Resolve DeviceSkills, serial, and concrete platform string."""
+    plat = (platform or "auto").strip().lower()
+    serial = (device_serial or "").strip()
+    if plat == "auto" or not serial:
+        res_serial, res_plat, _ = _resolve_device_serial(serial or None, plat)
+        if res_serial:
+            serial = res_serial
+        if res_plat:
+            plat = res_plat
+    target_serial = serial or device_serial
+    skills = get_skills(target_serial, plat)
+    drv_plat = getattr(getattr(skills, "driver", None), "platform", None)
+    if isinstance(drv_plat, str) and drv_plat in ("android", "ios", "harmony"):
+        plat = drv_plat
+    elif plat == "auto":
+        plat = "android"
+    return skills, target_serial, plat
 
 
 # =============================================================================
@@ -37,7 +57,9 @@ def _phone_find_image_sync(
                 "detail": str(e),
                 "template_path": template_path,
             }
-        skills = get_skills(device_serial, platform)
+        skills, resolved_serial, resolved_plat = _resolve_skills_and_platform(
+            device_serial, platform
+        )
         result = skills.find_image_on_screen(
             template_path,
             threshold=threshold,
@@ -45,8 +67,8 @@ def _phone_find_image_sync(
             method=method,
             max_results=max_results,
         )
-        result["device_serial"] = device_serial
-        result["platform"] = platform
+        result["device_serial"] = resolved_serial
+        result["platform"] = resolved_plat
         result["template_path"] = template_path
         return result
     except Exception as e:
@@ -57,7 +79,7 @@ def _phone_find_image_sync(
 async def phone_find_image(
     device_serial: str,
     template_path: str,
-    platform: str = "android",
+    platform: str = "auto",
     threshold: float = 0.85,
     grayscale: bool = True,
     method: str = "auto",
@@ -110,7 +132,9 @@ def _phone_ocr_find_sync(
 ) -> dict:
     """Sync body for phone_ocr_find (run in thread to avoid blocking event loop)."""
     try:
-        skills = get_skills(device_serial, platform)
+        skills, resolved_serial, resolved_plat = _resolve_skills_and_platform(
+            device_serial, platform
+        )
         result = skills.find_text_on_screen(
             query,
             lang=lang,
@@ -118,8 +142,8 @@ def _phone_ocr_find_sync(
             case_sensitive=case_sensitive,
             limit=limit,
         )
-        result["device_serial"] = device_serial
-        result["platform"] = platform
+        result["device_serial"] = resolved_serial
+        result["platform"] = resolved_plat
         result["query"] = query
         return result
     except Exception as e:
@@ -130,7 +154,7 @@ def _phone_ocr_find_sync(
 async def phone_ocr_find(
     device_serial: str,
     query: str,
-    platform: str = "android",
+    platform: str = "auto",
     lang: str = "eng",
     exact: bool = False,
     case_sensitive: bool = False,
@@ -188,15 +212,17 @@ def _phone_compare_screenshot_sync(
                 "detail": str(e),
                 "baseline_path": baseline_path,
             }
-        skills = get_skills(device_serial, platform)
+        skills, resolved_serial, resolved_plat = _resolve_skills_and_platform(
+            device_serial, platform
+        )
         baseline_bytes = pathlib.Path(baseline_path).read_bytes()
 
         result = skills.compare_screenshot(
             baseline_bytes,
             threshold=threshold,
         )
-        result["device_serial"] = device_serial
-        result["platform"] = platform
+        result["device_serial"] = resolved_serial
+        result["platform"] = resolved_plat
         result["baseline_path"] = baseline_path
         return result
     except Exception as e:
@@ -207,7 +233,7 @@ def _phone_compare_screenshot_sync(
 async def phone_compare_screenshot(
     device_serial: str,
     baseline_path: str,
-    platform: str = "android",
+    platform: str = "auto",
     threshold: float = 0.95,
 ) -> dict:
     """将当前屏幕与基准截图进行相似度比较。

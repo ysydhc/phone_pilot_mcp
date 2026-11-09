@@ -58,7 +58,7 @@ def test_device_level_entries_match_signatures():
         want = _sig_params(getattr(P.DeviceDriver, m), drop_self=True)
         got = _sig_params(getattr(drv, m), drop_self=False)
         assert want == got, f"DeviceDriver.{m} signature drift: {want} != {got}"
-    assert len(methods) == 18, f"expected 18 device-level methods, found {len(methods)}"
+    assert len(methods) == 19, f"expected 19 device-level methods, found {len(methods)}"
 
 
 def test_accessor_and_identity_properties_present():
@@ -86,7 +86,7 @@ def test_accessor_and_identity_properties_present():
 
 
 def test_total_is_43():
-    """19 sub-driver + 18 device-level + 6 properties = 43 (shell added in d1c4ae8)."""
+    """19 sub-driver + 19 device-level + 6 properties = 44 (shell added in d1c4ae8, go_recents in 7f65796)."""
     sub = sum(
         len(_proto_methods(p))
         for p in (P.InputDriver, P.ScreenDriver, P.UIDriver, P.AppDriver)
@@ -99,4 +99,4 @@ def test_total_is_43():
             if not n.startswith("_") and isinstance(v, property)
         ]
     )
-    assert sub + dev + props == 43, f"{sub}+{dev}+{props}"
+    assert sub + dev + props == 44, f"{sub}+{dev}+{props}"

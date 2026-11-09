@@ -505,7 +505,12 @@ class AndroidAppDriver:
             self._device_serial, include_system=include_system
         )
 
-    def launch_app(self, package: str, activity: Optional[str] = None) -> dict:
+    def launch_app(
+        self,
+        package: str,
+        activity: Optional[str] = None,
+        args: Optional[list[str]] = None,
+    ) -> dict:
         """Launch an application."""
         component = f"{package}/{activity}" if activity else None
         restart_app(

@@ -398,6 +398,29 @@ class TestP0Logcat:
         assert result["ok"] is True
         assert result["count"] >= 3  # line1, line2, line3
 
+    def test_search_logcat_reads_active_capture_file(
+        self, mock_resolve, mock_get_driver, tmp_path
+    ):
+        """当 serial 存在活跃采集文件时，search_logcat 直接读取本地文件且标注 source='active_capture'."""
+        from phone_pilot.mcp import server as mcp_server
+        from phone_pilot.mcp.server import phone_search_logcat
+
+        log_file = tmp_path / "active.log"
+        log_file.write_text(
+            "boot line\nAdSDK READY banner\ntrailing line\n", encoding="utf-8"
+        )
+        mcp_server._logcat_state["test_serial"] = str(log_file)
+        try:
+            mock_get_driver.return_value.read_log.reset_mock()
+            result = _run(phone_search_logcat(pattern="AdSDK READY", lines=10))
+            assert result["ok"] is True
+            assert result.get("source") == "active_capture"
+            assert result["count"] == 1
+            assert result["matches"] == ["AdSDK READY banner"]
+            mock_get_driver.return_value.read_log.assert_not_called()
+        finally:
+            mcp_server._logcat_state.pop("test_serial", None)
+
 
 # ---------------------------------------------------------------------------
 # P0 ScriptContext Tools
@@ -691,7 +714,7 @@ class TestMCPErrorHandling:
 
     def test_resolve_error_returns_ok_false(self):
         """设备未找到时返回 {"ok": False, "error": str}."""
-        with patch("phone_pilot.mcp._nav_tools._resolve_device_serial") as m:
+        with patch("phone_pilot.mcp._helpers._resolve_device_serial") as m:
             m.return_value = (
                 None,
                 None,
@@ -785,11 +808,11 @@ class TestContractValidation:
         assert len(missing) > 0
 
     def test_all_contracts_count(self):
-        """契约表总数应为 68。Contract table should have 68 entries."""
+        """契约表总数应为 69。Contract table should have 69 entries."""
         from phone_pilot.mcp.tool_contracts import get_all_contracts
 
         contracts = get_all_contracts()
-        assert len(contracts) == 68, f"Expected 68 contracts, got {len(contracts)}"
+        assert len(contracts) == 69, f"Expected 69 contracts, got {len(contracts)}"
 
 
 # ---------------------------------------------------------------------------
@@ -880,7 +903,7 @@ class TestInputValidation:
         assert result["ok"] is False
         assert "threshold" in result["error"]
 
-    def test_install_app_invalid_file_type(self):
+    def test_install_app_invalid_file_type(self, mock_resolve):
         """phone_install_app 非 APK 文件 → ok=False."""
         import tempfile
 
@@ -1011,7 +1034,10 @@ class TestLayeredToolLoading:
 
     def test_activate_category_idempotent(self):
         """重复激活同一类别不会出错。"""
-        from phone_pilot.mcp._tool_registry import activate_category
+        from phone_pilot.mcp._tool_registry import (
+            EXTENDED_CATEGORIES,
+            activate_category,
+        )
         from phone_pilot.mcp.server import mcp
 
         first = activate_category(mcp, "logcat")
@@ -1019,9 +1045,10 @@ class TestLayeredToolLoading:
         second = activate_category(mcp, "logcat")
         count_after_second = len(mcp._tool_manager._tools)
 
-        assert len(first) == 5
+        expected_len = len(EXTENDED_CATEGORIES["logcat"])
+        assert len(first) == expected_len
         assert count_after_first == count_after_second
-        assert len(second) == 5  # 已存在也返回名称列表
+        assert len(second) == expected_len  # 已存在也返回名称列表
 
     def test_activate_unknown_category(self):
         """未知类别返回空列表。"""
@@ -1037,10 +1064,10 @@ class TestLayeredToolLoading:
         from phone_pilot.mcp.server import mcp
 
         activated = activate_by_keyword(mcp, "logcat")
-        # 至少包含 3 个 logcat 工具（可能还匹配到描述中含 logcat 的其他工具）
-        assert len(activated) >= 3
+        # 扩展层包含剩余 logcat 断言/时间点过滤工具（核心 logcat 工具已在 CORE_TOOLS）
+        assert len(activated) >= 2
         logcat_tools = [n for n in activated if "logcat" in n.lower()]
-        assert len(logcat_tools) >= 3
+        assert len(logcat_tools) >= 2
 
     def test_category_summary(self):
         """get_category_summary 返回正确的类别概要。"""
@@ -1110,6 +1137,18 @@ class TestLayeredToolLoading:
         assert result["activated_count"] == 2
         assert "phone_long_press" in result["activated_tools"]
         assert "phone_keyevent" in result["activated_tools"]
+
+    def test_discover_tools_activate_multiple_categories(self):
+        """phone_discover_tools(category='app,logcat') 支持逗号分隔多分类一次性激活。"""
+        from phone_pilot.mcp._tool_registry import EXTENDED_CATEGORIES
+        from phone_pilot.mcp.server import phone_discover_tools
+
+        result = _run(phone_discover_tools(category="app,logcat"))
+        assert result["ok"] is True
+        assert result.get("categories") == ["app", "logcat"]
+        expected = set(EXTENDED_CATEGORIES["app"]) | set(EXTENDED_CATEGORIES["logcat"])
+        assert set(result["activated_tools"]) == expected
+        assert result["activated_count"] == len(expected)
 
     def test_discover_tools_unknown_category(self):
         """phone_discover_tools(category=unknown) 返回 ok=False。"""

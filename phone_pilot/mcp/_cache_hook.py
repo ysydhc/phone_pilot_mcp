@@ -63,6 +63,8 @@ def _safe_invalidate_ui(tool_name: str, kwargs: dict, result: Any) -> None:
 
     serial = result.get("device_serial") or kwargs.get("device_serial")
     platform = result.get("platform") or kwargs.get("platform")
+    if platform == "auto":
+        platform = None
 
     if not serial:
         return

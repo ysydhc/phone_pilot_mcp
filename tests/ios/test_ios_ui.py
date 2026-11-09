@@ -97,6 +97,27 @@ class TestAutomator:
         assert "Login" in texts
         assert "Welcome" in texts
 
+    def test_match_selector_class_name_short_and_full(self):
+        full_elem = {"type": "XCUIElementTypeButton", "label": "Login"}
+        short_elem = {"type": "Button", "label": "Login"}
+
+        assert automator.match_selector(full_elem, {"class_name": "XCUIElementTypeButton"})
+        assert automator.match_selector(full_elem, {"class_name": "Button"})
+        assert automator.match_selector(short_elem, {"class_name": "XCUIElementTypeButton"})
+        assert automator.match_selector(short_elem, {"class_name": "Button"})
+        assert not automator.match_selector(full_elem, {"class_name": "StaticText"})
+        assert not automator.match_selector(short_elem, {"class_name": "XCUIElementTypeStaticText"})
+
+    def test_selector_to_wda_predicate_class_name_variants(self):
+        pred_short = automator.selector_to_wda_predicate({"class_name": "Button", "text": "Login"})
+        pred_full = automator.selector_to_wda_predicate(
+            {"class_name": "XCUIElementTypeButton", "text": "Login"}
+        )
+        assert pred_short == pred_full
+        assert 'type == "XCUIElementTypeButton"' in pred_short
+        assert 'type == "Button"' in pred_short
+        assert 'label == "Login"' in pred_short
+
 
 # ---------------------------------------------------------------------------
 # iOSUIDriver
@@ -200,3 +221,27 @@ class TestUIDriver:
             second = driver.ui.find_elements({"text": "Login"})
             assert len(second) == 1
             assert client.source.call_count == 2
+
+    def test_ui_driver_get_screen_size_no_import_error(self):
+        client = MagicMock()
+        client.window_size.return_value = (390, 844)
+        client.scale = 3.0
+        ui_drv = iOSUIDriver(SERIAL)
+        with _patch_bridge(client):
+            size1 = ui_drv.get_screen_size()
+            size2 = ui_drv.get_screen_size()
+        assert size1 == (1170, 2532)
+        assert size2 == (1170, 2532)
+        assert client.window_size.call_count == 1
+
+    def test_find_elements_enriches_visibility_with_screen_size(self):
+        client = MagicMock()
+        client.scale = 1.0
+        client.window_size.return_value = (390, 844)
+        client.source.return_value = json.dumps(WDA_SOURCE)
+        with _patch_bridge(client):
+            results = iOSUIDriver(SERIAL).find_elements({"class_name": "Button"})
+        assert len(results) == 1
+        assert results[0]["name"] == "login_btn"
+        assert results[0]["visible"] is True
+        assert results[0]["visible_ratio"] == 1.0

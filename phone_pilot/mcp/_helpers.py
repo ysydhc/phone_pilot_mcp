@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Optional
 
 from phone_pilot.core.protocols import DeviceDriver
@@ -11,29 +12,89 @@ from phone_pilot.android.driver import AndroidDriver
 from phone_pilot.harmony.driver import HarmonyDriver
 from phone_pilot.script_api.context import ScriptContext
 
+_SCAN_CACHE_TTL_S: float = 10.0
+_scan_cache: dict[str, tuple[float, list[str]]] = {}
+
+
+def invalidate_device_cache() -> None:
+    """Clear short-TTL device topology caches in MCP helpers and iOS pmd utils."""
+    _scan_cache.clear()
+    try:
+        from phone_pilot.ios.pmd.utils import (
+            invalidate_device_cache as _inv_ios_cache,
+        )
+
+        _inv_ios_cache()
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Driver Factory
 # ---------------------------------------------------------------------------
 
 
-def get_driver(device_serial: str, platform: str = "android") -> DeviceDriver:
-    """Get a device driver instance based on platform."""
-    platform = (platform or "android").strip().lower()
-    if platform == "android":
+def get_driver(device_serial: str, platform: str = "auto") -> DeviceDriver:
+    """Get a device driver instance based on platform (supports 'auto')."""
+    plat = (platform or "auto").strip().lower()
+    if plat == "auto":
+        resolved_serial, resolved_plat, _ = _resolve_device_serial(
+            device_serial if device_serial and str(device_serial).strip() else None,
+            "auto",
+        )
+        if resolved_plat:
+            plat = resolved_plat
+            if resolved_serial and not (device_serial and str(device_serial).strip()):
+                device_serial = resolved_serial
+        else:
+            from phone_pilot.core.driver_factory import create_driver
+
+            return create_driver(device_serial, "auto")
+    if plat == "android":
         return AndroidDriver(device_serial)
-    if platform == "ios":
+    if plat == "ios":
         from phone_pilot.ios.driver import iOSDriver
 
         return iOSDriver(device_serial)
-    if platform == "harmony":
+    if plat == "harmony":
         return HarmonyDriver(device_serial)
     raise ValueError(f"Unknown platform: {platform}")
 
 
-def get_skills(device_serial: str, platform: str = "android") -> DeviceSkills:
+def get_skills(device_serial: str, platform: str = "auto") -> DeviceSkills:
     """Get a DeviceSkills instance for the given device."""
     return DeviceSkills(get_driver(device_serial, platform))
+
+
+def _resolve_driver_and_platform(
+    device_serial: str,
+    platform: str = "auto",
+    get_driver_fn=None,
+) -> tuple[DeviceDriver, str, str]:
+    """Resolve concrete (driver, resolved_serial, resolved_platform).
+
+    When platform is 'auto' (or empty), queries _resolve_device_serial first so
+    that even when get_driver_fn is mocked in unit tests, the concrete platform
+    ('android' | 'ios' | 'harmony') is accurately determined.
+    """
+    plat = (platform or "auto").strip().lower()
+    serial = (device_serial or "").strip()
+    if plat == "auto" or not serial:
+        res_serial, res_plat, _ = _resolve_device_serial(serial or None, plat)
+        if res_serial:
+            serial = res_serial
+        if res_plat:
+            plat = res_plat
+
+    factory = get_driver_fn or get_driver
+    target_serial = serial or device_serial
+    driver = factory(target_serial, plat)
+    drv_plat = getattr(driver, "platform", None)
+    if isinstance(drv_plat, str) and drv_plat in ("android", "ios", "harmony"):
+        plat = drv_plat
+    elif plat == "auto":
+        plat = "android"
+    return driver, target_serial, plat
 
 
 def _make_script_context(device_serial: str, platform: str) -> ScriptContext:
@@ -80,7 +141,11 @@ def _with_device(
                 lock_session = lock_info.get("session_id")
                 caller_session = os.getenv("PHONE_PILOT_SESSION_ID")
                 # Strict enforcement or session mismatch
-                strict = os.getenv("PHONE_PILOT_STRICT_LOCK", "1").lower() in ("1", "true", "yes")
+                strict = os.getenv("PHONE_PILOT_STRICT_LOCK", "1").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                )
                 if strict and (not caller_session or caller_session != lock_session):
                     return {
                         "ok": False,
@@ -110,7 +175,11 @@ def _with_device(
 
 
 def _scan_android_serials() -> list[str]:
-    """Return online ADB device serials (empty on any failure)."""
+    """Return online ADB device serials (10s TTL cached; empty on any failure)."""
+    now = time.monotonic()
+    cached = _scan_cache.get("android")
+    if cached is not None and (now - cached[0]) < _SCAN_CACHE_TTL_S:
+        return list(cached[1])
     serials: list[str] = []
     try:
         from phone_pilot.android.adb.utils import adb_executable
@@ -126,11 +195,16 @@ def _scan_android_serials() -> list[str]:
                 serials.append(d.get("serial"))
     except Exception:
         pass
+    _scan_cache["android"] = (now, list(serials))
     return serials
 
 
 def _scan_harmony_serials() -> list[str]:
-    """Return online HDC device serials (empty on any failure)."""
+    """Return online HDC device serials (10s TTL cached; empty on any failure)."""
+    now = time.monotonic()
+    cached = _scan_cache.get("harmony")
+    if cached is not None and (now - cached[0]) < _SCAN_CACHE_TTL_S:
+        return list(cached[1])
     serials: list[str] = []
     try:
         from phone_pilot.harmony.hdc.utils import hdc_executable
@@ -148,17 +222,24 @@ def _scan_harmony_serials() -> list[str]:
                 serials.append(serial)
     except Exception:
         pass
+    _scan_cache["harmony"] = (now, list(serials))
     return serials
 
 
 def _scan_ios_serials() -> list[str]:
-    """Return connected iOS UDIDs (real + booted simulators); empty on failure."""
+    """Return connected iOS UDIDs (real + booted simulators, 10s TTL cached); empty on failure."""
+    now = time.monotonic()
+    cached = _scan_cache.get("ios")
+    if cached is not None and (now - cached[0]) < _SCAN_CACHE_TTL_S:
+        return list(cached[1])
     try:
         from phone_pilot.ios.pmd.utils import list_ios_serials
 
-        return list_ios_serials()
+        serials = list_ios_serials()
     except Exception:
-        return []
+        serials = []
+    _scan_cache["ios"] = (now, list(serials))
+    return serials
 
 
 def _resolve_device_serial(
@@ -168,10 +249,6 @@ def _resolve_device_serial(
 
     Returns: (resolved_serial, resolved_platform, error_dict_or_none)
     """
-    from phone_pilot.android.adb.utils import ensure_adb_env
-
-    ensure_adb_env()
-
     # Prioritize environment variable binding if device_serial is not passed
     if not device_serial or not str(device_serial).strip():
         env_serial = os.getenv("PHONE_PILOT_DEVICE_SERIAL")
@@ -183,6 +260,11 @@ def _resolve_device_serial(
         env_platform = os.getenv("PHONE_PILOT_PLATFORM")
         if env_platform and env_platform.strip():
             platform = env_platform.strip().lower()
+
+    if platform in ("android", "auto"):
+        from phone_pilot.android.adb.utils import ensure_adb_env
+
+        ensure_adb_env()
 
     android_serials = _scan_android_serials() if platform in ("android", "auto") else []
     harmony_serials = _scan_harmony_serials() if platform in ("harmony", "auto") else []

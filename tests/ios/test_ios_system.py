@@ -6,10 +6,19 @@ uninstall, execute_shell, device listing). Subprocess mocked.
 import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from phone_pilot.ios import system
 
 
 SERIAL = "00008030-001234560A80802E"
+
+
+@pytest.fixture(autouse=True)
+def _reset_device_cache():
+    system.pmd_utils.invalidate_device_cache()
+    yield
+    system.pmd_utils.invalidate_device_cache()
 
 
 def _completed(stdout="", returncode=0, stderr=""):
@@ -141,3 +150,28 @@ class TestListDevices:
         assert all(d["serial"] != "ZZZ" for d in devs)
         entry = next(d for d in devs if d["serial"] == SERIAL)
         assert entry["description"] == "iPhone 16"
+
+    def test_list_ios_devices_merges_real_devices(self):
+        sim_udid = "11111111-2222-3333-4444-555555555555"
+        real_udid = "00008030-001234560A80802E"
+        payload = (
+            '{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-18-4": '
+            '[{"udid": "%s", "name": "iPhone 16", "state": "Booted"}]}}' % sim_udid
+        )
+        with (
+            _sp(),
+            patch.object(
+                system.pmd_runner, "run", return_value=_completed(stdout=payload)
+            ),
+            patch.object(
+                system.pmd_utils, "_list_real_serials", return_value=[real_udid]
+            ),
+        ):
+            devs = system.list_ios_devices()
+
+        serials = [d["serial"] for d in devs]
+        assert sim_udid in serials
+        assert real_udid in serials
+        real_entry = next(d for d in devs if d["serial"] == real_udid)
+        assert real_entry["platform"] == "ios"
+        assert real_entry["status"] == "device"

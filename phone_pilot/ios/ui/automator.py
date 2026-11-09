@@ -18,6 +18,34 @@ from typing import Union
 
 from phone_pilot.core.ui_node import UINode
 
+_XCUI_TYPE_PREFIX = "XCUIElementType"
+
+
+def _strip_xcui_prefix(type_name: str) -> str:
+    """Strip leading 'XCUIElementType' prefix if present."""
+    if (
+        type_name.startswith(_XCUI_TYPE_PREFIX)
+        and len(type_name) > len(_XCUI_TYPE_PREFIX)
+    ):
+        return type_name[len(_XCUI_TYPE_PREFIX) :]
+    return type_name
+
+
+def _ensure_xcui_prefix(type_name: str) -> str:
+    """Ensure 'XCUIElementType' prefix is present on non-empty type names."""
+    if not type_name or type_name.startswith(_XCUI_TYPE_PREFIX):
+        return type_name
+    return f"{_XCUI_TYPE_PREFIX}{type_name}"
+
+
+def _class_name_matches(actual: str, expected: str) -> bool:
+    """Compare WDA element type against selector class_name (prefix-agnostic)."""
+    if actual == expected:
+        return True
+    if not actual or not expected:
+        return False
+    return _strip_xcui_prefix(actual) == _strip_xcui_prefix(expected)
+
 
 def _as_dict(source: Union[str, dict]) -> dict:
     """Accept a JSON string or an already-parsed dict."""
@@ -102,7 +130,7 @@ def parse_wda_source(source: Union[str, dict], scale: float = 1.0) -> list[dict]
 
     # Skip the synthetic Application root from the flattened element list,
     # but still descend into its children.
-    if root.get("type") == "Application":
+    if _strip_xcui_prefix(root.get("type", "") or "") == "Application":
         for child in root.get("children", []) or []:
             _walk(child)
     else:
@@ -174,7 +202,7 @@ def match_selector(elem: dict, selector: dict) -> bool:
             if name != want:
                 return False
         elif key == "class_name":
-            if cls != want:
+            if not _class_name_matches(cls, str(want or "")):
                 return False
         elif key == "enabled":
             if bool(elem.get("isEnabled", True)) != bool(want):
@@ -207,10 +235,20 @@ def selector_to_wda_predicate(selector: dict) -> str:
             clauses.append(f'label == "{want}"')
         elif key == "text_contains":
             clauses.append(f'label CONTAINS "{want}"')
+        elif key in ("desc", "content_desc"):
+            clauses.append(f'label == "{want}"')
+        elif key in ("desc_contains", "content_desc_contains"):
+            clauses.append(f'label CONTAINS "{want}"')
         elif key == "resource_id":
             clauses.append(f'name == "{want}"')
         elif key == "class_name":
-            clauses.append(f'type == "{want}"')
+            want_str = str(want or "")
+            short_cls = _strip_xcui_prefix(want_str)
+            full_cls = _ensure_xcui_prefix(want_str)
+            if short_cls and short_cls != full_cls:
+                clauses.append(f'(type == "{full_cls}" OR type == "{short_cls}")')
+            else:
+                clauses.append(f'type == "{want_str}"')
     return " AND ".join(clauses)
 
 

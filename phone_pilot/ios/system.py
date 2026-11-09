@@ -91,6 +91,9 @@ def install_app(serial: str, app_path: str) -> dict:
             "error": (proc.stderr or "install_failed").strip()[:200],
             "platform": "ios",
         }
+    from phone_pilot.ios import wda_bridge
+
+    wda_bridge.clear_wda_runner_cache(serial)
     return {"ok": True, "app_path": app_path, "engine": engine}
 
 
@@ -147,15 +150,17 @@ def execute_shell(serial: str, command: str, timeout_s: float = 30.0) -> dict:
 
 
 def list_ios_devices() -> List[dict]:
-    """List booted iOS simulators as device entries (serial/status/platform/description)."""
+    """List connected iOS devices (booted simulators + real USB devices)."""
+    out: List[dict] = []
+    seen: set[str] = set()
     try:
         proc = pmd_runner.run(
             pmd_utils.simctl_prefix() + ["list", "devices", "-j"], timeout_s=10.0
         )
         data = json.loads(proc.stdout or "{}")
     except Exception:
-        return []
-    out: List[dict] = []
+        data = {}
+
     for _runtime, items in (data.get("devices", {}) or {}).items():
         if not isinstance(items, list):
             continue
@@ -163,16 +168,34 @@ def list_ios_devices() -> List[dict]:
             if not isinstance(it, dict) or it.get("state") != "Booted":
                 continue
             udid = it.get("udid")
-            if not udid:
+            if not udid or udid in seen:
                 continue
+            seen.add(str(udid))
             out.append(
                 {
-                    "serial": udid,
+                    "serial": str(udid),
                     "status": "device",
                     "platform": "ios",
                     "description": it.get("name"),
                 }
             )
+
+    try:
+        real_serials = pmd_utils._list_real_serials()
+    except Exception:
+        real_serials = []
+    for udid in real_serials:
+        if not udid or udid in seen:
+            continue
+        seen.add(str(udid))
+        out.append(
+            {
+                "serial": str(udid),
+                "status": "device",
+                "platform": "ios",
+                "description": "iOS Device",
+            }
+        )
     return out
 
 

@@ -20,9 +20,26 @@ import json
 import os
 import re
 import shutil
+import time
 from typing import List, Optional
 
 from phone_pilot.ios.pmd import runner
+
+# Short TTL cache (seconds) for device topology discovery to avoid spawning
+# repeated `simctl list devices` and `pymobiledevice3 usbmux list` subprocesses.
+_DEVICE_CACHE_TTL_S: float = 10.0
+_sim_serials_cache: Optional[tuple[float, List[str]]] = None
+_real_serials_cache: Optional[tuple[float, List[str]]] = None
+_form_factor_cache: dict[str, tuple[float, str]] = {}
+
+
+def invalidate_device_cache() -> None:
+    """Clear cached simulator/real device serial lists and form-factor lookups."""
+    global _sim_serials_cache, _real_serials_cache
+    _sim_serials_cache = None
+    _real_serials_cache = None
+    _form_factor_cache.clear()
+
 
 # ---------------------------------------------------------------------------
 # UDID shapes (design §4 / Plan T4b)
@@ -147,14 +164,24 @@ def simctl_prefix() -> list[str]:
 
 
 def _list_real_serials() -> List[str]:
-    """List connected real-device UDIDs via `pymobiledevice3 usbmux list`."""
+    """List connected real-device UDIDs via `pymobiledevice3 usbmux list` (10s TTL cached)."""
+    global _real_serials_cache
+    now = time.monotonic()
+    if (
+        _real_serials_cache is not None
+        and (now - _real_serials_cache[0]) < _DEVICE_CACHE_TTL_S
+    ):
+        return list(_real_serials_cache[1])
+
     try:
         exe = pmd_executable()
     except RuntimeError:
+        _real_serials_cache = (now, [])
         return []
     try:
         proc = runner.run([exe, "usbmux", "list", "--no-color"], timeout_s=10.0)
     except Exception:
+        _real_serials_cache = (now, [])
         return []
     out = proc.stdout or ""
     serials: List[str] = []
@@ -174,8 +201,9 @@ def _list_real_serials() -> List[str]:
                 )
                 if uid and is_valid_udid(str(uid)):
                     serials.append(str(uid))
-        if serials:
-            return _dedup(serials)
+        res = _dedup(serials)
+        _real_serials_cache = (now, res)
+        return list(res)
     except (ValueError, TypeError):
         pass
 
@@ -183,22 +211,34 @@ def _list_real_serials() -> List[str]:
     for pat in (_UDID_UUID, _UDID_IOS16, _UDID_40HEX):
         for m in pat.findall(out):
             serials.append(m)
-    return _dedup(serials)
+    res = _dedup(serials)
+    _real_serials_cache = (now, res)
+    return list(res)
 
 
 def _list_simulator_serials() -> List[str]:
-    """List *booted* simulator UDIDs via `simctl list devices booted -j`."""
+    """List *booted* simulator UDIDs via `simctl list devices booted -j` (10s TTL cached)."""
+    global _sim_serials_cache
+    now = time.monotonic()
+    if (
+        _sim_serials_cache is not None
+        and (now - _sim_serials_cache[0]) < _DEVICE_CACHE_TTL_S
+    ):
+        return list(_sim_serials_cache[1])
+
     try:
         proc = runner.run(
             simctl_prefix() + ["list", "devices", "booted", "-j"], timeout_s=10.0
         )
     except Exception:
+        _sim_serials_cache = (now, [])
         return []
     out = proc.stdout or ""
     serials: List[str] = []
     try:
         data = json.loads(out)
     except (ValueError, TypeError):
+        _sim_serials_cache = (now, [])
         return []
     devices = data.get("devices", {}) if isinstance(data, dict) else {}
     for _runtime, items in devices.items():
@@ -209,7 +249,9 @@ def _list_simulator_serials() -> List[str]:
                 continue
             if item.get("state") == "Booted" and item.get("udid"):
                 serials.append(str(item["udid"]))
-    return _dedup(serials)
+    res = _dedup(serials)
+    _sim_serials_cache = (now, res)
+    return list(res)
 
 
 def list_ios_serials() -> List[str]:
@@ -234,12 +276,20 @@ def _dedup(items: List[str]) -> List[str]:
 
 
 def detect_form_factor(serial: str) -> str:
-    """Return "simulator" | "real" | "unknown" for the given serial."""
+    """Return "simulator" | "real" | "unknown" for the given serial (10s TTL cached)."""
+    now = time.monotonic()
+    cached = _form_factor_cache.get(serial)
+    if cached is not None and (now - cached[0]) < _DEVICE_CACHE_TTL_S:
+        return cached[1]
+
     if serial in _list_simulator_serials():
-        return "simulator"
-    if serial in _list_real_serials():
-        return "real"
-    return "unknown"
+        res = "simulator"
+    elif serial in _list_real_serials():
+        res = "real"
+    else:
+        res = "unknown"
+    _form_factor_cache[serial] = (now, res)
+    return res
 
 
 # ---------------------------------------------------------------------------
@@ -289,4 +339,5 @@ __all__ = [
     "list_ios_serials",
     "detect_form_factor",
     "probe_tunnel",
+    "invalidate_device_cache",
 ]

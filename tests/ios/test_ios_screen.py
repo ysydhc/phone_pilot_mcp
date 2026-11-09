@@ -35,6 +35,65 @@ class TestScreenshot:
             data = iOSScreenDriver(SERIAL).screenshot()
         assert data[:4] == b"\x89PNG"
 
+    def test_screenshot_fallback_simulator_when_wda_fails(self):
+        import pathlib
+        import subprocess
+
+        def fake_run(cmd, **kw):
+            # cmd: ["xcrun", "simctl", "io", SERIAL, "screenshot", tmp_path]
+            pathlib.Path(cmd[-1]).write_bytes(PNG)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with (
+            patch(
+                "phone_pilot.ios.driver._wda_call",
+                return_value={"ok": False, "error": "wda_connection_refused"},
+            ),
+            patch(
+                "phone_pilot.ios.driver.pmd_utils.detect_form_factor",
+                return_value="simulator",
+            ),
+            patch(
+                "phone_pilot.ios.driver.pmd_utils.simctl_prefix",
+                return_value=["xcrun", "simctl"],
+            ),
+            patch("phone_pilot.ios.driver.pmd_runner.run", side_effect=fake_run) as m_run,
+        ):
+            data = iOSScreenDriver(SERIAL).screenshot()
+
+        assert data == PNG
+        cmd_used = m_run.call_args.args[0]
+        assert cmd_used[:4] == ["xcrun", "simctl", "io", SERIAL]
+        assert cmd_used[4] == "screenshot"
+
+    def test_screenshot_fallback_real_device_when_wda_returns_empty(self):
+        import pathlib
+        import subprocess
+
+        def fake_run(cmd, **kw):
+            # cmd: ["pmd", "developer", "dvt", "screenshot", tmp_path, "--udid", SERIAL]
+            pathlib.Path(cmd[4]).write_bytes(PNG)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with (
+            patch("phone_pilot.ios.driver._wda_call", return_value=b""),
+            patch(
+                "phone_pilot.ios.driver.pmd_utils.detect_form_factor",
+                return_value="real",
+            ),
+            patch(
+                "phone_pilot.ios.driver.pmd_utils.pmd_executable",
+                return_value="pmd",
+            ),
+            patch("phone_pilot.ios.driver.pmd_runner.run", side_effect=fake_run) as m_run,
+        ):
+            data = iOSScreenDriver(SERIAL).screenshot()
+
+        assert data == PNG
+        cmd_used = m_run.call_args.args[0]
+        assert cmd_used[:4] == ["pmd", "developer", "dvt", "screenshot"]
+        assert cmd_used[-2:] == ["--udid", SERIAL]
+
 
 class TestGetScreenSize:
     def test_applies_scale(self):

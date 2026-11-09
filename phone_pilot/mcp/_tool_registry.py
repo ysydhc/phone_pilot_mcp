@@ -35,6 +35,11 @@ CORE_TOOLS: frozenset[str] = frozenset(
         # App lifecycle
         "phone_launch_app",
         "phone_force_stop",
+        "phone_install_app",
+        # Logcat / Syslog capture & search
+        "phone_start_logcat",
+        "phone_stop_logcat",
+        "phone_search_logcat",
         # Navigation
         "phone_go_back",
         "phone_go_home",
@@ -85,7 +90,6 @@ EXTENDED_CATEGORIES: dict[str, list[str]] = {
         "phone_unlock",
         "phone_open_deeplink",
         "phone_launch_from_home",
-        "phone_install_app",
         "phone_uninstall_app",
         "phone_list_packages",
     ],
@@ -98,9 +102,6 @@ EXTENDED_CATEGORIES: dict[str, list[str]] = {
         "phone_checkpoint_diff",
     ],
     "logcat": [
-        "phone_start_logcat",
-        "phone_stop_logcat",
-        "phone_search_logcat",
         "phone_logcat_since",
         "phone_logcat_assert_sequence",
     ],
@@ -203,6 +204,7 @@ def setup_layered_tools(mcp_server: Any) -> None:
     all_extended_names: set[str] = set()
     for names in EXTENDED_CATEGORIES.values():
         all_extended_names.update(names)
+    all_extended_names -= CORE_TOOLS
 
     with _lock:
         for name in all_extended_names:

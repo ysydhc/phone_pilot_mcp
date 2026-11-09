@@ -82,6 +82,37 @@ class TestLogCaptureModule:
         res = log_capture.stop_log_capture(SERIAL, str(out))
         assert res["ok"] is True
 
+    def test_simulator_build_cmd_includes_debug_and_process_predicate(self, tmp_path):
+        out = str(tmp_path / "sim_log.txt")
+        fake_proc = MagicMock()
+        fake_proc.pid = 777
+        with (
+            patch(
+                "phone_pilot.ios.device.log_capture.pmd_utils.detect_form_factor",
+                return_value="simulator",
+            ),
+            patch(
+                "phone_pilot.ios.device.log_capture.pmd_utils.xcrun_executable",
+                return_value="xcrun",
+            ),
+            patch("subprocess.Popen", return_value=fake_proc) as mock_popen,
+        ):
+            res = log_capture.start_log_capture(SERIAL, out, process="Runner")
+        assert res["ok"] is True
+        cmd = mock_popen.call_args.args[0]
+        assert cmd == [
+            "xcrun",
+            "simctl",
+            "spawn",
+            SERIAL,
+            "log",
+            "stream",
+            "--level",
+            "debug",
+            "--predicate",
+            'process CONTAINS "Runner"',
+        ]
+
 
 class TestDriverLogEntries:
     def test_clear_log_not_supported(self):

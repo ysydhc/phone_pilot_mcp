@@ -252,10 +252,52 @@ class iOSScreenDriver:
             return b""
 
         result = _wda_call(self._serial, _do)
-        if isinstance(result, (bytes, bytearray)):
+        if isinstance(result, (bytes, bytearray)) and len(result) > 0:
             return bytes(result)
-        # error envelope (dict) → no image; return empty bytes (never raise)
-        logger.debug("screenshot failed: %s", result)
+        logger.debug(
+            "WDA screenshot failed (%s); falling back to CLI screenshot", result
+        )
+        return self._fallback_screenshot()
+
+    def _fallback_screenshot(self) -> bytes:
+        """Fallback screenshot via `simctl io screenshot` (simulator) or `pymobiledevice3 developer dvt screenshot` (real)."""
+        import tempfile
+
+        tmp_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp_path = pathlib.Path(tmp_file.name)
+        tmp_file.close()
+        try:
+            form = pmd_utils.detect_form_factor(self._serial)
+            if form == "simulator":
+                cmd = pmd_utils.simctl_prefix() + [
+                    "io",
+                    self._serial,
+                    "screenshot",
+                    str(tmp_path),
+                ]
+            else:
+                exe = pmd_utils.pmd_executable()
+                cmd = [
+                    exe,
+                    "developer",
+                    "dvt",
+                    "screenshot",
+                    str(tmp_path),
+                    "--udid",
+                    self._serial,
+                ]
+            proc = pmd_runner.run(cmd, timeout_s=15.0)
+            if proc.returncode == 0 and tmp_path.exists():
+                data = tmp_path.read_bytes()
+                if data:
+                    return data
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("fallback screenshot failed for [%s]: %s", self._serial, exc)
+        finally:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
         return b""
 
     def get_screen_size(self) -> tuple[int, int]:
@@ -265,7 +307,7 @@ class iOSScreenDriver:
 
         def _do(client):
             w, h = client.window_size()
-            scale = getattr(client, "scale", 1) or 1
+            scale = float(getattr(client, "scale", 1.0) or 1.0)
             return (int(w * scale), int(h * scale))
 
         result = _wda_call(self._serial, _do)
@@ -341,6 +383,7 @@ class iOSUIDriver:
     def __init__(self, device_serial: str) -> None:
         self._serial = device_serial
         self._scale_cache: Optional[float] = None
+        self._screen_size_cache: Optional[tuple[int, int]] = None
 
     def _get_scale(self) -> float:
         """Get scale factor (physical pixels / logical points). Cached."""
@@ -389,9 +432,14 @@ class iOSUIDriver:
 
     def get_screen_size(self) -> tuple[int, int]:
         """Get screen dimensions (width, height) in physical pixels."""
-        from phone_pilot.ios.driver import IOSScreenDriver
+        if self._screen_size_cache:
+            return self._screen_size_cache
+        from phone_pilot.ios.driver import iOSScreenDriver
 
-        return IOSScreenDriver(self._serial).get_screen_size()
+        size = iOSScreenDriver(self._serial).get_screen_size()
+        if size and size != (0, 0):
+            self._screen_size_cache = size
+        return size
 
     def _enrich_with_visibility(self, results: list[dict]) -> list[dict]:
         """Enrich results with bounds_rect, visible, visible_ratio."""
@@ -510,22 +558,55 @@ class iOSAppDriver:
             return [str(x) for x in data]
         return []
 
-    def launch_app(self, package: str, activity: Optional[str] = None) -> dict:
+    def _refresh_wda_after_app_change(
+        self, package: Optional[str] = None, *, activate: bool = False
+    ) -> None:
+        """
+        Synchronize WDA client state and invalidate UI cache after ``simctl`` /
+        ``pymobiledevice3`` launches or terminates an app process outside WDA.
+        """
+        if activate and package and self._serial in wda_bridge._cache:
+            cached = wda_bridge._cache.get(self._serial)
+            activate_fn = getattr(cached, "app_activate", None)
+            if callable(activate_fn):
+                try:
+                    activate_fn(package)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "WDA app_activate(%s) failed for [%s]: %s",
+                        package,
+                        self._serial,
+                        exc,
+                    )
+        wda_bridge.reset_wda(self._serial)
+        ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+
+    def launch_app(
+        self,
+        package: str,
+        activity: Optional[str] = None,
+        args: Optional[list[str]] = None,
+    ) -> dict:
         """Launch an app by bundle ID. activity ignored on iOS. Form-factor split."""
+        extra_args = [str(a) for a in args] if args else []
         try:
             if self._is_sim():
-                proc = self._simctl(["launch", self._serial, package])
+                proc = self._simctl(["launch", self._serial, package, *extra_args])
                 engine = "simctl"
             else:
-                proc = self._pmd(["developer", "dvt", "launch", package])
+                proc = self._pmd(
+                    ["developer", "dvt", "launch", package, *extra_args]
+                )
                 engine = "pymobiledevice3"
         except Exception as exc:  # noqa: BLE001
             return _err("launch_failed", package=package, detail=str(exc))
         if proc.returncode != 0:
             return _err("launch_failed", package=package, detail=proc.stderr or "")
-        res = {"ok": True, "package": package, "engine": engine}
+        res: dict = {"ok": True, "package": package, "engine": engine}
+        if extra_args:
+            res["args"] = extra_args
         if res.get("ok"):
-            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+            self._refresh_wda_after_app_change(package, activate=True)
         return res
 
     def force_stop(self, package: str) -> dict:
@@ -543,7 +624,7 @@ class iOSAppDriver:
             return _err("force_stop_failed", package=package, detail=proc.stderr or "")
         res = {"ok": True, "package": package, "engine": engine}
         if res.get("ok"):
-            ui_snapshot_cache.invalidate_device_ui(self._serial, platform="ios")
+            self._refresh_wda_after_app_change(package, activate=False)
         return res
 
     def clear_data(self, package: str) -> dict:

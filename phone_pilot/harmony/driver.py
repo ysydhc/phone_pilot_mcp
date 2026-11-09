@@ -661,7 +661,12 @@ class HarmonyAppDriver:
 
             return list_installed_packages(self._serial, include_system=include_system)
 
-    def launch_app(self, package: str, activity: Optional[str] = None) -> dict:
+    def launch_app(
+        self,
+        package: str,
+        activity: Optional[str] = None,
+        args: Optional[list[str]] = None,
+    ) -> dict:
         """Launch an application."""
         try:
             hm = _get_hm(self._serial)

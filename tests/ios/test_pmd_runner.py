@@ -19,6 +19,13 @@ UDID_UUID = "00008030-001234560A80802E"
 SIM_UDID = "11111111-2222-3333-4444-555555555555"
 
 
+@pytest.fixture(autouse=True)
+def _reset_device_cache():
+    utils.invalidate_device_cache()
+    yield
+    utils.invalidate_device_cache()
+
+
 def _completed(stdout: str = "", returncode: int = 0, stderr: str = ""):
     return subprocess.CompletedProcess(
         args=["mock"], returncode=returncode, stdout=stdout, stderr=stderr
@@ -269,3 +276,36 @@ class TestRunner:
         with patch("subprocess.run", return_value=_completed(returncode=2)):
             proc = runner.run(["false"])
         assert proc.returncode == 2
+
+
+class TestDeviceTopologyCache:
+    def test_device_topology_ttl_cache_and_invalidation(self):
+        sim_payload = (
+            '{"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-17-0": '
+            '[{"udid": "%s", "state": "Booted"}]}}' % SIM_UDID
+        )
+        real_payload = '[{"Identifier": "%s"}]' % UDID_UUID
+
+        with (
+            patch.object(utils, "simctl_prefix", return_value=["simctl"]),
+            patch.object(utils, "pmd_executable", return_value="pmd"),
+            patch.object(
+                runner,
+                "run",
+                side_effect=[
+                    _completed(stdout=sim_payload, returncode=0),
+                    _completed(stdout=real_payload, returncode=0),
+                ],
+            ) as mock_run,
+        ):
+            assert utils.detect_form_factor(SIM_UDID) == "simulator"
+            assert utils.detect_form_factor(SIM_UDID) == "simulator"
+            assert utils._list_simulator_serials() == [SIM_UDID]
+            assert utils._list_real_serials() == [UDID_UUID]
+            assert utils._list_real_serials() == [UDID_UUID]
+            assert mock_run.call_count == 2
+
+        utils.invalidate_device_cache()
+        assert utils._sim_serials_cache is None
+        assert utils._real_serials_cache is None
+        assert utils._form_factor_cache == {}

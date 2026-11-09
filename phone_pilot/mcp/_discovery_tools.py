@@ -68,15 +68,24 @@ def _list_categories() -> dict:
 
 
 async def _activate_category(category: str, ctx: Context | None) -> dict:
-    """Activate a tool category and notify the client."""
-    if category not in EXTENDED_CATEGORIES:
-        available = list(EXTENDED_CATEGORIES.keys())
-        return {
-            "ok": False,
-            "error": f"Unknown category: '{category}'. Available: {available}",
-        }
+    """Activate one or more comma-separated tool categories and notify the client."""
+    cats = [c.strip() for c in category.split(",") if c.strip()]
+    if not cats:
+        return _list_categories()
 
-    activated = activate_category(mcp, category)
+    available = list(EXTENDED_CATEGORIES.keys())
+    for c in cats:
+        if c not in EXTENDED_CATEGORIES:
+            return {
+                "ok": False,
+                "error": f"Unknown category: '{c}'. Available: {available}",
+            }
+
+    activated: list[str] = []
+    for c in cats:
+        for tool_name in activate_category(mcp, c):
+            if tool_name not in activated:
+                activated.append(tool_name)
 
     # Notify client that tool list has changed
     if activated and ctx is not None:
@@ -85,7 +94,7 @@ async def _activate_category(category: str, ctx: Context | None) -> dict:
         except Exception:
             pass  # Client may not support notifications
 
-    return {
+    res: dict = {
         "ok": True,
         "category": category,
         "activated_tools": activated,
@@ -94,6 +103,9 @@ async def _activate_category(category: str, ctx: Context | None) -> dict:
         if activated
         else f"Category '{category}' was already loaded.",
     }
+    if len(cats) > 1:
+        res["categories"] = cats
+    return res
 
 
 async def _search_keyword(keyword: str, ctx: Context | None) -> dict:

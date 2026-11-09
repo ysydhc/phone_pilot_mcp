@@ -10,7 +10,11 @@ import asyncio
 from typing import Optional
 
 from phone_pilot.mcp.server import mcp
-from phone_pilot.mcp._helpers import get_driver, _with_device
+from phone_pilot.mcp._helpers import (  # noqa: F401
+    get_driver,
+    _with_device,
+    _resolve_device_serial,
+)
 
 
 def _phone_go_home_sync(device_serial: Optional[str], platform: str) -> dict:

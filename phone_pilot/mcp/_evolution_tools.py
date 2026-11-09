@@ -355,7 +355,7 @@ async def phone_save_ui_graph(
             ui_graph = UIKnowledgeGraph.load_graph_json(path)
         else:
             ui_graph = UIKnowledgeGraph()
-        payload = ui_graph.export_graph_json(path)
+        ui_graph.export_graph_json(path)
         return {
             "ok": True,
             "path": path,

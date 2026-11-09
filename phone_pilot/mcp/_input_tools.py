@@ -16,7 +16,11 @@ from typing import Any
 
 from phone_pilot.core import ui_snapshot_cache
 from phone_pilot.mcp.server import mcp
-from phone_pilot.mcp._helpers import get_driver, _with_device
+from phone_pilot.mcp._helpers import (
+    get_driver,
+    _with_device,
+    _resolve_driver_and_platform,
+)
 
 
 @mcp.tool()
@@ -24,7 +28,7 @@ async def phone_tap(
     device_serial: str,
     x: int,
     y: int,
-    platform: str = "android",
+    platform: str = "auto",
     wait_s: float = 0.15,
 ) -> dict:
     """点击屏幕坐标。
@@ -71,7 +75,9 @@ def _phone_tap_text_sync(
             "device_serial": device_serial,
         }
     try:
-        driver = get_driver(device_serial, platform)
+        driver, resolved_serial, resolved_plat = _resolve_driver_and_platform(
+            device_serial, platform, get_driver
+        )
 
         selector: dict[str, Any] = {}
         if match_mode == "exact":
@@ -87,7 +93,8 @@ def _phone_tap_text_sync(
                 "error": "element_not_found",
                 "text": text,
                 "match_mode": match_mode,
-                "device_serial": device_serial,
+                "device_serial": resolved_serial,
+                "platform": resolved_plat,
             }
 
         if index < 0 or index >= len(elements):
@@ -97,7 +104,8 @@ def _phone_tap_text_sync(
                 "text": text,
                 "index": index,
                 "matched_count": len(elements),
-                "device_serial": device_serial,
+                "device_serial": resolved_serial,
+                "platform": resolved_plat,
             }
 
         elem = elements[index]
@@ -105,7 +113,7 @@ def _phone_tap_text_sync(
         cy = elem.get("center_y") or elem.get("center", [0, 0])[1]
 
         tap_res = driver.input.tap(cx, cy, wait_s=wait_s)
-        ui_snapshot_cache.invalidate_device_ui(device_serial, platform=platform)
+        ui_snapshot_cache.invalidate_device_ui(resolved_serial, platform=resolved_plat)
         tap_ok = tap_res.get("ok", True) if isinstance(tap_res, dict) else True
 
         return {
@@ -117,8 +125,8 @@ def _phone_tap_text_sync(
             "center_x": cx,
             "center_y": cy,
             "element": elem,
-            "device_serial": device_serial,
-            "platform": platform,
+            "device_serial": resolved_serial,
+            "platform": resolved_plat,
         }
     except Exception as e:
         return {"ok": False, "error": str(e), "device_serial": device_serial}
@@ -128,7 +136,7 @@ def _phone_tap_text_sync(
 async def phone_tap_text(
     device_serial: str,
     text: str,
-    platform: str = "android",
+    platform: str = "auto",
     match_mode: str = "contains",
     index: int = 0,
     wait_s: float = 0.5,
@@ -165,9 +173,11 @@ async def phone_tap_text(
         await asyncio.sleep(max(wait_ms, 0) / 1000.0)
         from phone_pilot.mcp._page_state_tools import _build_post_action_page_state
 
-        driver = get_driver(device_serial, platform)
+        resolved_serial = res.get("device_serial") or device_serial
+        resolved_plat = res.get("platform") or platform
+        driver = get_driver(resolved_serial, resolved_plat)
         res["page_state"] = _build_post_action_page_state(
-            driver, platform, device_serial
+            driver, resolved_plat, resolved_serial
         )
         res["page_state_updated"] = True
     return res
@@ -180,7 +190,7 @@ async def phone_swipe(
     y1: int,
     x2: int,
     y2: int,
-    platform: str = "android",
+    platform: str = "auto",
     duration_ms: int = 300,
 ) -> dict:
     """从 (x1, y1) 滑动到 (x2, y2)。
@@ -213,7 +223,7 @@ async def phone_long_press(
     device_serial: str,
     x: int,
     y: int,
-    platform: str = "android",
+    platform: str = "auto",
     duration_ms: int = 500,
 ) -> dict:
     """在指定坐标长按。
@@ -244,7 +254,7 @@ async def phone_long_press(
 async def phone_input_text(
     device_serial: str,
     text: str,
-    platform: str = "android",
+    platform: str = "auto",
     enter: bool = False,
 ) -> dict:
     """在焦点输入框中输入文本。
@@ -277,7 +287,7 @@ async def phone_input_text(
 async def phone_keyevent(
     device_serial: str,
     keycode: str,
-    platform: str = "android",
+    platform: str = "auto",
 ) -> dict:
     """发送按键事件。
     Send a key event.

@@ -19,6 +19,7 @@ from phone_pilot.mcp.server import mcp
 from phone_pilot.mcp._helpers import (
     get_driver,
     _resolve_device_serial,
+    _resolve_driver_and_platform,
 )
 
 
@@ -459,8 +460,17 @@ def _phone_screenshot_sync(
 ) -> dict:
     """Sync body for phone_screenshot (run in thread to avoid blocking event loop)."""
     try:
-        driver = get_driver(device_serial, platform)
+        driver, resolved_serial, resolved_plat = _resolve_driver_and_platform(
+            device_serial, platform, get_driver
+        )
         png_bytes = driver.screen.screenshot()
+        if not png_bytes:
+            return {
+                "ok": False,
+                "error": "screenshot_failed",
+                "device_serial": resolved_serial,
+                "platform": resolved_plat,
+            }
 
         if save_path:
             path = pathlib.Path(save_path)
@@ -468,15 +478,15 @@ def _phone_screenshot_sync(
             path.write_bytes(png_bytes)
             return {
                 "ok": True,
-                "device_serial": device_serial,
-                "platform": platform,
+                "device_serial": resolved_serial,
+                "platform": resolved_plat,
                 "screenshot_path": str(path),
             }
         else:
             return {
                 "ok": True,
-                "device_serial": device_serial,
-                "platform": platform,
+                "device_serial": resolved_serial,
+                "platform": resolved_plat,
                 "screenshot_base64": base64.b64encode(png_bytes).decode("ascii"),
             }
     except Exception as e:
@@ -486,7 +496,7 @@ def _phone_screenshot_sync(
 @mcp.tool()
 async def phone_screenshot(
     device_serial: str,
-    platform: str = "android",
+    platform: str = "auto",
     save_path: Optional[str] = None,
 ) -> dict:
     """截取设备屏幕截图。
@@ -516,12 +526,14 @@ def _phone_get_screen_size_sync(
 ) -> dict:
     """Sync body for phone_get_screen_size (run in thread to avoid blocking event loop)."""
     try:
-        driver = get_driver(device_serial, platform)
+        driver, resolved_serial, resolved_plat = _resolve_driver_and_platform(
+            device_serial, platform, get_driver
+        )
         width, height = driver.screen.get_screen_size()
         return {
             "ok": True,
-            "device_serial": device_serial,
-            "platform": platform,
+            "device_serial": resolved_serial,
+            "platform": resolved_plat,
             "width": width,
             "height": height,
         }
@@ -532,7 +544,7 @@ def _phone_get_screen_size_sync(
 @mcp.tool()
 async def phone_get_screen_size(
     device_serial: str,
-    platform: str = "android",
+    platform: str = "auto",
 ) -> dict:
     """获取屏幕尺寸。
     Get screen dimensions.

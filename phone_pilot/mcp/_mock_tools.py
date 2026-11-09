@@ -171,7 +171,7 @@ async def phone_mock_start(
     ctrl_port: int = 0,
     seed: dict | None = None,
     device_serial: str | None = None,
-    platform: str = "android",
+    platform: str = "auto",
 ) -> dict:
     """启动本地 mock server 并建立 adb reverse 隧道。
     Start local mock server and set up adb reverse tunnel.

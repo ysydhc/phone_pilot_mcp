@@ -29,10 +29,14 @@ def _clean_bridge_state():
     wda_bridge._WdaClient = object  # pretend the class is importable
     wda_bridge._cache.clear()
     wda_bridge._failed_serials.clear()
+    wda_bridge._serial_urls.clear()
+    wda_bridge._wda_runner_absent_until.clear()
     yield
     wda_bridge._WdaClient = None
     wda_bridge._cache.clear()
     wda_bridge._failed_serials.clear()
+    wda_bridge._serial_urls.clear()
+    wda_bridge._wda_runner_absent_until.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -166,3 +170,197 @@ def test_ensure_wda_class_import_error_message():
     with patch.dict("sys.modules", {"wda": None}):
         with pytest.raises(ImportError, match=r"phone-pilot\[ios\]"):
             wda_bridge._ensure_wda_class()
+
+
+# ---------------------------------------------------------------------------
+# Self-healing cooldown & per-serial URL / multi-simulator isolation
+# ---------------------------------------------------------------------------
+
+
+def test_with_reconnect_short_circuits_during_cooldown_and_heals_after_expiry():
+    """Within the 2.5s cooldown window, with_reconnect short-circuits with cooldown=True; after expiry it self-heals."""
+    wda_bridge._failed_serials.add(SERIAL)
+
+    with (
+        patch.object(wda_bridge, "_connect_client") as mock_connect,
+        patch.object(wda_bridge, "probe_tunnel") as mock_probe,
+    ):
+        short_circuit = wda_bridge.with_reconnect(
+            SERIAL, lambda c: {"ok": True, "client": c}
+        )
+
+    assert short_circuit == {
+        "ok": False,
+        "error": "wda_connection_refused",
+        "cooldown": True,
+        "device_serial": SERIAL,
+    }
+    mock_connect.assert_not_called()
+    mock_probe.assert_not_called()
+
+    # Expire cooldown -> next with_reconnect reconnects and succeeds
+    wda_bridge._failed_serials._timestamps[SERIAL] -= (
+        wda_bridge._FAILURE_COOLDOWN_S + 1.0
+    )
+
+    with (
+        patch.object(wda_bridge, "_connect_client", return_value="RECOVERED_CLIENT"),
+        patch.object(wda_bridge, "probe_tunnel", return_value={"ok": True}),
+    ):
+        result = wda_bridge.with_reconnect(SERIAL, lambda c: {"ok": True, "client": c})
+
+    assert result == {"ok": True, "client": "RECOVERED_CLIENT"}
+    assert SERIAL not in wda_bridge._failed_serials
+    assert wda_bridge._cache[SERIAL] == "RECOVERED_CLIENT"
+
+
+def test_simulator_wda_negative_cache_and_install_invalidation():
+    """When WebDriverAgentRunner is absent on simulator, negative cache suppresses listapps for 30s until install_app."""
+    import subprocess
+    from phone_pilot.ios import system
+
+    empty_listapps = '    "com.apple.Preferences" = {\n    };\n'
+    with (
+        patch(
+            "phone_pilot.ios.wda_bridge.pmd_utils.detect_form_factor",
+            return_value="simulator",
+        ),
+        patch(
+            "phone_pilot.ios.wda_bridge.pmd_utils.simctl_prefix",
+            return_value=["xcrun", "simctl"],
+        ),
+        patch(
+            "phone_pilot.ios.wda_bridge.pmd_runner.run",
+            return_value=subprocess.CompletedProcess(["simctl"], 0, empty_listapps, ""),
+        ) as mock_run,
+    ):
+        assert wda_bridge._try_launch_simulator_wda(SERIAL) is False
+        assert mock_run.call_count == 1
+        # Second call within 30s hits negative cache -> no extra simctl subprocess
+        assert wda_bridge._try_launch_simulator_wda(SERIAL) is False
+        assert mock_run.call_count == 1
+
+    # Installing an app clears the negative cache for that serial
+    with (
+        patch.object(system.pmd_utils, "detect_form_factor", return_value="simulator"),
+        patch.object(system.pmd_utils, "simctl_prefix", return_value=["simctl"]),
+        patch.object(
+            system.pmd_runner,
+            "run",
+            return_value=subprocess.CompletedProcess(["simctl"], 0, "", ""),
+        ),
+    ):
+        res = system.install_app(SERIAL, "/tmp/WebDriverAgentRunner-Runner.app")
+    assert res["ok"] is True
+    assert SERIAL not in wda_bridge._wda_runner_absent_until
+
+
+def test_get_wda_cooldown_expires_automatically():
+    """Direct get_wda raises within cooldown window, then automatically retries after cooldown expires."""
+    with patch.object(
+        wda_bridge, "_connect_client", side_effect=_ConnRefused("refused")
+    ):
+        with pytest.raises(RuntimeError, match="Failed to initialize WDA"):
+            wda_bridge.get_wda(SERIAL)
+
+    assert SERIAL in wda_bridge._failed_serials
+
+    # Immediately within cooldown -> still raises
+    with pytest.raises(RuntimeError, match="reset_wda"):
+        wda_bridge.get_wda(SERIAL)
+
+    # Simulate cooldown expiration
+    wda_bridge._failed_serials._timestamps[SERIAL] -= (
+        wda_bridge._FAILURE_COOLDOWN_S + 1.0
+    )
+
+    with patch.object(wda_bridge, "_connect_client", return_value="HEALED_CLIENT"):
+        client = wda_bridge.get_wda(SERIAL)
+
+    assert client == "HEALED_CLIENT"
+    assert SERIAL not in wda_bridge._failed_serials
+
+
+def test_per_serial_url_resolution_and_cache_isolation(monkeypatch):
+    """Different device serials resolve dedicated WDA URLs and isolate cached clients."""
+    sim_a = "606174FC-4664-48B9-9A9B-061157DC2819"
+    sim_b = "11112222-3333-4444-5555-666677778888"
+
+    wda_bridge.set_wda_url(sim_a, "8101")
+    monkeypatch.setenv(
+        "PHONE_PILOT_WDA_URL_11112222_3333_4444_5555_666677778888",
+        "http://127.0.0.1:8102",
+    )
+
+    assert wda_bridge.wda_base_url(sim_a) == "http://127.0.0.1:8101"
+    assert wda_bridge.wda_base_url(sim_b) == "http://127.0.0.1:8102"
+    assert wda_bridge.wda_base_url("other-serial") == "http://127.0.0.1:8100"
+
+    created_urls = []
+
+    def fake_wda_cls(url):
+        created_urls.append(url)
+        return {"url": url}
+
+    wda_bridge._WdaClient = fake_wda_cls
+    c_a = wda_bridge.get_wda(sim_a)
+    c_b = wda_bridge.get_wda(sim_b)
+
+    assert c_a == {"url": "http://127.0.0.1:8101"}
+    assert c_b == {"url": "http://127.0.0.1:8102"}
+    assert wda_bridge._cache[sim_a] is not wda_bridge._cache[sim_b]
+
+
+def test_verify_client_serial_mismatch_raises():
+    """If WDA status() reports a different device UDID, _connect_client raises RuntimeError."""
+
+    class FakeClient:
+        def __init__(self, url):
+            self.url = url
+
+        def status(self):
+            return {"ios": {"udid": "DIFFERENT-UDID"}}
+
+    wda_bridge._WdaClient = FakeClient
+    with pytest.raises(RuntimeError, match="WDA target mismatch"):
+        wda_bridge.get_wda(SERIAL)
+
+
+def test_simulator_auto_launch_wda_on_reconnect():
+    """When reconnect probes a simulator, it attempts to auto-launch installed WebDriverAgentRunner."""
+    import subprocess
+
+    listapps_out = '    "com.facebook.WebDriverAgentRunner.xctrunner" = {\n    };\n'
+    with (
+        patch(
+            "phone_pilot.ios.wda_bridge.pmd_utils.detect_form_factor",
+            return_value="simulator",
+        ),
+        patch(
+            "phone_pilot.ios.wda_bridge.pmd_utils.simctl_prefix",
+            return_value=["xcrun", "simctl"],
+        ),
+        patch(
+            "phone_pilot.ios.wda_bridge.pmd_runner.run",
+            side_effect=[
+                subprocess.CompletedProcess(["simctl"], 0, listapps_out, ""),
+                subprocess.CompletedProcess(
+                    ["simctl"],
+                    0,
+                    "com.facebook.WebDriverAgentRunner.xctrunner: 1234",
+                    "",
+                ),
+            ],
+        ) as mock_run,
+    ):
+        launched = wda_bridge._try_launch_simulator_wda(SERIAL)
+
+    assert launched is True
+    assert mock_run.call_count == 2
+    assert mock_run.call_args_list[1].args[0] == [
+        "xcrun",
+        "simctl",
+        "launch",
+        SERIAL,
+        "com.facebook.WebDriverAgentRunner.xctrunner",
+    ]

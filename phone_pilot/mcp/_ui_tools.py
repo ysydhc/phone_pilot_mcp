@@ -10,7 +10,11 @@ import asyncio
 from typing import Any, Optional
 
 from phone_pilot.mcp.server import mcp
-from phone_pilot.mcp._helpers import get_driver, _with_device
+from phone_pilot.mcp._helpers import (
+    get_driver,
+    _with_device,
+    _resolve_driver_and_platform,
+)
 
 
 def _phone_find_element_sync(
@@ -27,7 +31,9 @@ def _phone_find_element_sync(
 ) -> dict:
     """Sync body for phone_find_element (run in thread to avoid blocking event loop)."""
     try:
-        driver = get_driver(device_serial, platform)
+        driver, resolved_serial, resolved_plat = _resolve_driver_and_platform(
+            device_serial, platform, get_driver
+        )
 
         selector: dict[str, Any] = {}
         if text is not None:
@@ -51,8 +57,8 @@ def _phone_find_element_sync(
 
         return {
             "ok": True,
-            "device_serial": device_serial,
-            "platform": platform,
+            "device_serial": resolved_serial,
+            "platform": resolved_plat,
             "count": len(elements),
             "elements": elements,
         }
@@ -63,7 +69,7 @@ def _phone_find_element_sync(
 @mcp.tool()
 async def phone_find_element(
     device_serial: str,
-    platform: str = "android",
+    platform: str = "auto",
     text: Optional[str] = None,
     text_contains: Optional[str] = None,
     desc: Optional[str] = None,
@@ -110,7 +116,7 @@ async def phone_find_element(
 @mcp.tool()
 async def phone_get_current_activity(
     device_serial: str,
-    platform: str = "android",
+    platform: str = "auto",
 ) -> dict:
     """获取当前前台 Activity 信息。
     Get current foreground activity info.

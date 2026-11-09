@@ -193,12 +193,28 @@ def _phone_search_logcat_sync(
         return err
 
     try:
-        plat = resolved_platform or "android"
-        driver = get_driver(resolved_serial, plat)
-        log_text = driver.read_log(lines=lines)
+        source: str | None = None
+        with _state_lock:
+            active_log_path = _logcat_state.get(resolved_serial)
+
+        if active_log_path and Path(active_log_path).is_file():
+            raw_lines = (
+                Path(active_log_path)
+                .read_text(encoding="utf-8", errors="replace")
+                .splitlines()
+            )
+            if lines and lines > 0:
+                raw_lines = raw_lines[-int(lines) :]
+            log_lines = raw_lines
+            source = "active_capture"
+        else:
+            plat = resolved_platform or "android"
+            driver = get_driver(resolved_serial, plat)
+            log_text = driver.read_log(lines=lines)
+            log_lines = log_text.splitlines()
 
         matches: list[str] = []
-        for line in log_text.splitlines():
+        for line in log_lines:
             if regex:
                 if re.search(pattern, line):
                     matches.append(line)
@@ -206,12 +222,15 @@ def _phone_search_logcat_sync(
                 if pattern in line:
                     matches.append(line)
 
-        return {
+        result = {
             "ok": True,
             "matches": matches,
             "count": len(matches),
             "device_serial": resolved_serial,
         }
+        if source:
+            result["source"] = source
+        return result
     except Exception as e:
         return {"ok": False, "error": str(e), "device_serial": resolved_serial}
 

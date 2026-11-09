@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 from phone_pilot.script_api.broadcast import (
     _pid_of,
-    _pid_of_ios,
     ensure_app_alive,
     send_broadcast,
 )

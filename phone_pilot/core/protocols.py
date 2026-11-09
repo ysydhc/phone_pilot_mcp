@@ -115,7 +115,12 @@ class AppDriver(Protocol):
         """List installed packages."""
         ...
 
-    def launch_app(self, package: str, activity: Optional[str] = None) -> dict:
+    def launch_app(
+        self,
+        package: str,
+        activity: Optional[str] = None,
+        args: Optional[list[str]] = None,
+    ) -> dict:
         """Launch an application."""
         ...
 
