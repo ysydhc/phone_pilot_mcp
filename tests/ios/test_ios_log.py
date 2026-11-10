@@ -82,7 +82,7 @@ class TestLogCaptureModule:
         res = log_capture.stop_log_capture(SERIAL, str(out))
         assert res["ok"] is True
 
-    def test_simulator_build_cmd_includes_debug_and_process_predicate(self, tmp_path):
+    def test_simulator_build_cmd_default_no_debug_and_process_predicate(self, tmp_path):
         out = str(tmp_path / "sim_log.txt")
         fake_proc = MagicMock()
         fake_proc.pid = 777
@@ -107,10 +107,44 @@ class TestLogCaptureModule:
             SERIAL,
             "log",
             "stream",
+            "--predicate",
+            'process CONTAINS "Runner"',
+        ]
+
+    def test_simulator_build_cmd_explicit_debug_and_info_levels(self):
+        with (
+            patch(
+                "phone_pilot.ios.device.log_capture.pmd_utils.detect_form_factor",
+                return_value="simulator",
+            ),
+            patch(
+                "phone_pilot.ios.device.log_capture.pmd_utils.xcrun_executable",
+                return_value="xcrun",
+            ),
+        ):
+            cmd_d = log_capture._build_cmd(SERIAL, level="D", process="Runner")
+            cmd_i = log_capture._build_cmd(SERIAL, level="info", process="")
+        assert cmd_d == [
+            "xcrun",
+            "simctl",
+            "spawn",
+            SERIAL,
+            "log",
+            "stream",
             "--level",
             "debug",
             "--predicate",
             'process CONTAINS "Runner"',
+        ]
+        assert cmd_i == [
+            "xcrun",
+            "simctl",
+            "spawn",
+            SERIAL,
+            "log",
+            "stream",
+            "--level",
+            "info",
         ]
 
 

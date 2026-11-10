@@ -37,3 +37,44 @@ def test_hits_field_unchanged_structure():
         result = logcat_wait_for(ctx, "pattern1", timeout_s=1, interval_s=0.1)
     assert isinstance(result["hits"], dict)
     assert result["hits"]["pattern1"] == ["pattern1 hit"]
+
+
+def test_multiline_same_prefix_preserves_first_line_and_all_lines():
+    """同时间戳多行同前缀日志：line 默认取首条（含 URL），lines 保留全部正序匹配行，支持 match_mode 切换。"""
+    url_line = "11-10 14:30:00.123 100 200 I SDK: [FunnelWithoutInstance] lifecycle_stage url: https://ad.example.com/v1"
+    fail_line = "11-10 14:30:00.123 100 200 E SDK: [FunnelWithoutInstance] lifecycle_stage report failed, code:0"
+    ctx = _ctx_with_log(["11-10 14:29:59.000 100 200 D SDK: boot", url_line, fail_line])
+
+    with patch("phone_pilot.script_api.logcat.time.sleep"):
+        res_default = logcat_wait_for(
+            ctx, "[FunnelWithoutInstance]", timeout_s=1, interval_s=0.1
+        )
+        res_last = logcat_wait_for(
+            ctx,
+            "[FunnelWithoutInstance]",
+            timeout_s=1,
+            interval_s=0.1,
+            match_mode="last",
+        )
+        res_all = logcat_wait_for(
+            ctx,
+            "[FunnelWithoutInstance]",
+            timeout_s=1,
+            interval_s=0.1,
+            match_mode="all",
+        )
+
+    assert res_default["ok"] is True
+    assert res_default["line"] == url_line
+    assert res_default["lines"] == [url_line, fail_line]
+    assert res_default["match_mode"] == "first"
+
+    assert res_last["ok"] is True
+    assert res_last["line"] == fail_line
+    assert res_last["lines"] == [url_line, fail_line]
+    assert res_last["match_mode"] == "last"
+
+    assert res_all["ok"] is True
+    assert res_all["line"] == url_line
+    assert res_all["lines"] == [url_line, fail_line]
+    assert res_all["match_mode"] == "all"

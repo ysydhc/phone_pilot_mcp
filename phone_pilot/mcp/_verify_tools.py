@@ -31,6 +31,94 @@ from phone_pilot.mcp._helpers import (
 # Verification & Pipeline Tools (验证管道工具)
 # =============================================================================
 
+# Track script directories loaded by phone_run_script so sibling helper modules
+# (e.g. atomic_ops.py, utils.py, conftest.py) from a previous workspace/directory
+# never pollute sys.modules or sys.path when switching projects.
+_loaded_script_dirs: set[pathlib.Path] = set()
+
+
+def _isolate_script_modules(script_path: pathlib.Path, repo_path: str = "") -> None:
+    """Ensure local helper modules in ``script_path.parent`` are isolated across runs.
+
+    When ``phone_run_script`` runs scripts across different repositories in the
+    same long-lived MCP server process (for example ``adx-sdk-ios/tests/e2e``
+    followed by ``adx-sdk-android/tests/e2e``), both directories may contain
+    same-named helper modules such as ``atomic_ops.py`` with different exports.
+    This helper:
+    1. Discovers local ``.py`` modules and packages in ``script_dir``.
+    2. Evicts any non-stdlib/non-phone_pilot module in ``sys.modules`` whose
+       top-level name collides with a local module in ``script_dir`` or whose
+       ``__file__`` resides inside a previously executed ``script_dir``.
+    3. Removes previous ``script_dir`` entries from ``sys.path``, places the
+       current ``script_dir`` at ``sys.path[0]``, and invalidates import caches.
+    """
+    import importlib
+    import sys
+
+    script_dir = script_path.parent.resolve()
+    local_mod_names: set[str] = set()
+    try:
+        for p in script_dir.glob("*.py"):
+            if p.is_file() and p.stem != "__init__":
+                local_mod_names.add(p.stem)
+        for p in script_dir.iterdir():
+            if p.is_dir() and (p / "__init__.py").is_file():
+                local_mod_names.add(p.name)
+    except OSError:
+        pass
+
+    other_script_dirs = {d for d in _loaded_script_dirs if d != script_dir}
+
+    for mod_name, mod in list(sys.modules.items()):
+        if mod is None or mod_name == "phone_pilot" or mod_name.startswith("phone_pilot."):
+            continue
+        top_name = mod_name.split(".")[0]
+        mod_file = getattr(mod, "__file__", None)
+        if not mod_file:
+            continue
+        try:
+            mod_path = pathlib.Path(mod_file).resolve()
+        except OSError:
+            continue
+
+        # Never evict stdlib / virtualenv / site-packages modules
+        mod_path_str = str(mod_path)
+        if "site-packages" in mod_path_str or "lib/python" in mod_path_str:
+            continue
+
+        should_evict = False
+        # Case 1: Current script_dir has a same-named module/package (e.g. atomic_ops.py)
+        if top_name in local_mod_names:
+            should_evict = True
+        # Case 2: Module was imported from a previous script_dir in another workspace
+        elif any(
+            mod_path == prev_dir or prev_dir in mod_path.parents
+            for prev_dir in other_script_dirs
+        ):
+            should_evict = True
+
+        if should_evict:
+            sys.modules.pop(mod_name, None)
+
+    # Clean up previous script_dirs from sys.path and bind sys.path[0] = str(script_dir)
+    cleaned_sys_path: list[str] = []
+    for entry in sys.path:
+        if not entry:
+            cleaned_sys_path.append(entry)
+            continue
+        try:
+            resolved_entry = pathlib.Path(entry).resolve()
+        except OSError:
+            cleaned_sys_path.append(entry)
+            continue
+        if resolved_entry == script_dir or resolved_entry in other_script_dirs:
+            continue
+        cleaned_sys_path.append(entry)
+
+    sys.path[:] = [str(script_dir), *cleaned_sys_path]
+    _loaded_script_dirs.add(script_dir)
+    importlib.invalidate_caches()
+
 
 @mcp.tool()
 async def phone_run_script(
@@ -48,6 +136,8 @@ async def phone_run_script(
 
     The script must define a `main(ctx: ScriptContext) -> dict | None` function.
     脚本需定义 `main(ctx: ScriptContext) -> dict | None` 函数。
+    每次执行前会自动将脚本所在目录置于 `sys.path[0]` 并清理跨目录同名本地辅助模块
+    （如 `atomic_ops.py`、`utils.py`）的 `sys.modules` 缓存，防止跨仓库串扰。
 
     .. note::
         phone_pilot is an automation test tool, NOT a build tool.
@@ -123,6 +213,9 @@ async def phone_run_script(
         script_path=str(script_path),
     )
 
+    # Isolate local sibling helper modules (e.g. atomic_ops.py) across workspaces
+    _isolate_script_modules(script_path, repo_path=repo_path)
+
     # Dynamic import
     spec = importlib.util.spec_from_file_location("_workflow_script", str(script_path))
     if spec is None or spec.loader is None:
@@ -137,13 +230,13 @@ async def phone_run_script(
 
     t0 = _time.monotonic()
     try:
-        spec.loader.exec_module(module)
-
-        main_fn = getattr(module, "main", None)
-        if main_fn is None:
-            return {"ok": False, "error": "script has no main(ctx) function"}
-
         with contextlib.redirect_stdout(stdout_buf):
+            spec.loader.exec_module(module)
+
+            main_fn = getattr(module, "main", None)
+            if main_fn is None:
+                return {"ok": False, "error": "script has no main(ctx) function"}
+
             result = main_fn(ctx)
 
     except Exception as exc:

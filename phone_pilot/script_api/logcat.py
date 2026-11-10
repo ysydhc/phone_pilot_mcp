@@ -359,6 +359,15 @@ def _flatten_hits(found: dict[str, list[str]]) -> list[str]:
     return flat
 
 
+def _pick_representative_line(flat_lines: list[str], mode: str) -> Optional[str]:
+    """Select the single representative line (`line`) according to `match_mode`."""
+    if not flat_lines:
+        return None
+    if mode == "last":
+        return flat_lines[-1]
+    return flat_lines[0]
+
+
 def logcat_wait_for(
     ctx: ScriptContext,
     *patterns: str,
@@ -369,12 +378,21 @@ def logcat_wait_for(
     clear_before: bool = False,
     merge_multiline: bool = True,
     tag: Optional[str] = None,
+    match_mode: str = "first",
 ) -> dict:
     """轮询设备日志，等待指定模式出现。
     Poll device log until pattern(s) appear.
 
     *patterns 必须**全部**命中；any_of 只需命中**一个**。
     All *patterns must match; any_of requires at least one match.
+
+    多行同前缀命中说明 / Multi-line match behavior:
+        当同一时间窗口内有多行日志同时命中同一 pattern（例如第 1 行输出请求 URL、
+        第 2 行输出状态码）时：
+        - ``lines`` 与 ``hit_lines`` 完整保留本次窗口内所有命中行（按时间正序排列）；
+        - ``line`` 根据 ``match_mode`` 返回代表性单行：默认 ``match_mode="first"``
+          （或 ``"all"``）返回**第一条**命中行（防止首条带业务参数的日志被末尾状态行覆盖），
+          ``match_mode="last"`` 返回最后一条命中行。
 
     Parameters / 参数:
         ctx: 脚本执行上下文 / Script execution context
@@ -385,13 +403,26 @@ def logcat_wait_for(
         lines: 每次读取的日志行数 / Log lines per read
         clear_before: 轮询前是否清空日志 / Clear log before polling
         merge_multiline: 合并多行日志 / Merge multiline messages
+        tag: 可选 logcat tag 过滤 / Optional device-side logcat tag filter
+        match_mode: 多行命中时 ``line`` 的选取策略 ("first" | "last" | "all")，默认 "first"
 
     Returns / 返回值:
-        dict: {"ok": bool, "hits": {pattern: [lines]}, "hit_lines": [str],
-               "missing": [str]}
-        - hit_lines: hits 的扁平化列表（保留原始顺序，不去重）/ flattened
-          hits, order-preserving, not deduplicated
+        dict: {
+            "ok": bool,
+            "line": str | None,        # 单行代表结果（默认取时间正序首条，match_mode="last" 取末条）
+            "lines": list[str],        # 本次窗口内所有命中行列表（按时间正序排列）
+            "hits": {pattern: [lines]},# 按 pattern 分组的全部命中行
+            "hit_lines": list[str],    # hits 的扁平化列表（保留原始顺序，不去重，向后兼容）
+            "match_mode": str,         # "first" | "last" | "all"
+            "missing": list[str],
+        }
     """
+    mode = (match_mode or "first").strip().lower()
+    if mode not in ("first", "last", "all"):
+        raise ValueError(
+            f"Invalid match_mode: {match_mode!r} (expected 'first', 'last', or 'all')"
+        )
+
     if clear_before:
         try:
             ctx.driver.clear_log()
@@ -446,10 +477,14 @@ def logcat_wait_for(
         all_found = all(p in found for p in all_keys)
         any_satisfied = (not any_of_list) or (any_of_hit is not None)
         if all_found and any_satisfied:
+            flat = _flatten_hits(found)
             return {
                 "ok": True,
+                "line": _pick_representative_line(flat, mode),
+                "lines": list(flat),
                 "hits": found,
-                "hit_lines": _flatten_hits(found),
+                "hit_lines": flat,
+                "match_mode": mode,
                 "missing": [],
             }
 
@@ -464,16 +499,25 @@ def logcat_wait_for(
     missing = [p for p in all_keys if p not in found]
     if any_of_list and not any_of_hit:
         missing.append(f"any_of({', '.join(any_of_list)})")
+    flat = _flatten_hits(found)
     return {
         "ok": False,
+        "line": _pick_representative_line(flat, mode),
+        "lines": list(flat),
         "hits": found,
-        "hit_lines": _flatten_hits(found),
+        "hit_lines": flat,
+        "match_mode": mode,
         "missing": missing,
     }
 
 
 def logcat_wait_for_tagged(
-    ctx: ScriptContext, pattern: str, *, tag: str, timeout_s: float = 25
+    ctx: ScriptContext,
+    pattern: str,
+    *,
+    tag: str,
+    timeout_s: float = 25,
+    match_mode: str = "first",
 ) -> dict:
     """按 tag 精确等待 pattern：轮询 + 超时后一次兜底扫描，附带诊断片段。
     Wait for pattern under a tag: poll then a single fallback scan on timeout.
@@ -496,16 +540,26 @@ def logcat_wait_for_tagged(
         pattern: 查找字符串（子串语义）/ Search string (substring semantics)
         tag: logcat tag 过滤（设备端）/ logcat tag filter (device-side)
         timeout_s: 最长等待秒数 / Max wait seconds
+        match_mode: 多行命中时 ``matched_line`` / ``line`` 的选取策略 ("first" | "last" | "all")
 
     Returns / 返回值:
-        dict: {"ok": bool, "matched_line": str | None, "elapsed_s": float,
+        dict: {"ok": bool, "matched_line": str | None, "line": str | None,
+               "lines": list[str], "elapsed_s": float,
                "tail": list[str], "tag_has_logs": bool}
     """
+    mode = (match_mode or "first").strip().lower()
+    if mode not in ("first", "last", "all"):
+        raise ValueError(
+            f"Invalid match_mode: {match_mode!r} (expected 'first', 'last', or 'all')"
+        )
+
     since = logcat_mark(ctx, tag=tag)
     if since is None:
         return {
             "ok": False,
             "matched_line": None,
+            "line": None,
+            "lines": [],
             "elapsed_s": 0.0,
             "tail": [],
             "error": "mark_failed",
@@ -514,10 +568,13 @@ def logcat_wait_for_tagged(
     start = time.monotonic()
     poll_result = logcat_wait_for(ctx, pattern, tag=tag, timeout_s=timeout_s)
     if poll_result.get("ok"):
-        lines = poll_result.get("hits", {}).get(pattern, [])
+        matched_list = list(poll_result.get("hits", {}).get(pattern, []))
+        rep = _pick_representative_line(matched_list, mode)
         return {
             "ok": True,
-            "matched_line": lines[0] if lines else None,
+            "matched_line": rep,
+            "line": rep,
+            "lines": matched_list,
             "elapsed_s": round(time.monotonic() - start, 3),
             "tail": [],
             "tag_has_logs": True,
@@ -525,10 +582,13 @@ def logcat_wait_for_tagged(
 
     fallback = logcat_since(ctx, since, pattern=pattern, tag=tag, regex=False)
     all_lines = fallback.get("lines", [])
-    hits = fallback.get("hits", [])
+    hits = list(fallback.get("hits", []))
+    rep = _pick_representative_line(hits, mode)
     return {
         "ok": bool(hits),
-        "matched_line": hits[0] if hits else None,
+        "matched_line": rep,
+        "line": rep,
+        "lines": hits,
         "elapsed_s": round(time.monotonic() - start, 3),
         "tail": all_lines[-20:],
         "tag_has_logs": bool(all_lines),

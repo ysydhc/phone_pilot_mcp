@@ -23,7 +23,12 @@ def _build_cmd(serial: str, *, level: str, process: str = "") -> list[str]:
     form = pmd_utils.detect_form_factor(serial)
     if form == "simulator":
         exe = pmd_utils.xcrun_executable()
-        cmd = [exe, "simctl", "spawn", serial, "log", "stream", "--level", "debug"]
+        cmd = [exe, "simctl", "spawn", serial, "log", "stream"]
+        lvl = (level or "").strip().upper()
+        if lvl in ("D", "DEBUG"):
+            cmd += ["--level", "debug"]
+        elif lvl in ("I", "INFO"):
+            cmd += ["--level", "info"]
         proc_kw = (process or "").strip()
         if proc_kw:
             cmd += ["--predicate", f'process CONTAINS "{proc_kw}"']

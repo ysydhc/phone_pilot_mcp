@@ -401,22 +401,24 @@ class TestP0Logcat:
     def test_search_logcat_reads_active_capture_file(
         self, mock_resolve, mock_get_driver, tmp_path
     ):
-        """当 serial 存在活跃采集文件时，search_logcat 直接读取本地文件且标注 source='active_capture'."""
+        """当 serial 存在活跃采集文件时，search_logcat 全量匹配后再按 lines 截断 matches，防止早期日志被挤出窗口."""
         from phone_pilot.mcp import server as mcp_server
         from phone_pilot.mcp.server import phone_search_logcat
 
         log_file = tmp_path / "active.log"
+        trailing_noise = "\n".join(f"noise line {i}" for i in range(20))
         log_file.write_text(
-            "boot line\nAdSDK READY banner\ntrailing line\n", encoding="utf-8"
+            f"boot line\nAdSDK READY banner 1\nAdSDK READY banner 2\n{trailing_noise}\n",
+            encoding="utf-8",
         )
         mcp_server._logcat_state["test_serial"] = str(log_file)
         try:
             mock_get_driver.return_value.read_log.reset_mock()
-            result = _run(phone_search_logcat(pattern="AdSDK READY", lines=10))
+            result = _run(phone_search_logcat(pattern="AdSDK READY", lines=1))
             assert result["ok"] is True
             assert result.get("source") == "active_capture"
             assert result["count"] == 1
-            assert result["matches"] == ["AdSDK READY banner"]
+            assert result["matches"] == ["AdSDK READY banner 2"]
             mock_get_driver.return_value.read_log.assert_not_called()
         finally:
             mcp_server._logcat_state.pop("test_serial", None)
@@ -1419,4 +1421,73 @@ class TestEvolutionTools:
         assert "error" in res_err
         ok, missing = validate_response("phone_verify_ad_format", res_err)
         assert ok is True, f"Contract validation failed, missing: {missing}"
+
+    def test_phone_run_script_isolates_same_named_local_modules_across_dirs(
+        self, mock_resolve, mock_get_driver, tmp_path
+    ):
+        """不同目录下存在同名辅助模块（如 atomic_ops.py）时，连续调用 phone_run_script 互不污染 sys.modules。"""
+        from phone_pilot.mcp.server import phone_run_script
+
+        ios_dir = tmp_path / "adx-sdk-ios" / "tests" / "e2e"
+        android_dir = tmp_path / "adx-sdk-android" / "tests" / "e2e"
+        ios_dir.mkdir(parents=True)
+        android_dir.mkdir(parents=True)
+
+        # iOS 版 atomic_ops.py 没有 TAG
+        (ios_dir / "atomic_ops.py").write_text(
+            'IOS_HELPER = "ios_ok"\n',
+            encoding="utf-8",
+        )
+        ios_script = ios_dir / "test_ios_ad.py"
+        ios_script.write_text(
+            "import sys\n"
+            "from pathlib import Path\n"
+            "sys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+            "import atomic_ops\n"
+            "def main(ctx):\n"
+            '    return {"ok": True, "platform_helper": atomic_ops.IOS_HELPER, "has_tag": hasattr(atomic_ops, "TAG")}\n',
+            encoding="utf-8",
+        )
+
+        # Android 版 atomic_ops.py 导出 TAG 与 enter_ad_page
+        (android_dir / "atomic_ops.py").write_text(
+            'TAG = "Adm-SDK"\n'
+            "def enter_ad_page():\n"
+            '    return "android_entered"\n',
+            encoding="utf-8",
+        )
+        android_script = android_dir / "test_android_ad.py"
+        android_script.write_text(
+            "from atomic_ops import TAG, enter_ad_page\n"
+            "def main(ctx):\n"
+            '    return {"ok": True, "tag": TAG, "step": enter_ad_page()}\n',
+            encoding="utf-8",
+        )
+
+        # 1. 先执行 iOS 脚本，加载 iOS 版 atomic_ops
+        res_ios = _run(phone_run_script(path=str(ios_script), device_serial="dev1"))
+        assert res_ios["ok"] is True, f"iOS script failed: {res_ios}"
+        assert res_ios["result"] == {
+            "ok": True,
+            "platform_helper": "ios_ok",
+            "has_tag": False,
+        }
+
+        # 2. 紧接着在同一进程执行 Android 脚本，必须加载 Android 版 atomic_ops 而非命中 iOS 缓存
+        res_android = _run(
+            phone_run_script(path=str(android_script), device_serial="dev1")
+        )
+        assert res_android["ok"] is True, f"Android script failed: {res_android}"
+        assert res_android["result"] == {
+            "ok": True,
+            "tag": "Adm-SDK",
+            "step": "android_entered",
+        }
+
+        # 3. 再次切回 iOS 脚本，确认反向切换同样隔离正常
+        res_ios_again = _run(
+            phone_run_script(path=str(ios_script), device_serial="dev1")
+        )
+        assert res_ios_again["ok"] is True, f"iOS re-run failed: {res_ios_again}"
+        assert res_ios_again["result"]["has_tag"] is False
 

@@ -203,8 +203,6 @@ def _phone_search_logcat_sync(
                 .read_text(encoding="utf-8", errors="replace")
                 .splitlines()
             )
-            if lines and lines > 0:
-                raw_lines = raw_lines[-int(lines) :]
             log_lines = raw_lines
             source = "active_capture"
         else:
@@ -222,9 +220,14 @@ def _phone_search_logcat_sync(
                 if pattern in line:
                     matches.append(line)
 
+        if lines and lines > 0:
+            matches = matches[-int(lines) :]
+
         result = {
             "ok": True,
             "matches": matches,
+            "lines": matches,
+            "line": matches[0] if matches else None,
             "count": len(matches),
             "device_serial": resolved_serial,
         }
@@ -246,15 +249,19 @@ async def phone_search_logcat(
     """搜索设备日志。
     Search device logcat for pattern.
 
+    多行命中说明 / Multi-line match behavior:
+        当存在多行日志同时匹配 ``pattern`` 时，``matches``（及 ``lines``）按时间正序
+        返回全部匹配行列表，``line`` 返回时间正序的第 1 条匹配行（避免首行 URL 等关键信息被末尾状态行覆盖）。
+
     Parameters / 参数:
         device_serial: 设备序列号 / Device serial
         pattern: 搜索关键词或正则 / Search keyword or regex pattern
-        lines: 读取最近行数 / Number of recent lines to read
+        lines: 最多返回的匹配行数 / Maximum number of matched lines to return
         regex: 是否使用正则匹配 / Use regex matching
         platform: 平台类型 / Platform type
 
     Returns / 返回值:
-        dict: {"ok": True, "matches": [str], "count": int}
+        dict: {"ok": True, "matches": [str], "lines": [str], "line": str | None, "count": int}
     """
     return await asyncio.to_thread(
         _phone_search_logcat_sync,
