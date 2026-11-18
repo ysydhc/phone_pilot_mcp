@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
+import io
+from phone_pilot.core.safe_io import safe_directory
 from pathlib import Path
 from typing import Any, Optional
 
@@ -32,7 +35,7 @@ def generate_html_report(run_dir: str | Path) -> Path:
         FileNotFoundError: run_dir 不存在 / run_dir does not exist
         ImportError: jinja2 未安装 / jinja2 not installed
     """
-    run_dir = Path(run_dir).expanduser().resolve()
+    run_dir = Path(run_dir).expanduser().absolute()
     if not run_dir.is_dir():
         raise FileNotFoundError(f"Run directory not found: {run_dir}")
 
@@ -40,8 +43,39 @@ def generate_html_report(run_dir: str | Path) -> Path:
     html = _render_html(data)
 
     report_path = run_dir / "report.html"
-    report_path.write_text(html, encoding="utf-8")
+    with safe_directory(run_dir, writable=True) as folder:
+        folder.write_bytes("report.html", html.encode("utf-8"), replace=True)
     return report_path
+
+
+def render_html_report(run_dir: str | Path) -> str:
+    """Render a trusted template in memory; viewing archives never writes back."""
+    directory = Path(run_dir).expanduser().absolute()
+    with safe_directory(directory):
+        return _render_html(_load_run_data(directory))
+
+
+def _safe_files(directory):
+    try:
+        with safe_directory(directory) as folder:
+            return sorted(
+                name for name in os.listdir(folder.fd) if _regular(folder, name)
+            )
+    except (ValueError, OSError):
+        return []
+
+
+def _regular(folder, name):
+    try:
+        folder.stat(name)
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _read_bytes(path):
+    with safe_directory(path.parent) as folder:
+        return folder.read_bytes(path.name)
 
 
 def _load_run_data(run_dir: Path) -> dict[str, Any]:
@@ -70,6 +104,25 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     )
     data["meta"] = meta
 
+    from phone_pilot.core.report_evidence import business_projection
+    from phone_pilot.core.scene_restore import inspect_scene
+
+    business = {}
+    data["business_error"] = ""
+    if (run_dir / "business_report.json").is_file():
+        from phone_pilot.core.business_report import load_business_report
+
+        try:
+            business = load_business_report(run_dir)
+            if not business.get("cases"):
+                business = {}  # Uninstrumented sessions retain legacy tool rendering.
+        except (ValueError, OSError, TypeError) as error:
+            data["business_error"] = str(error)
+            business = {}
+    data["business"] = business_projection(run_dir, business) if business else {}
+    data["scene"] = inspect_scene(run_dir)
+    data["run_name"] = run_dir.name
+
     # ---- Duration display ----
     duration_s = meta.get("duration_s", 0)
     mins = int(duration_s) // 60
@@ -84,8 +137,21 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     steps_data = _read_json(run_dir / "steps.json") or {}
     steps = steps_data.get("steps", [])
     # Post-process: mark "retry found" steps as success
-    steps = _classify_retry_steps(steps)
+    # New business records retain every tool attempt; legacy classification only
+    # affects the old tool visualization, never the independent business verdict.
+    if not business:
+        steps = _classify_retry_steps(steps)
     data["steps"] = steps
+    if data["business"]:
+        for card in data["business"]["steps"]:
+            for attempt in card["attempts"]:
+                attempt["tools"] = [
+                    tool
+                    for tool in steps
+                    if tool.get("parent_case_id") == attempt.get("case_id")
+                    and tool.get("parent_step_id") == attempt.get("business_step_id")
+                    and tool.get("parent_attempt_id") == attempt.get("attempt_id")
+                ]
 
     # Recalculate pass rate from filtered steps (retry failures already removed)
     if steps:
@@ -103,23 +169,25 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     is_portrait = False  # Default: landscape/square
     if screenshots_dir.is_dir():
         screenshots = sorted(
-            f.name
-            for f in screenshots_dir.iterdir()
-            if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
+            name
+            for name in _safe_files(screenshots_dir)
+            if Path(name).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
         )
         # Detect orientation from first screenshot
         if screenshots:
             try:
                 from PIL import Image
 
-                first_img = Image.open(screenshots_dir / screenshots[0])
+                first_img = Image.open(
+                    io.BytesIO(_read_bytes(screenshots_dir / screenshots[0]))
+                )
                 w, h = first_img.size
                 first_img.close()
                 is_portrait = h > w * 1.2  # Portrait if height > 1.2x width
             except Exception:
                 pass
     # Build screenshot -> step mapping for gallery captions
-    step_by_num = {s.get("step"): s for s in steps}
+    step_by_screenshot = {s["screenshot"]: s for s in steps if s.get("screenshot")}
     gallery_items: list[dict] = []
     for img_name in screenshots:
         item: dict[str, Any] = {
@@ -128,21 +196,16 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
             "step_action": None,
             "step_detail": None,
         }
-        # Parse step number from filename like "003_find_text.png"
-        if "_" in img_name:
-            try:
-                sn = int(img_name.split("_", 1)[0])
-                item["step_num"] = sn
-                # Find matching step (by original step number before filtering)
-                matched = step_by_num.get(sn)
-                if matched:
-                    item["step_action"] = matched.get("action", "")
-                    item["step_detail"] = (
-                        _extract_query(matched.get("detail", ""))
-                        or matched.get("detail", "")[:40]
-                    )
-            except (ValueError, IndexError):
-                pass
+        # Explicit artifact identity, never a numeric filename-prefix guess:
+        # repeated tool counters and actions retain independent observations.
+        matched = step_by_screenshot.get(img_name)
+        if matched:
+            item["step_num"] = matched.get("step")
+            item["step_action"] = matched.get("action", "")
+            item["step_detail"] = (
+                _extract_query(matched.get("detail", ""))
+                or matched.get("detail", "")[:40]
+            )
         gallery_items.append(item)
 
     data["screenshots"] = screenshots
@@ -153,12 +216,15 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     logcat_dir = run_dir / "logcat"
     logcat_files: list[dict] = []
     if logcat_dir.is_dir():
-        for f in sorted(logcat_dir.iterdir()):
+        for name in _safe_files(logcat_dir):
+            f = logcat_dir / name
             if f.is_file():
                 try:
-                    text = f.read_text(encoding="utf-8", errors="replace")
-                    lines = text.count("\n")
-                    size_kb = f.stat().st_size // 1024
+                    with safe_directory(logcat_dir) as folder:
+                        lines = sum(
+                            block.count(b"\n") for block in folder.iter_chunks(f.name)
+                        )
+                        size_kb = folder.stat(f.name).st_size // 1024
                 except Exception:
                     lines = 0
                     size_kb = 0
@@ -179,15 +245,17 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     console_tail_lines = 50
     if console_path.is_file():
         try:
-            all_lines = console_path.read_text(
-                encoding="utf-8", errors="replace"
-            ).splitlines()
-            tail = (
-                all_lines[-console_tail_lines:]
-                if len(all_lines) > console_tail_lines
-                else all_lines
-            )
-            console_tail = "\n".join(tail)
+            with safe_directory(run_dir) as folder:
+                with folder.open("console.log") as stream:
+                    # Keep only a bounded tail, even for a multi-GB single line.
+                    tail_bytes = b""
+                    for block in iter(lambda: stream.read(65536), b""):
+                        tail_bytes = (tail_bytes + block)[-65536:]
+                    console_tail = "\n".join(
+                        tail_bytes.decode("utf-8", errors="replace").splitlines()[
+                            -console_tail_lines:
+                        ]
+                    )
         except Exception:
             pass
     data["console_tail"] = console_tail
@@ -203,7 +271,7 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     healing_events: list[dict] = []
     if healing_path.is_file():
         try:
-            hdata = json.loads(healing_path.read_text(encoding="utf-8"))
+            hdata = json.loads(_read_bytes(healing_path))
             healing_events = hdata.get("healing_events", [])
         except Exception:
             pass
@@ -321,10 +389,11 @@ def _load_memory_data(meminfo_dir: Path) -> dict[str, Any]:
 
     # Read all JSON files
     raw_files: dict[str, dict] = {}
-    for f in sorted(meminfo_dir.iterdir()):
+    for name in _safe_files(meminfo_dir):
+        f = meminfo_dir / name
         if f.suffix == ".json" and f.is_file():
             try:
-                raw_files[f.stem] = json.loads(f.read_text(encoding="utf-8"))
+                raw_files[f.stem] = json.loads(_read_bytes(f))
             except Exception:
                 pass
 
@@ -532,6 +601,6 @@ def _read_json(path: Path) -> Optional[dict]:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(_read_bytes(path))
     except Exception:
         return None

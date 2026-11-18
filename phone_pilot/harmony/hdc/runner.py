@@ -16,7 +16,7 @@ import time
 from typing import List
 
 # Reuse shared logging infra from core + Android runner.
-from phone_pilot.core.log import _log, get_console_log_file
+from phone_pilot.core.log import _log, write_console_log
 from phone_pilot.android.adb.runner import (
     _current_log_level,
     _shorten_cmd,
@@ -85,13 +85,7 @@ class HdcCommandRunner:
                     _log(f"  > {short}")
             elif level >= 1 and friendly:
                 _log(f"  {friendly}")
-        _clf = get_console_log_file()
-        if _clf:
-            try:
-                _clf.write(f"[cmd] {short}\n")
-                _clf.flush()
-            except Exception:
-                pass
+        write_console_log(f"[cmd] {short}\n")
 
         try:
             proc = subprocess.run(

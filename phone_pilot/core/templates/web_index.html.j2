@@ -191,13 +191,14 @@ a:hover { text-decoration: underline; }
         <td style="font-size:.8rem;color:var(--text2)">{{ r.device_serial or "-" }}</td>
         <td style="font-size:.8rem;white-space:nowrap">{{ r.started_at[5:16] if r.started_at else "-" }}</td>
         <td>
-          {% if r.has_report %}
+          {% if r.view_available %}
           <a href="/run/{{ r.run_dir }}/report.html" target="_blank">查看</a>
-          {% else %}
-          <button class="btn-gen" data-run="{{ r.run_dir }}" onclick="generateReport('{{ r.run_dir }}')">生成</button>
+          {% endif %}
+          {% if not r.has_report_file and r.can_generate_report %}
+          <button class="btn-gen" data-run="{{ r.run_dir }}" onclick="generateReport(this.dataset.run)">生成</button>
           {% endif %}
         </td>
-        <td><button class="btn-del" onclick="deleteRun('{{ r.run_dir }}')">删除</button></td>
+        <td><button class="btn-del" data-run="{{ r.run_dir }}" onclick="deleteRun(this.dataset.run)">删除</button></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -229,11 +230,11 @@ a:hover { text-decoration: underline; }
       <div class="origin" title="{{ res.cached_path or '' }}">{{ res.cached_path or '' }}</div>
       <div class="meta-time">{{ res.updated_at[:16] if res.updated_at else "" }}</div>
       <div class="actions">
-        <button class="btn-copy" onclick="copyPath('@res:{{ res.key }}')">复制引用</button>
+        <button class="btn-copy" data-path="@res:{{ res.key }}" onclick="copyPath(this.dataset.path)">复制引用</button>
         {% if res.cached_path %}
-        <button class="btn-copy" onclick="copyPath('{{ res.cached_path }}')">复制路径</button>
+        <button class="btn-copy" data-path="{{ res.cached_path }}" onclick="copyPath(this.dataset.path)">复制路径</button>
         {% endif %}
-        <button class="btn-del" onclick="deleteResource('{{ res.key }}')">删除</button>
+        <button class="btn-del" data-key="{{ res.key }}" onclick="deleteResource(this.dataset.key)">删除</button>
       </div>
     </div>
     {% endfor %}
@@ -364,7 +365,10 @@ function generateReport(name) {
     .then(function(d) {
       if (d.ok) {
         showToast('报告已生成: ' + name);
-        btn.outerHTML = '<a href="/run/' + name + '/report.html" target="_blank">查看</a>';
+        var link = document.createElement('a');
+        link.href = '/run/' + encodeURIComponent(name) + '/report.html';
+        link.target = '_blank'; link.textContent = '查看';
+        btn.replaceWith(link);
         return true;
       } else {
         showToast('生成失败: ' + (d.error || '未知错误'), true);
@@ -413,7 +417,10 @@ function generateAllReports() {
         done++;
         genBtn.textContent = '生成中 (' + done + '/' + total + ')...';
         if (d.ok) {
-          btn.outerHTML = '<a href="/run/' + name + '/report.html" target="_blank">查看</a>';
+          var link = document.createElement('a');
+        link.href = '/run/' + encodeURIComponent(name) + '/report.html';
+        link.target = '_blank'; link.textContent = '查看';
+        btn.replaceWith(link);
         } else {
           btn.disabled = false;
           btn.textContent = '失败';

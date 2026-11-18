@@ -21,10 +21,14 @@ import json
 import logging
 import os
 import re
-import sys
 import tempfile
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+import stat
+
+from phone_pilot.core.safe_io import safe_directory
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Generator, Optional
@@ -47,7 +51,8 @@ def _sanitize_serial(serial: str) -> str:
 def _get_lock_dir() -> Path:
     """Ensure and return the lock directory."""
     path = Path(_DEFAULT_LOCK_DIR)
-    path.mkdir(parents=True, exist_ok=True)
+    with safe_directory(path, create=True, writable=True):
+        pass
     return path
 
 
@@ -88,12 +93,86 @@ class LockInfo:
         return d
 
 
+def _safe_operation(method):
+    @wraps(method)
+    def operation(self, *args, **kwargs):
+        try:
+            with self.pinned():
+                return method(self, *args, **kwargs)
+        except Exception as error:
+            return {"ok": False, "error": str(error)}
+
+    return operation
+
+
 class DeviceLeaseManager:
     """Manages cross-process leases for mobile devices."""
 
     def __init__(self, lock_dir: Optional[str | Path] = None):
-        self.lock_dir = Path(lock_dir) if lock_dir else _get_lock_dir()
-        self.lock_dir.mkdir(parents=True, exist_ok=True)
+        self.lock_dir = Path(lock_dir) if lock_dir else Path(_DEFAULT_LOCK_DIR)
+        self._directory = ContextVar("lease_directory", default=None)
+        with self.pinned(create=True):
+            pass
+
+    @contextmanager
+    def pinned(self, create=False):
+        """Keep every lease IO operation on one validated directory inode."""
+        directory = self._directory.get()
+        if directory is not None:
+            yield directory
+            return
+        with safe_directory(self.lock_dir, create=create, writable=True) as directory:
+            token = self._directory.set(directory)
+            try:
+                yield directory
+            finally:
+                self._directory.reset(token)
+
+    def _open_lock(self, path):
+        directory = self._directory.get()
+        if directory is None or Path(path).parent != self.lock_dir:
+            raise ValueError("lock IO requires pinned directory")
+        fd = os.open(
+            Path(path).name,
+            os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+            0o600,
+            dir_fd=directory.fd,
+        )
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or info.st_uid != os.geteuid()
+            or info.st_mode & 0o022
+        ):
+            os.close(fd)
+            raise ValueError("untrusted lease lock file")
+        return fd
+
+    def _read_meta(self, path):
+        return json.loads(
+            self._directory.get().read_bytes(Path(path).name, max_bytes=1024 * 1024)
+        )
+
+    def _write_meta(self, path, data):
+        self._directory.get().write_bytes(
+            Path(path).name, json.dumps(data, indent=2).encode(), replace=True
+        )
+
+    def _meta_exists(self, path):
+        try:
+            self._directory.get().stat(Path(path).name)
+            return True
+        except Exception as exc:
+            cause = exc
+            while cause.__cause__ is not None:
+                cause = cause.__cause__
+            if isinstance(cause, FileNotFoundError):
+                return False
+            raise
+
+    def _unlink_meta(self, path):
+        os.unlink(Path(path).name, dir_fd=self._directory.get().fd)
 
     def _get_paths(self, serial: str) -> tuple[Path, Path]:
         safe = _sanitize_serial(serial)
@@ -101,6 +180,7 @@ class DeviceLeaseManager:
         meta_file = self.lock_dir / f"{safe}.json"
         return flock_file, meta_file
 
+    @_safe_operation
     def get_lock_status(self, serial: str) -> dict[str, Any]:
         """
         Check if a device is currently locked and retrieve lock metadata.
@@ -109,16 +189,20 @@ class DeviceLeaseManager:
             return {"ok": False, "error": "device_serial_required"}
 
         flock_file, meta_file = self._get_paths(serial)
-        if not meta_file.exists():
+        if not self._meta_exists(meta_file):
             return {"ok": True, "locked": False, "device_serial": serial}
 
         try:
-            with open(meta_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = self._read_meta(meta_file)
             info = LockInfo(**data)
-        except Exception:
-            # Corrupted or unreadable lock file
-            return {"ok": True, "locked": False, "device_serial": serial, "note": "corrupted_lock_cleared"}
+        except (json.JSONDecodeError, TypeError):
+            # Preserve legacy recovery for malformed JSON only, not unsafe IO.
+            return {
+                "ok": True,
+                "locked": False,
+                "device_serial": serial,
+                "note": "corrupted_lock_cleared",
+            }
 
         # Check expiration or dead PID
         if info.is_expired:
@@ -146,6 +230,7 @@ class DeviceLeaseManager:
             "lock_info": info.to_dict(),
         }
 
+    @_safe_operation
     def acquire_lock(
         self,
         serial: str,
@@ -185,9 +270,13 @@ class DeviceLeaseManager:
         while True:
             # Step 1: Open flock file and attempt non-blocking kernel lock
             try:
-                fd = os.open(str(flock_file), os.O_CREAT | os.O_RDWR, 0o644)
+                fd = self._open_lock(flock_file)
             except Exception as e:
-                return {"ok": False, "error": f"cannot_open_lock_file: {e}", "device_serial": serial}
+                return {
+                    "ok": False,
+                    "error": f"cannot_open_lock_file: {e}",
+                    "device_serial": serial,
+                }
 
             acquired_flock = False
             try:
@@ -202,11 +291,17 @@ class DeviceLeaseManager:
                 try:
                     # Step 2: Under flock protection, check existing metadata
                     current_status = self.get_lock_status(serial)
+                    if not current_status.get("ok"):
+                        return current_status
                     is_locked = current_status.get("locked", False)
                     lock_info_dict = current_status.get("lock_info")
 
                     # If already locked by the SAME session, treat as a reentrant renewal
-                    if is_locked and lock_info_dict and lock_info_dict.get("session_id") == session_id:
+                    if (
+                        is_locked
+                        and lock_info_dict
+                        and lock_info_dict.get("session_id") == session_id
+                    ):
                         is_locked = False
 
                     if not is_locked:
@@ -222,10 +317,7 @@ class DeviceLeaseManager:
                             ttl_s=ttl_s,
                         )
                         # Atomic write metadata
-                        temp_meta = meta_file.with_suffix(f".tmp.{os.getpid()}")
-                        with open(temp_meta, "w", encoding="utf-8") as f:
-                            json.dump(asdict(info), f, indent=2)
-                        temp_meta.replace(meta_file)
+                        self._write_meta(meta_file, asdict(info))
 
                         return {
                             "ok": True,
@@ -263,6 +355,7 @@ class DeviceLeaseManager:
             # Sleep briefly and retry
             time.sleep(min(0.5, max(0.1, (wait_timeout_s - elapsed) / 4)))
 
+    @_safe_operation
     def release_lock(
         self,
         serial: str,
@@ -281,7 +374,7 @@ class DeviceLeaseManager:
             return {"ok": False, "error": "device_serial_required"}
 
         flock_file, meta_file = self._get_paths(serial)
-        if not meta_file.exists():
+        if not self._meta_exists(meta_file):
             return {
                 "ok": True,
                 "released": True,
@@ -290,20 +383,23 @@ class DeviceLeaseManager:
             }
 
         try:
-            fd = os.open(str(flock_file), os.O_CREAT | os.O_RDWR, 0o644)
+            fd = self._open_lock(flock_file)
         except Exception as e:
-            return {"ok": False, "error": f"cannot_open_lock_file: {e}", "device_serial": serial}
+            return {
+                "ok": False,
+                "error": f"cannot_open_lock_file: {e}",
+                "device_serial": serial,
+            }
 
         try:
             import fcntl
 
             fcntl.flock(fd, fcntl.LOCK_EX)
             try:
-                if not meta_file.exists():
+                if not self._meta_exists(meta_file):
                     return {"ok": True, "released": True, "device_serial": serial}
 
-                with open(meta_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = self._read_meta(meta_file)
                 info = LockInfo(**data)
 
                 if not force and session_id and info.session_id != session_id:
@@ -318,7 +414,7 @@ class DeviceLeaseManager:
 
                 # Safe removal
                 try:
-                    meta_file.unlink(missing_ok=True)
+                    self._unlink_meta(meta_file)
                 except Exception:
                     pass
 
@@ -336,6 +432,7 @@ class DeviceLeaseManager:
         except Exception as e:
             return {"ok": False, "error": str(e), "device_serial": serial}
 
+    @_safe_operation
     def renew_lock(
         self,
         serial: str,
@@ -350,24 +447,31 @@ class DeviceLeaseManager:
 
         ttl_s = max(5.0, float(ttl_s))
         flock_file, meta_file = self._get_paths(serial)
-        if not meta_file.exists():
+        if not self._meta_exists(meta_file):
             return {"ok": False, "error": "lock_not_found", "device_serial": serial}
 
         try:
-            fd = os.open(str(flock_file), os.O_CREAT | os.O_RDWR, 0o644)
+            fd = self._open_lock(flock_file)
         except Exception as e:
-            return {"ok": False, "error": f"cannot_open_lock_file: {e}", "device_serial": serial}
+            return {
+                "ok": False,
+                "error": f"cannot_open_lock_file: {e}",
+                "device_serial": serial,
+            }
 
         try:
             import fcntl
 
             fcntl.flock(fd, fcntl.LOCK_EX)
             try:
-                if not meta_file.exists():
-                    return {"ok": False, "error": "lock_not_found", "device_serial": serial}
+                if not self._meta_exists(meta_file):
+                    return {
+                        "ok": False,
+                        "error": "lock_not_found",
+                        "device_serial": serial,
+                    }
 
-                with open(meta_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+                data = self._read_meta(meta_file)
                 info = LockInfo(**data)
 
                 if info.session_id != session_id:
@@ -383,10 +487,7 @@ class DeviceLeaseManager:
                 info.expires_at = now + ttl_s
                 info.ttl_s = ttl_s
 
-                temp_meta = meta_file.with_suffix(f".tmp.{os.getpid()}")
-                with open(temp_meta, "w", encoding="utf-8") as f:
-                    json.dump(asdict(info), f, indent=2)
-                temp_meta.replace(meta_file)
+                self._write_meta(meta_file, asdict(info))
 
                 return {
                     "ok": True,
@@ -434,7 +535,9 @@ def release_device_lock(
     session_id: Optional[str] = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    return _lease_manager.release_lock(serial=serial, session_id=session_id, force=force)
+    return _lease_manager.release_lock(
+        serial=serial, session_id=session_id, force=force
+    )
 
 
 def renew_device_lock(

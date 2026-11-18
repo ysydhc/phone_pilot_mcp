@@ -240,7 +240,8 @@ class TestRenderHtml(unittest.TestCase):
 
         self.assertIn("<!DOCTYPE html>", html)
         self.assertIn("test_script", html)
-        self.assertIn("PASSED", html)
+        self.assertIn("业务 UNKNOWN", html)
+        self.assertIn("EXIT 0", html)
         self.assertIn("</html>", html)
 
     def test_renders_failed_run(self):
@@ -310,6 +311,26 @@ class TestGenerateHtmlReport(unittest.TestCase):
         self.assertIn('src="screenshots/', html)
         # No base64 data URIs
         self.assertNotIn("data:image/png;base64", html)
+
+
+def test_repeated_tool_counter_gallery_uses_exact_screenshot_identity(tmp_path):
+    from phone_pilot.core.run_store import RunSession
+
+    session = RunSession.create("gallery", recordings_dir=str(tmp_path))
+    session.add_step(1, "find_text", "fail", "first observation", png_bytes=b"first")
+    session.add_step(1, "find_text", "ok", "later observation", png_bytes=b"later")
+    orphan = session.save_screenshot("001_find_text_orphan", b"unassociated")
+    session.finalize()
+    gallery = {
+        item["filename"]: item
+        for item in _load_run_data(session.run_dir)["gallery_items"]
+    }
+    first, later = session._steps
+    assert gallery[first["screenshot"]]["step_detail"] == "first observation"
+    assert gallery[later["screenshot"]]["step_detail"] == "later observation"
+    assert gallery[first["screenshot"]]["step_num"] == 1
+    assert gallery[orphan.name]["step_detail"] is None
+    assert gallery[orphan.name]["step_num"] is None
 
 
 if __name__ == "__main__":

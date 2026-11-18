@@ -13,6 +13,32 @@
 | **动画/参数微调** | 约定好「改哪段代码、改什么」的逻辑，由 Agent 按步骤做代码微调并启动脚本；通过录屏对比多版效果，快速选出最合适的参数。 |
 | **二分法定位问题** | 多次运行脚本（每次用不同代码或配置），结合日志、截图、录屏与报告，二分缩小范围，快速锁定引入问题的改动或配置。 |
 
+## 业务逐步骤报告与设备现场复原
+
+工具流水与业务验收分开：先通过 `ctx.declare_cases()` 声明用例/业务步骤及必需 UI、回调日志、网络维度，再用 `with ctx.business_step(...) as step` 记录前置、动作、预期/实际、环境引用和每次尝试。`step.add_evidence()` 保存包内原始材料，`step.add_assertion()` 绑定证据。缺失必需材料、校验失败、未执行或关联不确定均不算 PASS；HTML 提供完整屏幕故事板、首次失败/恢复与日志行区间。旧包不补猜业务事实。
+
+```python
+ctx.declare_cases([{"case_id": "TC-01", "steps": [{
+    "business_step_id": "target", "title": "目标页面",
+    "expected": "目标控件可见", "required_dimensions": ["ui"],
+    "not_applicable": {"callback_log": "纯离线UI验证", "network": "不发生网络请求"},
+    "required_evidence": ["screenshot"]}]}])
+with ctx.business_step("TC-01", "target", preconditions="已核验构建/配置",
+                       action="进入目标页面", environment_ref="verified-env") as step:
+    # 先执行语义动作并读取实际目标状态；不能把截屏成功当作验证。
+    evidence = step.capture("target")
+    step.add_assertion("ui", "PASS" if observed_target else "FAIL",
+                       "目标控件可见", str(observed_target),
+                       evidence_refs=[evidence["evidence_id"]])
+    step.actual = str(observed_target)
+```
+
+**设备现场复原不是截图/录像回放。** 审阅运行包的 `scene_manifest.json` 后，可执行 `python -m phone_pilot.scene_cli <run_dir>` 只读检查；执行必须显式指定 `--device-serial` 和 `--approve-manifest-sha256`。Dashboard 默认禁用，启动时使用 `--approve-scene-sha256 <审核过的原始文件哈希>` 才开放对应包的按钮；有同源/token检查、设备确认和后台回执。
+
+安装 `phone-pilot[restore]` 提供已安装 APK 的静态 Manifest 校验器（缺失即 BLOCKED）。v1 仅支持 Android **受信、无请求权限、已装单 APK 匹配的离线 Debug Demo**，固定 `force_stop → launch → 精确 selector 动态点击`，实测新 PID/starttime、前台和目标 UI，重采 PNG/XML/本进程日志并出具回执。不执行历史 Python/shell，不安装/清数据/授权，不自动恢复配置/Mock/账户/外部服务；任何未知、不支持依赖或不可逆副作用会停止。READY 仅表示本地计划合法，SUCCESS 仅表示重新验证的 UI 现场状态，并不证明 SDK 业务回调或网络语义 PASS；FAILED 可能已有批准动作执行，不能声称回滚。iOS/Harmony、Android SDK 的联网激励视频/配置与 Mock 复原尚未覆盖。
+
+归档读写要求 POSIX 描述符能力，Windows 或不安全输出根会 fail-closed；写路径逐级拒绝用户符号链接和非受信可写祖先，macOS 仅兼容核验过的 root-owned 系统别名。只读 Dashboard 查看在内存中重渲染，不改写原包。日志捕获若停止或导入失败，会返回 `ok: false` 与 `retained_capture_path` 并保留私有原始材料供重试，不把缺失日志当作成功；成功归档后才清理临时材料。报告生成与设备复原应分别验收。
+
 ## 一行安装
 
 ```bash

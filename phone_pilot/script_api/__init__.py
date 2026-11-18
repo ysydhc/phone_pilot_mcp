@@ -13,7 +13,8 @@ from __future__ import annotations
 from phone_pilot.core.ui import Box
 from phone_pilot.core.run_store import RunSession
 
-from .context import ScriptContext, RetryExhausted
+from .context import ScriptContext, RetryExhausted, BusinessStepContext
+from phone_pilot.core.business_report import load_business_report
 
 # ---- 重新导出：查找 API ----
 from .find import find_text, find_image, find_text_list, find_image_list, find_vision
@@ -166,6 +167,8 @@ __all__ = [
     # Core
     "ScriptContext",
     "RunSession",
+    "BusinessStepContext",
+    "load_business_report",
     "ChainResult",
     "chain",
     "Box",

@@ -10,6 +10,10 @@ import os
 import pathlib
 import sys
 import time
+import tempfile
+import uuid
+from phone_pilot.core.safe_io import safe_directory
+from phone_pilot.core.run_store import _safe
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -89,6 +93,120 @@ class RetryExhausted(RuntimeError):
     """
 
     pass
+
+
+class BusinessStepContext:
+    """Explicit business attempt scope; never suppresses a business exception.
+
+    Captures are optional and remain evidence, not automatic assertions.
+    """
+
+    def __init__(
+        self,
+        ctx,
+        case_id,
+        business_step_id,
+        *,
+        capture_before=False,
+        capture_after=False,
+        capture_on_failure=True,
+        **kwargs,
+    ):
+        self.ctx = ctx
+        self.case_id = case_id
+        self.business_step_id = business_step_id
+        self.kwargs = kwargs
+        self.capture_before = capture_before
+        self.capture_after = capture_after
+        self.capture_on_failure = capture_on_failure
+        self.status = "PASS"
+        self.actual = ""
+        self.result = None
+
+    def __enter__(self):
+        session = self.ctx._ensure_business_session()
+        self.result = session.begin_business_step(
+            self.case_id, self.business_step_id, **self.kwargs
+        )
+        if self.capture_before:
+            try:
+                self.capture("before")
+            except BaseException as error:
+                try:
+                    self.result = session.end_business_step(
+                        "FAIL", failure_class="capture", error_message=str(error)
+                    )
+                except Exception as finalize_error:
+                    error.add_note(
+                        f"entry attempt finalization failed: {finalize_error}"
+                    )
+                raise
+        return self
+
+    def add_evidence(self, kind, **kwargs) -> dict:
+        return self.ctx._ensure_business_session().add_evidence(kind, **kwargs)
+
+    def add_assertion(self, dimension, status, expected, actual, **kwargs) -> dict:
+        return self.ctx._ensure_business_session().add_assertion(
+            dimension, status, expected, actual, **kwargs
+        )
+
+    def capture(self, phase="after") -> dict:
+        try:
+            png = self.ctx.driver.screen.screenshot()
+            if not png:
+                raise RuntimeError("screenshot returned no bytes")
+        except Exception as exc:
+            return self.add_evidence(
+                "screenshot",
+                capture_error=str(exc),
+                source="driver.screen.screenshot",
+                metadata={"phase": phase},
+            )
+        return self.add_evidence(
+            "screenshot",
+            data=png,
+            source="driver.screen.screenshot",
+            metadata={"phase": phase, "original": True},
+        )
+
+    def __exit__(self, exc_type, exc, tb):
+        session = self.ctx._ensure_business_session()
+        if exc is not None:
+            # Reporting must not replace the original business exception.
+            try:
+                if self.capture_on_failure:
+                    self.capture("failure")
+            except Exception as report_error:
+                exc.add_note(f"failure evidence recording failed: {report_error}")
+            try:
+                self.result = session.end_business_step(
+                    "FAIL",
+                    self.actual,
+                    failure_class="business",
+                    error_message=f"{exc_type.__name__}: {exc}",
+                )
+            except Exception as report_error:
+                exc.add_note(f"business step finalization failed: {report_error}")
+            return False
+        if self.capture_after:
+            try:
+                self.capture("after")
+            except BaseException as error:
+                try:
+                    self.result = session.end_business_step(
+                        "FAIL",
+                        self.actual,
+                        failure_class="capture",
+                        error_message=str(error),
+                    )
+                except Exception as finalize_error:
+                    error.add_note(
+                        f"post-capture attempt finalization failed: {finalize_error}"
+                    )
+                raise
+        self.result = session.end_business_step(self.status, self.actual)
+        return False
 
 
 @dataclass
@@ -274,6 +392,11 @@ class ScriptContext:
             except Exception:
                 pass
 
+        if self._session is not None:
+            self._session._device_info.update(
+                serial=self.device_serial, platform=self.platform
+            )
+
         # Print startup banner
         self._print_banner()
 
@@ -297,6 +420,33 @@ class ScriptContext:
     def session(self) -> Optional[RunSession]:
         """Return the current RunSession (or None if not created)."""
         return self._session
+
+    def _ensure_business_session(self) -> RunSession:
+        """Create host-side reporting without detecting or touching a device."""
+        if not self.script_name:
+            main_file = self.script_path or (sys.argv[0] if sys.argv else "")
+            self.script_name = pathlib.Path(main_file).stem if main_file else "script"
+            if main_file and not self.script_path:
+                self.script_path = main_file
+        if self._session is None:
+            self._session = RunSession.create(
+                self.script_name or "script",
+                script_path=self.script_path,
+                recordings_dir=self.recordings_dir,
+                device_serial=self.device_serial,
+                platform=self.platform,
+            )
+        return self._session
+
+    def declare_cases(self, cases: list[dict]) -> None:
+        """Declare the planned acceptance denominator before any device action."""
+        self._ensure_business_session().declare_cases(cases)
+
+    def business_step(
+        self, case_id: str, business_step_id: str, **kwargs
+    ) -> BusinessStepContext:
+        """Return a business attempt context; yields a mutable status/actual handle."""
+        return BusinessStepContext(self, case_id, business_step_id, **kwargs)
 
     # ---- Airtest / Poco (Android-only) ----
 
@@ -408,8 +558,28 @@ class ScriptContext:
             return {"ok": False, "error": "already_recording"}
         if not name:
             name = f"record_{time.strftime('%H%M%S')}"
-        # 传文件名给 driver，driver 返回 remote_path（平台决定存储位置）
-        result = self.driver.screen.start_screenrecord(f"{name}.mp4")
+        # iOS simulator records on the host, never give it an archive pathname.
+        local_temporary = None
+        driver_path = f"{name}.mp4"
+        if self.platform == "ios" or getattr(self.driver, "platform", None) == "ios":
+            local_temporary = tempfile.TemporaryDirectory(
+                prefix="pp-record-local-", delete=False
+            )
+            driver_path = str(
+                pathlib.Path(local_temporary.name).resolve() / "capture.mp4"
+            )
+        try:
+            result = self.driver.screen.start_screenrecord(driver_path)
+        except BaseException:
+            if local_temporary:
+                local_temporary.cleanup()
+            raise
+        if not result.get("ok") and local_temporary:
+            local_temporary.cleanup()
+        self._record_local_temporary = local_temporary if result.get("ok") else None
+        self._record_local_path = (
+            result.get("path", "") if local_temporary and result.get("ok") else ""
+        )
         if result.get("ok"):
             self._recording = True
             self._record_name = name
@@ -434,27 +604,84 @@ class ScriptContext:
         self._record_name = ""
         self._record_remote = ""
 
-        # Auto-pull recording to run directory (platform-agnostic via driver.pull_file)
-        if self._session and remote:
+        local_temporary = getattr(self, "_record_local_temporary", None)
+        if local_temporary:
+            capture = pathlib.Path(getattr(self, "_record_local_path", ""))
+            try:
+                if not result.get("ok") or not self._session:
+                    raise ValueError(result.get("error", "host recording not archived"))
+                if (
+                    capture
+                    != pathlib.Path(local_temporary.name).resolve() / "capture.mp4"
+                ):
+                    raise ValueError("host recording path differs from private capture")
+                filename = f"{_safe(name)}_{uuid.uuid4().hex}.mp4"
+                with safe_directory(capture.parent) as source:
+                    if source.stat(capture.name).st_size == 0:
+                        raise ValueError("host recording empty")
+                with safe_directory(self._session.run_dir, writable=True) as root:
+                    with root.subdir("recordings", create=True) as folder:
+                        folder.copy_file(filename, capture)
+                result["local_path"] = str(self._session.recordings_dir / filename)
+                local_temporary.cleanup()
+                self._record_local_temporary = None
+            except Exception as error:
+                return dict(
+                    result,
+                    ok=False,
+                    error=str(error),
+                    retained_capture_path=str(capture),
+                )
+            return result
+
+        # Keep at least one recoverable copy until successful safe archival.
+        archived = False
+        if self._session and remote and result.get("ok"):
+            temporary = tempfile.TemporaryDirectory(prefix="pp-record-", delete=False)
+            capture = pathlib.Path(temporary.name).resolve() / "capture.mp4"
             try:
                 time.sleep(1)  # 等设备文件写入完成
-                local_path = self._session.recordings_dir / f"{name}.mp4"
-                local_path.parent.mkdir(parents=True, exist_ok=True)
-                pull_result = self.driver.pull_file(remote, str(local_path))
-                if local_path.exists() and local_path.stat().st_size > 0:
-                    _runner_log(
-                        f"  [rec] 录屏已保存 → {local_path.name} ({local_path.stat().st_size // 1024}KB)"
-                    )
-                    result["local_path"] = str(local_path)
+                filename = f"{_safe(name)}_{uuid.uuid4().hex}.mp4"
+                local_path = self._session.recordings_dir / filename
+                pulled = self.driver.pull_file(remote, str(capture))
+                if isinstance(pulled, dict) and not pulled.get("ok"):
+                    raise ValueError(pulled.get("error", "recording pull failed"))
+                with safe_directory(capture.parent) as source:
+                    if source.stat(capture.name).st_size == 0:
+                        raise ValueError("recording capture empty")
+                with safe_directory(self._session.run_dir, writable=True) as root:
+                    with root.subdir("recordings", create=True) as folder:
+                        folder.copy_file(filename, capture)
+                result["local_path"] = str(local_path)
+                archived = True
+                temporary.cleanup()
+            except Exception as error:
+                _runner_log(
+                    f"  [rec] 录屏导入失败，材料保留于 {capture} / {remote}: {error}"
+                )
+                result = dict(
+                    result,
+                    ok=False,
+                    error=str(error),
+                    retained_remote_path=remote,
+                )
+                if capture.is_file():
+                    result["retained_capture_path"] = str(capture)
                 else:
-                    _runner_log(
-                        f"  [rec] 录屏 pull 失败: {pull_result.get('stderr', '')}"
-                    )
-            except Exception as e:
-                _runner_log(f"  [rec] 录屏保存异常: {e}")
+                    temporary.cleanup()
+        elif remote:
+            result = dict(
+                result,
+                ok=False,
+                error=result.get("error", "recording not archived"),
+                retained_remote_path=remote,
+            )
+        else:
+            result = dict(
+                result, ok=False, error="recording remote path missing; not archived"
+            )
 
-        # 清理设备上的临时文件 (platform-agnostic)
-        if remote:
+        if archived and remote:
             try:
                 self.driver.remove_remote_file(remote)
             except Exception:
@@ -508,28 +735,43 @@ class ScriptContext:
         if hasattr(self, "_logcat_processes") and name in self._logcat_processes:
             return {"ok": False, "error": f"logcat '{name}' already running"}
 
-        # Determine output path
-        if self._session:
-            out_path = self._session.logcat_dir / f"{name}.txt"
-        else:
-            out_path = pathlib.Path(self.out_dir) / f"{name}.txt"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep the driver's ordinary-path writer inside a private temporary root.
+        out_root = (
+            self._session.logcat_dir
+            if self._session
+            else pathlib.Path(self.out_dir).absolute()
+        )
+        out_path = out_root / f"{_safe(name)}_{uuid.uuid4().hex}.txt"
+        with safe_directory(out_root, create=True, writable=True):
+            pass
+        # Keep failed captures after context destruction as well as for retry.
+        # Python >=3.13: delete=False disables implicit cleanup, explicit cleanup
+        # still runs on successful import or unsuccessful capture startup.
+        temporary = tempfile.TemporaryDirectory(prefix="pp-log-", delete=False)
+        driver_path = pathlib.Path(temporary.name).resolve() / "capture.txt"
 
         # Delegate to driver's platform-specific log capture
-        result = self.driver.start_log_capture(
-            str(out_path),
-            tags=tag,
-            exclude_tags=exclude_tag,
-            level=level,
-            process=process,
-        )
+        try:
+            result = self.driver.start_log_capture(
+                str(driver_path),
+                tags=tag,
+                exclude_tags=exclude_tag,
+                level=level,
+                process=process,
+            )
+        except BaseException:
+            temporary.cleanup()
+            raise
+        if not result.get("ok"):
+            temporary.cleanup()
 
         if result.get("ok"):
             if not hasattr(self, "_logcat_processes"):
                 self._logcat_processes: dict[str, dict] = {}
             self._logcat_processes[name] = {
                 "path": out_path,
-                "driver_output_path": str(out_path),
+                "driver_output_path": str(driver_path),
+                "temporary": temporary,
             }
             desc_parts = []
             if tag:
@@ -564,13 +806,48 @@ class ScriptContext:
         if name not in procs:
             return {"ok": False, "error": f"logcat '{name}' not found"}
 
-        info = procs.pop(name)
+        info = procs[name]
         out_path = info["path"]
         driver_output_path = info.get("driver_output_path", str(out_path))
 
-        # Delegate stop to driver
-        result = self.driver.stop_log_capture(driver_output_path)
-
+        try:
+            if not info.get("stopped"):
+                result = self.driver.stop_log_capture(driver_output_path)
+                if not result.get("ok"):
+                    if result.get("terminal") is True and result.get("stopped") is True:
+                        procs.pop(name)
+                        if not hasattr(self, "_retained_logcat_captures"):
+                            self._retained_logcat_captures = {}
+                        self._retained_logcat_captures[name] = info
+                    _runner_log(
+                        f"  [log] 捕获停止失败，原始材料保留于 {driver_output_path}"
+                    )
+                    return {
+                        "ok": False,
+                        "name": name,
+                        "error": result.get("error", "capture stop failed"),
+                        "retained_capture_path": driver_output_path,
+                    }
+                info["stopped"] = True
+                info["stop_result"] = result
+            result = info["stop_result"]
+            with safe_directory(out_path.parent, writable=True) as folder:
+                folder.copy_file(out_path.name, pathlib.Path(driver_output_path))
+        except (ValueError, OSError) as error:
+            _runner_log(
+                f"  [log] 捕获导入失败，原始材料保留于 {driver_output_path}: {error}"
+            )
+            # Keep the TemporaryDirectory object alive and allow explicit retry;
+            # losing the only raw capture is worse than a failed archive import.
+            return {
+                "ok": False,
+                "name": name,
+                "error": str(error),
+                "retained_capture_path": driver_output_path,
+            }
+        procs.pop(name)
+        if info.get("temporary"):
+            info["temporary"].cleanup()
         lines = result.get("lines", 0)
         _runner_log(f"  [log] logcat 已保存 → {out_path.name} ({lines} 行)")
         return {
@@ -613,32 +890,52 @@ class ScriptContext:
 
         # Screenshot
         png_bytes: bytes | None = None
+        capture_error = ""
+        annotated_path = None
         if self.auto_screenshot:
             try:
                 png_bytes = self.driver.screen.screenshot()
-            except Exception:
-                pass
+                if not png_bytes:
+                    capture_error = "screenshot returned no bytes"
+            except Exception as exc:
+                capture_error = str(exc)
 
-        # Annotate element on screenshot if available
-        if png_bytes and element is not None and status == "ok":
-            png_bytes = _annotate_screenshot(png_bytes, element)
+        # Preserve the original; annotated views are separate artifacts.
+        if png_bytes and element is not None and status == "ok" and self._session:
+            annotated = _annotate_screenshot(png_bytes, element)
+            if annotated != png_bytes:
+                try:
+                    annotated_path = self._session.save_screenshot(
+                        f"{step:03d}_{action}_annotated", annotated
+                    ).name
+                except Exception as exc:
+                    capture_error = f"annotation save failed: {exc}"
 
         # Save to RunSession (consolidated steps.json + screenshot to screenshots/)
         if self._session:
             try:
                 self._session.add_step(
-                    step, action, status, detail, png_bytes=png_bytes
+                    step,
+                    action,
+                    status,
+                    detail,
+                    png_bytes=png_bytes,
+                    extra={
+                        "capture_error": capture_error,
+                        "annotated_screenshot": annotated_path,
+                    },
                 )
             except Exception:
-                pass
+                if self._session._business.active is not None:
+                    raise
         elif png_bytes:
             try:
                 out_root = pathlib.Path(self.out_dir)
-                out_root.mkdir(parents=True, exist_ok=True)
                 path = (
                     out_root
-                    / f"auto_step{step:03d}_{action.replace(' ', '_')[:30]}.png"
+                    / f"auto_step{step:03d}_{_safe(action, 30)}_{uuid.uuid4().hex}.png"
                 )
-                path.write_bytes(png_bytes)
+                with safe_directory(out_root, create=True, writable=True) as folder:
+                    folder.write_bytes(path.name, png_bytes)
             except Exception:
                 pass

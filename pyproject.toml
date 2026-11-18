@@ -35,6 +35,8 @@ Issues = "https://github.com/aspect-build/phone-pilot-mcp/issues"
 [project.optional-dependencies]
 # Dev: lint & test (make lint / make test)
 dev = ["ruff>=0.8.0", "pytest>=8.0.0"]
+# Strict installed-APK manifest validation for opt-in Android scene restoration.
+restore = ["androguard>=4.1.0,<5"]
 # HarmonyOS device automation
 harmony = ["hmdriver2>=1.4.0"]
 # iOS device automation (macOS only)
@@ -48,6 +50,7 @@ all = ["phone-pilot[harmony,ios,vision]"]
 phone-pilot-mcp = "phone_pilot.cli:main"
 phone-pilot-call = "phone_pilot.mcp_call:main"
 phone-pilot-web = "phone_pilot.web:_cli"
+phone-pilot-restore = "phone_pilot.scene_cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

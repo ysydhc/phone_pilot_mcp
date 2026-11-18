@@ -79,7 +79,9 @@ class TestDeviceLease(unittest.TestCase):
         self.assertEqual(rel_fail.get("error"), "permission_denied")
 
         # Session 2 forces release -> succeeds
-        rel_force = self.manager.release_lock(self.serial, session_id="session-2", force=True)
+        rel_force = self.manager.release_lock(
+            self.serial, session_id="session-2", force=True
+        )
         self.assertTrue(rel_force.get("ok"))
         self.assertTrue(rel_force.get("released"))
 
@@ -116,6 +118,7 @@ class TestDeviceLease(unittest.TestCase):
         now = time.time()
         import json
         from pathlib import Path
+
         meta_file = Path(self.test_dir) / f"{self.serial}.json"
         data = {
             "device_serial": self.serial,
@@ -137,15 +140,17 @@ class TestDeviceLease(unittest.TestCase):
         self.assertEqual(status.get("stale_reason"), "ttl_expired")
 
         # New session can now acquire immediately
-        res = self.manager.acquire_lock(self.serial, session_id="new-session", ttl_s=10.0)
+        res = self.manager.acquire_lock(
+            self.serial, session_id="new-session", ttl_s=10.0
+        )
         self.assertTrue(res.get("ok"))
         self.assertEqual(res.get("session_id"), "new-session")
 
     def test_context_manager(self):
         # Override global manager's lock dir temporarily
-        import sys
-        import phone_pilot.core.device_lease
-        dl_mod = sys.modules["phone_pilot.core.device_lease"]
+        import importlib
+
+        dl_mod = importlib.import_module("phone_pilot.core.device_lease")
         orig_mgr = dl_mod._lease_manager
         dl_mod._lease_manager = self.manager
         try:
@@ -166,6 +171,30 @@ class TestDeviceLease(unittest.TestCase):
             self.assertFalse(st_after.get("locked"))
         finally:
             dl_mod._lease_manager = orig_mgr
+
+    def test_symlink_meta_and_flock_rejected_without_following(self):
+        from pathlib import Path
+
+        victim = Path(self.test_dir).parent / f"victim_{os.getpid()}.txt"
+        victim.write_text("protected_data", encoding="utf-8")
+        try:
+            flock_file, meta_file = self.manager._get_paths(self.serial)
+            meta_file.symlink_to(victim)
+            st = self.manager.get_lock_status(self.serial)
+            self.assertFalse(st.get("ok"))
+            acq = self.manager.acquire_lock(self.serial, session_id="s1")
+            self.assertFalse(acq.get("ok"))
+            meta_file.unlink()
+            if flock_file.exists():
+                flock_file.unlink()
+
+            flock_file.symlink_to(victim)
+            acq2 = self.manager.acquire_lock(self.serial, session_id="s1")
+            self.assertFalse(acq2.get("ok"))
+            self.assertEqual(victim.read_text(encoding="utf-8"), "protected_data")
+        finally:
+            if victim.exists():
+                victim.unlink()
 
 
 if __name__ == "__main__":

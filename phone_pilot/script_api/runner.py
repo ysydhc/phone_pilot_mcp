@@ -878,6 +878,7 @@ def run_script(fn: Callable[[], int], *, ctx: Optional[ScriptContext] = None) ->
         if ctx is None:
             ctx = ScriptContext()
         import inspect
+
         sig = inspect.signature(fn)
         if len(sig.parameters) > 0:
             res = fn(ctx)
@@ -980,17 +981,11 @@ def _finalize_run(
     # ---- Stop meminfo sampler ----
     if _meminfo_sampler is not None:
         try:
-            import json as _json
-
             samples = _meminfo_sampler.stop()
             if samples:
                 session = ctx.session
                 if session:
-                    tl_path = session.meminfo_dir / "timeline.json"
-                    tl_path.write_text(
-                        _json.dumps({"samples": samples}, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
+                    session.save_meminfo("timeline", {"samples": samples})
                     _runner_log(
                         f"  [sampler] 已保存 {len(samples)} 个采样点到 timeline.json"
                     )
@@ -1001,7 +996,6 @@ def _finalize_run(
     if _perfetto_ctx and _perfetto_ctx.get("ok"):
         try:
             from phone_pilot.memory_analyze.perfetto_profiler import stop_and_analyze
-            import json as _json
             from ._helpers import _get_current_focus
 
             focus = _get_current_focus(ctx)
@@ -1011,11 +1005,7 @@ def _finalize_run(
                 result = stop_and_analyze(ctx.device_serial or "", trace_file, pkg)
                 session = ctx.session
                 if session and result.get("ok"):
-                    pf_path = session.meminfo_dir / "perfetto_analysis.json"
-                    pf_path.write_text(
-                        _json.dumps(result, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
+                    session.save_meminfo("perfetto_analysis", result)
                     _runner_log(
                         "  [perfetto] 分析完成，已保存到 perfetto_analysis.json"
                     )

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{ meta.script_name }} — {{ "PASSED" if meta.exit_code == 0 else "FAILED" }}</title>
+<title>{{ meta.script_name }} — 执行 {{ "EXIT 0" if meta.exit_code == 0 else "FAILED" }} · 业务 {{ business.summary.status if business else 'UNKNOWN' }}</title>
 <style>
 /* ---- Reset & Base ---- */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -172,7 +172,10 @@ a { color: var(--blue); text-decoration: none; }
   <a href="/" style="font-weight:700;color:var(--blue)" title="返回 Dashboard">&larr; Dashboard</a>
   <span style="color:var(--border)">|</span>
   <a href="#overview">概览</a>
-  <a href="#steps">步骤</a>
+  <a href="#steps">工具流水</a>
+  <a href="#business-overview">功能全景</a>
+  <a href="#business-steps">业务步骤</a>
+  <a href="#scene-restore">现场复原</a>
   {% if gallery_items %}<a href="#gallery">截图</a>{% endif %}
   {% if logcat_files or console_tail %}<a href="#logs">日志</a>{% endif %}
   {% if meminfo_files %}<a href="#memory">内存</a>{% endif %}
@@ -182,11 +185,11 @@ a { color: var(--blue); text-decoration: none; }
 <div class="container">
 
 <!-- Banner -->
-<div class="banner {{ 'passed' if meta.exit_code == 0 else 'failed' }}">
+<div class="banner {{ 'passed' if business and business.summary.status == 'PASS' and meta.exit_code == 0 else 'failed' }}">
   <div>
     <h1>{{ meta.script_name or "Script" }}</h1>
     <div class="meta-row">
-      <span>{{ "PASSED" if meta.exit_code == 0 else "FAILED" }}</span>
+      <span>执行 {{ "EXIT 0" if meta.exit_code == 0 else "FAILED" }} · 业务 {{ business.summary.status if business else 'UNKNOWN' }}</span>
       <span>{{ duration_display }}</span>
       <span>{{ meta.device.serial or "?" }} ({{ meta.device.platform or "?" }})</span>
       {% if meta.git.commit %}<span>{{ meta.git.branch or "" }}@{{ meta.git.commit }}{% if meta.git.dirty %} *{% endif %}</span>{% endif %}
@@ -195,11 +198,13 @@ a { color: var(--blue); text-decoration: none; }
   <span class="badge">{{ meta.started_at[:19] if meta.started_at else "" }}</span>
 </div>
 
+{% include 'business_report.html.j2' %}
+
 <!-- Overview Cards -->
 <div class="cards" id="overview">
   <!-- Steps pass rate -->
   <div class="card">
-    <h3>步骤通过率</h3>
+    <h3>工具调用通过率（非业务验收）</h3>
     <div class="big {{ 'green' if steps_pass_rate == 100 else ('red' if steps_pass_rate < 50 else 'amber') }}">{{ steps_pass_rate }}%</div>
     <div style="font-size:.85rem;color:var(--text2);margin-top:4px">{{ meta.steps.passed }}/{{ meta.steps.total }} 步通过</div>
     <div class="progress-bar">
@@ -299,8 +304,8 @@ a { color: var(--blue); text-decoration: none; }
       <div class="log-actions">
         <span style="color:var(--text2);font-size:.8rem;white-space:nowrap">{{ lf.lines }} 行 &middot; {{ lf.size_kb }}KB</span>
         {% if lf.abs_path %}
-        <button class="btn-sm" onclick="copyToClipboard('{{ lf.abs_path }}')">复制路径</button>
-        <button class="btn-sm" onclick="openInFinder('{{ lf.abs_dir }}')">在 Finder 中打开</button>
+        <button class="btn-sm" data-copy-path="{{ lf.abs_path }}" onclick="copyToClipboard(this.dataset.copyPath)">复制路径</button>
+        <button class="btn-sm" data-copy-path="{{ lf.abs_dir }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
         {% endif %}
       </div>
     </div>
@@ -311,8 +316,8 @@ a { color: var(--blue); text-decoration: none; }
     <h4 style="margin:16px 0 8px;font-size:.9rem">
       控制台输出（末尾 {{ console_tail_lines }} 行）
       {% if console_log_abs %}
-      <button class="btn-sm" style="margin-left:8px" onclick="copyToClipboard('{{ console_log_abs }}')">复制路径</button>
-      <button class="btn-sm" onclick="openInFinder('{{ run_dir_abs }}')">在 Finder 中打开</button>
+      <button class="btn-sm" style="margin-left:8px" data-copy-path="{{ console_log_abs }}" onclick="copyToClipboard(this.dataset.copyPath)">复制路径</button>
+      <button class="btn-sm" data-copy-path="{{ run_dir_abs }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
       {% endif %}
     </h4>
     <div class="log-preview">{{ console_tail }}</div>

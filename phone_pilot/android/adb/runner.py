@@ -40,7 +40,7 @@ def _current_log_level() -> int:
 
 from phone_pilot.core.log import (  # noqa: E402
     _log,
-    get_console_log_file,
+    write_console_log,
 )
 
 
@@ -146,14 +146,8 @@ class CommandRunner:
                 # normal: only print when there is a friendly label
                 _log(f"  {friendly}")
             # quiet (level 0): print nothing
-        _clf = get_console_log_file()
-        if _clf:
-            # Always write full command to console.log for debugging
-            try:
-                _clf.write(f"[cmd] {short}\n")
-                _clf.flush()
-            except Exception:
-                pass
+        # Always tee full commands, including silent commands, with IO failure tracking.
+        write_console_log(f"[cmd] {short}\n")
 
         try:
             proc = subprocess.run(
