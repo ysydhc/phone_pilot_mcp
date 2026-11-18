@@ -30,7 +30,7 @@ Usage:
     # Start: phone-pilot-mcp
 """
 
-__version__ = "0.10.1"
+__version__ = "0.11.0"
 
 # Convenience imports
 from phone_pilot.core import (
