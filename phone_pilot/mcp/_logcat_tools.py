@@ -129,7 +129,7 @@ def _phone_stop_logcat_sync(
         return err
 
     with _state_lock:
-        path = output_path or _logcat_state.pop(resolved_serial, "")
+        path = output_path or _logcat_state.get(resolved_serial, "")
     if not path:
         return {
             "ok": False,
@@ -137,18 +137,28 @@ def _phone_stop_logcat_sync(
             "device_serial": resolved_serial,
         }
 
-    # 若通过 output_path 指定，也需从状态中移除 / Remove from state when output_path provided
-    with _state_lock:
-        _logcat_state.pop(resolved_serial, None)
-
     try:
         plat = resolved_platform or "android"
         driver = get_driver(resolved_serial, plat)
         result = driver.stop_log_capture(path)
         result["device_serial"] = resolved_serial
+        result["path"] = path
+        if result.get("ok") or (
+            result.get("terminal") is True and result.get("stopped") is True
+        ):
+            # Keep retryable failures registered; terminal failures retain their source.
+            # An explicit stop of another path must not unregister the active capture.
+            with _state_lock:
+                if _logcat_state.get(resolved_serial) == path:
+                    _logcat_state.pop(resolved_serial, None)
         return result
     except Exception as e:
-        return {"ok": False, "error": str(e), "device_serial": resolved_serial}
+        return {
+            "ok": False,
+            "error": str(e),
+            "device_serial": resolved_serial,
+            "path": path,
+        }
 
 
 @mcp.tool()

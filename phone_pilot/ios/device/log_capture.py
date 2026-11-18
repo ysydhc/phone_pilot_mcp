@@ -9,13 +9,14 @@ stop_log_capture can find and terminate the right process. Form-factor split
 
 from __future__ import annotations
 
+import os
 import pathlib
-import subprocess
 
 from phone_pilot.ios.pmd import utils as pmd_utils
 
 # output_path → {"proc": Popen, "fh": file handle}
 _log_captures: dict[str, dict] = {}
+_retained_log_captures: dict[str, dict] = {}
 
 
 def _build_cmd(serial: str, *, level: str, process: str = "") -> list[str]:
@@ -55,6 +56,14 @@ def start_log_capture(
 
     Returns {"ok": True, "pid": int, "path": str} or an error envelope.
     """
+    if os.name != "posix":
+        return {
+            "ok": False,
+            "error": "log capture requires POSIX process groups",
+            "platform": "ios",
+        }
+    if output_path in _retained_log_captures:
+        return {"ok": False, "error": "retained_capture_use_new_path", "path": output_path, "platform": "ios"}
     if output_path in _log_captures:
         return {
             "ok": False,
@@ -82,38 +91,31 @@ def start_log_capture(
     )
     need_proc_grep = bool(proc_kw and not is_sim_predicate)
 
+    import re
+    from phone_pilot.core.capture_pipeline import start_pipeline
+
+    if include:
+        filters.append(["grep", "--line-buffered", "-E", "|".join(re.escape(t) for t in include)])
+    for ex in excludes:
+        filters.append(["grep", "--line-buffered", "-v", re.escape(ex)])
+    if need_proc_grep:
+        filters.append(["grep", "--line-buffered", re.escape(proc_kw)])
+    fh = None
     try:
         fh = open(out, "w", encoding="utf-8")
-        if include or excludes or need_proc_grep:
-            import re as _re
-
-            quoted_parts = [
-                f"'{part}'" if (" " in part or '"' in part) else part for part in cmd
-            ]
-            shell_cmd = " ".join(quoted_parts)
-            if include:
-                pat = "|".join(_re.escape(t) for t in include)
-                shell_cmd += f" | grep -E '{pat}'"
-            for ex in excludes:
-                shell_cmd += f" | grep -v '{_re.escape(ex)}'"
-            if need_proc_grep:
-                shell_cmd += f" | grep '{_re.escape(proc_kw)}'"
-            proc = subprocess.Popen(
-                shell_cmd, shell=True, stdout=fh, stderr=subprocess.DEVNULL
-            )
-            filters = [shell_cmd]
-        else:
-            proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.DEVNULL)
-    except Exception as exc:  # noqa: BLE001
+        info = start_pipeline(cmd, filters, fh)
+    except Exception as exc:
+        if fh is not None:
+            fh.close()
         return {"ok": False, "error": str(exc), "platform": "ios"}
-
-    _log_captures[output_path] = {"proc": proc, "fh": fh, "filters": filters}
+    _log_captures[output_path] = info
+    proc = info["proc"]
     return {"ok": True, "pid": proc.pid, "path": output_path}
 
 
 def stop_log_capture(serial: str, output_path: str) -> dict:
     """Stop background syslog capture for the given output_path; tolerate exit."""
-    info = _log_captures.pop(output_path, None)
+    info = _log_captures.get(output_path)
     if info is None:
         return {
             "ok": False,
@@ -121,22 +123,15 @@ def stop_log_capture(serial: str, output_path: str) -> dict:
             "platform": "ios",
         }
 
-    proc = info.get("proc")
-    fh = info.get("fh")
-    try:
-        if proc is not None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except Exception:
-                pass
-    except (ProcessLookupError, OSError):
-        pass
-    try:
-        if fh is not None:
-            fh.close()
-    except Exception:
-        pass
+    from phone_pilot.core.capture_pipeline import stop_pipeline
+
+    result = stop_pipeline(info)
+    if not result.get("ok"):
+        if result.get("terminal") is True and result.get("stopped") is True:
+            _retained_log_captures[output_path] = info
+            _log_captures.pop(output_path)
+        return {**result, "path": output_path, "platform": "ios"}
+    _log_captures.pop(output_path)
 
     lines = 0
     out = pathlib.Path(output_path)

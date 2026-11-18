@@ -65,21 +65,31 @@ class TestLogCaptureModule:
     def test_stop_terminates_and_counts_lines(self, tmp_path):
         out = tmp_path / "log.txt"
         out.write_text("line1\nline2\nline3\n", encoding="utf-8")
-        fake_proc = MagicMock()
-        log_capture._log_captures[str(out)] = {"proc": fake_proc, "fh": MagicMock()}
-        res = log_capture.stop_log_capture(SERIAL, str(out))
+        fake_proc = MagicMock(pid=4321)
+        log_capture._log_captures[str(out)] = {
+            "proc": fake_proc,
+            "pgid": 4321,
+            "fh": MagicMock(),
+        }
+        with patch("os.killpg") as signal_group:
+            signal_group.side_effect = [None, ProcessLookupError()]
+            res = log_capture.stop_log_capture(SERIAL, str(out))
         assert res["ok"] is True
         assert res["lines"] == 3
-        fake_proc.terminate.assert_called_once()
+        fake_proc.wait.assert_called_once()
         assert str(out) not in log_capture._log_captures
 
     def test_stop_tolerates_already_exited(self, tmp_path):
         out = tmp_path / "log.txt"
         out.write_text("x\n", encoding="utf-8")
-        fake_proc = MagicMock()
-        fake_proc.terminate.side_effect = ProcessLookupError()
-        log_capture._log_captures[str(out)] = {"proc": fake_proc, "fh": MagicMock()}
-        res = log_capture.stop_log_capture(SERIAL, str(out))
+        fake_proc = MagicMock(pid=4321)
+        log_capture._log_captures[str(out)] = {
+            "proc": fake_proc,
+            "pgid": 4321,
+            "fh": MagicMock(),
+        }
+        with patch("os.killpg", side_effect=ProcessLookupError()):
+            res = log_capture.stop_log_capture(SERIAL, str(out))
         assert res["ok"] is True
 
     def test_simulator_build_cmd_default_no_debug_and_process_predicate(self, tmp_path):
@@ -182,7 +192,9 @@ class TestDriverLogEntries:
         assert res["ok"] is True
         assert res["lines"] == 2
         mock_read.assert_called_once_with(lines=100)
-        assert (tmp_path / "dump.log").read_text(encoding="utf-8") == "log line 1\nlog line 2\n"
+        assert (tmp_path / "dump.log").read_text(
+            encoding="utf-8"
+        ) == "log line 1\nlog line 2\n"
 
     def test_dump_log_failure(self):
         drv = iOSDriver(SERIAL)

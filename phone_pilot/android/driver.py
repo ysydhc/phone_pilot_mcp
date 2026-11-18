@@ -780,10 +780,16 @@ class AndroidDriver:
         """Start background logcat capture to a file.
         启动后台 logcat 捕获，输出到文件。
         """
+        import os
         import re
-        import subprocess as _sp
         from phone_pilot.android.adb.utils import adb_prefix
 
+        # A shell pipeline cannot be stopped safely without a private process group.
+        if os.name != "posix":
+            return {"ok": False, "error": "log capture requires POSIX process groups"}
+
+        if output_path in getattr(self, "_retained_log_captures", {}):
+            return {"ok": False, "error": "retained_capture_use_new_path", "path": output_path}
         if not hasattr(self, "_log_captures"):
             self._log_captures: dict[str, dict] = {}
         if output_path in self._log_captures:
@@ -807,30 +813,26 @@ class AndroidDriver:
         )
         proc_kw = process.strip() if process else ""
 
+        from phone_pilot.core.capture_pipeline import start_pipeline
+
+        filters = []
+        if include_tags:
+            filters.append(["grep", "--line-buffered", "-E", "|".join(re.escape(t) for t in include_tags)])
+        for ex in exclude_list:
+            filters.append(["grep", "--line-buffered", "-v", re.escape(ex)])
+        if proc_kw:
+            filters.append(["grep", "--line-buffered", re.escape(proc_kw)])
+        fh = None
         try:
             fh = open(out, "w", encoding="utf-8")
-            if include_tags or exclude_list or proc_kw or (level and tags):
-                if include_tags:
-                    grep_pattern = "|".join(re.escape(t) for t in include_tags)
-                    shell_cmd = " ".join(logcat_cmd) + f" | grep -E '{grep_pattern}'"
-                else:
-                    shell_cmd = " ".join(logcat_cmd)
-                for ex in exclude_list:
-                    shell_cmd += f" | grep -v '{re.escape(ex)}'"
-                if proc_kw:
-                    shell_cmd += f" | grep '{re.escape(proc_kw)}'"
-                proc = _sp.Popen(shell_cmd, shell=True, stdout=fh, stderr=_sp.DEVNULL)
-            else:
-                proc = _sp.Popen(logcat_cmd, stdout=fh, stderr=_sp.DEVNULL)
+            info = start_pipeline(logcat_cmd, filters, fh)
         except Exception as e:
+            if fh is not None:
+                fh.close()
             return {"ok": False, "error": str(e)}
-
-        self._log_captures[output_path] = {
-            "proc": proc,
-            "fh": fh,
-            "exclude_tags": exclude_tags,
-            "process": process,
-        }
+        info.update(exclude_tags=exclude_tags, process=process)
+        self._log_captures[output_path] = info
+        proc = info["proc"]
         return {"ok": True, "pid": proc.pid, "path": output_path}
 
     def stop_log_capture(self, output_path: str) -> dict:
@@ -840,22 +842,18 @@ class AndroidDriver:
         if not hasattr(self, "_log_captures") or output_path not in self._log_captures:
             return {"ok": False, "error": f"no log capture running for {output_path}"}
 
-        info = self._log_captures.pop(output_path)
-        proc = info["proc"]
-        fh = info["fh"]
+        from phone_pilot.core.capture_pipeline import stop_pipeline
 
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-        try:
-            fh.close()
-        except Exception:
-            pass
+        info = self._log_captures[output_path]
+        result = stop_pipeline(info)
+        if not result.get("ok"):
+            if result.get("terminal") is True and result.get("stopped") is True:
+                if not hasattr(self, "_retained_log_captures"):
+                    self._retained_log_captures = {}
+                self._retained_log_captures[output_path] = info
+                self._log_captures.pop(output_path)
+            return {**result, "path": output_path}
+        self._log_captures.pop(output_path)
 
         # Post-process: apply exclude_tag filter in-place
         out = pathlib.Path(output_path)
