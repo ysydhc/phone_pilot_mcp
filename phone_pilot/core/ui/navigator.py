@@ -49,12 +49,14 @@ class UINavigator:
         state_provider: Callable[[], dict[str, Any]] | None = None,
         action_executor: Callable[[UIEdge, dict[str, Any]], dict[str, Any]] | None = None,
         popup_labels: Sequence[str] | None = None,
+        action_guard: Callable[[dict[str, Any]], bool] | None = None,
     ) -> None:
         self.graph = graph
         self.ctx = ctx
         self.driver = driver if driver is not None else getattr(ctx, "driver", None)
         self.state_provider = state_provider
         self.action_executor = action_executor
+        self.action_guard = action_guard
         self.popup_labels: tuple[str, ...] = (
             tuple(popup_labels) if popup_labels is not None else DEFAULT_POPUP_DISMISS_LABELS
         )
@@ -130,38 +132,7 @@ class UINavigator:
         if not state or node is None:
             return False
 
-        explicit_id = state.get("node_id")
-        if isinstance(explicit_id, str) and explicit_id == node.node_id:
-            # 若同时提供了页面元素/特征，校验特征未违背
-            sig = node.page_signature
-            if sig.required_elements or sig.forbidden_elements or sig.activity_or_controller or sig.extra_match_fn:
-                norm_state = self._normalize_state_for_signature(state, sig)
-                if state.get("elements") or state.get("all_texts") or state.get("activity") or state.get("view_controller"):
-                    return sig.matches(norm_state)
-            return True
-
-        sig = node.page_signature
-        has_sig_criteria = bool(
-            sig.required_elements
-            or sig.forbidden_elements
-            or sig.activity_or_controller
-            or sig.extra_match_fn
-        )
-        if has_sig_criteria:
-            norm_state = self._normalize_state_for_signature(state, sig)
-            if not sig.matches(norm_state):
-                return False
-            if node.activity_or_vc and not sig.activity_or_controller:
-                state_act = UIKnowledgeGraph._extract_activity_str(state)
-                if state_act and node.activity_or_vc not in state_act and state_act not in node.activity_or_vc:
-                    return False
-            return True
-
-        if node.activity_or_vc:
-            state_act = UIKnowledgeGraph._extract_activity_str(state)
-            return bool(state_act and (node.activity_or_vc in state_act or state_act in node.activity_or_vc))
-
-        return False
+        return self.graph.state_matches_node(state, node)
 
     def _matches_target(
         self,
@@ -174,18 +145,18 @@ class UINavigator:
             return False, None
 
         if isinstance(target, PageSignature):
+            # 调用者签名定义到达契约；图谱节点只用于规划和结果命名，不能覆盖约束。
             norm_state = self._normalize_state_for_signature(state, target)
             if target.matches(norm_state):
                 matched = self.graph.match_node(state) or target_node
                 resolved_id = matched.node_id if matched is not None else (target.name or None)
                 return True, resolved_id
-            if target_node is not None and self._state_matches_node(state, target_node):
-                return True, target_node.node_id
             return False, None
 
         # target 为字符串（node_id 或页面名）
-        if target_node is not None and self._state_matches_node(state, target_node):
-            return True, target_node.node_id
+        if target_node is not None:
+            matched = self._state_matches_node(state, target_node)
+            return matched, target_node.node_id if matched else None
 
         matched_node = self.graph.match_node(state)
         if matched_node is not None and (
@@ -254,7 +225,20 @@ class UINavigator:
         # 优先精确匹配，其次包含匹配
         for exact in (True, False):
             for el in elements:
-                if not isinstance(el, dict):
+                if not isinstance(el, dict) or el.get("visible") is False:
+                    continue
+                locator = criteria.get("resource_id") or criteria.get("identifier")
+                if locator and locator not in (el.get("resource_id"), el.get("identifier")):
+                    continue
+                if locator:
+                    # 重复列表行 ID 必须与每个提供的文本判别字段共同命中。
+                    text_queries = [(key, query) for key, query in target_queries
+                                    if key not in ("resource_id", "identifier")]
+                    values = [el.get(key) for key in ("text", "label", "content_desc", "name")]
+                    if all(any(isinstance(value, str) and (
+                        value.strip() == query if exact else query in value.strip()
+                    ) for value in values) for _, query in text_queries):
+                        return el
                     continue
                 for key, query in target_queries:
                     candidate_vals = [
@@ -308,6 +292,27 @@ class UINavigator:
 
         return {"ok": True, "center": center, "text": text}
 
+    @staticmethod
+    def _scroll_identity_matches(before: dict[str, Any], after: dict[str, Any], source: Optional[UINode]) -> bool:
+        """滚动期间只校验稳定身份，菜单首屏文本与视口骨架允许变化。"""
+        before_act = UIKnowledgeGraph._extract_activity_str(before) or (source.activity_or_vc if source else "")
+        after_act = UIKnowledgeGraph._extract_activity_str(after)
+        if before_act:
+            if before_act != after_act:
+                return False
+        elif source is None or not UIKnowledgeGraph().state_matches_node(after, source):
+            return False
+        before_frag = UIKnowledgeGraph._extract_active_fragment(before) or (source.active_fragment if source else "")
+        if before_frag and UIKnowledgeGraph._extract_active_fragment(after) != before_frag:
+            return False
+        before_selected = UIKnowledgeGraph._selected_labels(before.get("elements"))
+        after_selected = UIKnowledgeGraph._selected_labels(after.get("elements"))
+        if before_selected and after_selected and before_selected != after_selected:
+            return False
+        if after.get("window_type") == "modal" or after.get("node_type") == "modal":
+            return False
+        return True
+
     def _execute_edge(self, edge: UIEdge, state: dict[str, Any]) -> dict[str, Any]:
         """在当前状态上执行 UIEdge 定义的交互动作。"""
         if self.action_executor is not None:
@@ -319,6 +324,24 @@ class UINavigator:
 
         if action_type == "tap":
             matched_el = self._find_element_for_criteria(criteria, state)
+            # scroll_page 是定位提示，不是可直接点击的旧坐标；逐屏刷新 UI 树。
+            try:
+                scroll_page = max(0, int(criteria.get("scroll_page") or 0))
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "invalid_scroll_page"}
+            initial_state = state
+            for _ in range(min(scroll_page, 20)):
+                if matched_el is not None:
+                    break
+                if not self._perform_relative_swipe(state, direction="up"):
+                    return {"ok": False, "error": "scroll_unavailable"}
+                state = self.get_current_state()
+                source = self.graph.get_node(edge.source_id)
+                if not self._scroll_identity_matches(initial_state, state, source):
+                    return {"ok": False, "error": "page_drift_while_scrolling"}
+                matched_el = self._find_element_for_criteria(criteria, state)
+            if scroll_page and matched_el is None:
+                return {"ok": False, "error": "scroll_target_not_found"}
             center = self._compute_element_center(matched_el) if matched_el else None
             label = (
                 criteria.get("text")
@@ -454,6 +477,11 @@ class UINavigator:
 
     def _perform_relative_swipe(self, state: dict[str, Any], direction: str = "up") -> bool:
         """基于屏幕几何尺寸比例动态计算滑动起止点，严禁写死像素坐标。"""
+        if self.action_guard is not None:
+            fresh = self.get_current_state()
+            if not self.action_guard(fresh):
+                return False
+            state = fresh
         screen_w: Optional[int] = None
         screen_h: Optional[int] = None
 
@@ -500,6 +528,8 @@ class UINavigator:
 
     def _try_scroll(self, state: dict[str, Any]) -> bool:
         """尝试在当前页面上执行滚动以露出未见元素。"""
+        if self.action_guard is not None and not self.action_guard(self.get_current_state()):
+            return False
         if self._perform_relative_swipe(state, direction="up"):
             return True
 
@@ -510,8 +540,11 @@ class UINavigator:
                 action_type="swipe",
                 trigger_criteria={"direction": "up", "is_scroll_retry": True},
             )
-            self.action_executor(scroll_edge, state)
-            return True
+            fresh = self.get_current_state() if self.action_guard is not None else state
+            if self.action_guard is not None and not self.action_guard(fresh):
+                return False
+            result = self.action_executor(scroll_edge, fresh)
+            return bool(result.get("ok", False)) if isinstance(result, dict) else bool(result)
 
         return False
 

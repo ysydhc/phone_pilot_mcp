@@ -12,7 +12,7 @@ from phone_pilot.core.ui.explorer import AppExplorer
 from phone_pilot.core.ui.graph import UIKnowledgeGraph
 from phone_pilot.core.ui.navigator import UINavigator
 from phone_pilot.core.ui.projection import project_page_state
-from phone_pilot.mcp._helpers import _resolve_device_serial, get_driver
+from phone_pilot.mcp._helpers import _resolve_device_serial, _with_device, get_driver
 from phone_pilot.mcp._page_state_tools import phone_get_page_state
 from phone_pilot.mcp.server import mcp
 
@@ -105,7 +105,10 @@ async def phone_get_focused_state(
             return {"ok": False, "error": "invalid_page_state"}
         if not raw_state.get("ok", True):
             if "error" not in raw_state:
-                return {**raw_state, "error": str(raw_state.get("reason") or "page_state_failed")}
+                return {
+                    **raw_state,
+                    "error": str(raw_state.get("reason") or "page_state_failed"),
+                }
             return raw_state
 
         projected = project_page_state(
@@ -139,7 +142,11 @@ async def phone_navigate_to(
     Navigate to target_node_id using UIKnowledgeGraph shortest-path planning and 3-tier self-healing.
     """
     if not target_node_id or not str(target_node_id).strip():
-        return {"ok": False, "error": "target_node_id is required", "reason": "invalid_target"}
+        return {
+            "ok": False,
+            "error": "target_node_id is required",
+            "reason": "invalid_target",
+        }
 
     try:
         if graph_data is not None:
@@ -227,7 +234,12 @@ async def phone_explore_app(
     package_or_bundle: str = "",
     max_depth: int = 3,
     max_pages: int = 15,
-    max_branches_per_page: int = 4,
+    max_branches_per_page: int = 100,
+    lock_package: bool = True,
+    mermaid_mode: str = "detailed",
+    enable_scroll_stitch: bool = True,
+    max_scroll_pages: int = 2,
+    inspect_package_routes: bool = True,
     save_path: str = "",
     device_serial: str = "",
     platform: str = "auto",
@@ -235,28 +247,45 @@ async def phone_explore_app(
     """一键启发式探索指定应用或当前前台应用，自动遍历页面并构建生成页面知识图谱与脑图（Mindmap/Mermaid/JSON）。
     One-click heuristic exploration of an app: roam clickable paths, build UIKnowledgeGraph, and generate Mermaid/Mindmap.
     """
-    try:
-        driver = None
-        resolved_serial, resolved_platform, err = _resolve_device_serial(
-            device_serial or None, platform
-        )
-        if not err and resolved_serial:
-            driver = get_driver(resolved_serial, resolved_platform or "android")
-
-        if driver is None:
-            return {"ok": False, "error": "device_driver_unavailable"}
+    def _run_exploration(resolved_serial: str, resolved_platform: str) -> dict:
+        driver = get_driver(resolved_serial, resolved_platform or "android")
 
         if package_or_bundle and hasattr(driver, "app"):
-            try:
-                driver.app.start(package_or_bundle)
-            except Exception as exc:
-                _log(f"[phone_explore_app] start app {package_or_bundle} failed: {exc}")
+            app_drv = driver.app
+            launched = False
+            for method_name in ("launch_app", "launch", "start"):
+                fn = getattr(app_drv, method_name, None)
+                if callable(fn):
+                    try:
+                        if method_name == "launch_app":
+                            launch_result = fn(package_or_bundle, None)
+                        else:
+                            launch_result = fn(package_or_bundle)
+                        if AppExplorer._action_succeeded(launch_result):
+                            launched = True
+                            break
+                    except Exception as exc:
+                        _log(
+                            f"[phone_explore_app] {method_name} app {package_or_bundle} failed: {exc}"
+                        )
+            if not launched:
+                return {"ok": False, "error": "target_app_launch_failed"}
 
-        explorer = AppExplorer(driver=driver)
+        explorer = AppExplorer(
+            driver=driver,
+            target_package=package_or_bundle or None,
+            lock_package=lock_package,
+        )
         result = explorer.explore(
             max_depth=max_depth,
             max_pages=max_pages,
             max_branches_per_page=max_branches_per_page,
+            target_package=package_or_bundle or None,
+            lock_package=lock_package,
+            mermaid_mode=mermaid_mode,
+            enable_scroll_stitch=enable_scroll_stitch,
+            max_scroll_pages=max_scroll_pages,
+            inspect_package_routes=inspect_package_routes,
         )
 
         if save_path and result.get("ok"):
@@ -264,6 +293,12 @@ async def phone_explore_app(
             result["saved_to"] = save_path
 
         return result
+
+    try:
+        import asyncio
+
+        # 长时探索在后台线程运行，先使用共用租约检查，避免阻塞 MCP 事件循环。
+        return await asyncio.to_thread(_with_device, _run_exploration, device_serial or None, platform)
     except Exception as e:
         return {"ok": False, "error": str(e), "reason": "exception"}
 
@@ -371,6 +406,7 @@ async def phone_save_ui_graph(
 async def phone_load_ui_graph(
     path: str = "",
     graph_data: dict | None = None,
+    mermaid_mode: str = "detailed",
 ) -> dict:
     """加载本地知识图谱文件，并导出 Mermaid 结构与脑图数据字典。
     Load UIKnowledgeGraph from file or dict, returning Mermaid markup and mindmap tree structure.
@@ -383,11 +419,21 @@ async def phone_load_ui_graph(
         else:
             return {"ok": False, "error": "either path or graph_data must be provided"}
 
+        mermaid_compact = ui_graph.to_mermaid(mode="compact")
+        mermaid_detailed = ui_graph.to_mermaid(mode="detailed")
+        mermaid_out = (
+            mermaid_detailed
+            if str(mermaid_mode).strip().lower()
+            in ("detailed", "detail", "full", "verbose")
+            else mermaid_compact
+        )
         return {
             "ok": True,
             "nodes_count": len(ui_graph.nodes),
             "edges_count": len(ui_graph.edges),
-            "mermaid": ui_graph.to_mermaid(),
+            "mermaid": mermaid_out,
+            "mermaid_compact": mermaid_compact,
+            "mermaid_detailed": mermaid_detailed,
             "mindmap": ui_graph.to_mindmap_dict(),
             "graph": ui_graph.export_graph_json(),
         }
@@ -423,5 +469,3 @@ async def phone_generate_dashboard(
         }
     except Exception as e:
         return {"ok": False, "error": str(e), "reason": "exception"}
-
-
