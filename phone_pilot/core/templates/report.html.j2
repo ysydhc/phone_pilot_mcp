@@ -177,7 +177,7 @@ a { color: var(--blue); text-decoration: none; }
   <a href="#business-steps">业务步骤</a>
   <a href="#scene-restore">现场复原</a>
   {% if gallery_items %}<a href="#gallery">截图</a>{% endif %}
-  {% if logcat_files or console_tail %}<a href="#logs">日志</a>{% endif %}
+  {% if logcat_files or key_acceptance_logs or console_tail %}<a href="#logs">日志</a>{% endif %}
   {% if meminfo_files %}<a href="#memory">内存</a>{% endif %}
   {% if healing_events %}<a href="#healing">自愈</a>{% endif %}
 </nav>
@@ -195,7 +195,12 @@ a { color: var(--blue); text-decoration: none; }
       {% if meta.git.commit %}<span>{{ meta.git.branch or "" }}@{{ meta.git.commit }}{% if meta.git.dirty %} *{% endif %}</span>{% endif %}
     </div>
   </div>
-  <span class="badge">{{ meta.started_at[:19] if meta.started_at else "" }}</span>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <button type="button" class="badge" style="cursor:pointer;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.22);color:#fff;font-weight:700;" onclick="if(window.copyMarkdownSummary)window.copyMarkdownSummary()">
+      📋 一键复制验收结论 (贴 iCafe / IM)
+    </button>
+    <span class="badge">{{ meta.started_at[:19] if meta.started_at else "" }}</span>
+  </div>
 </div>
 
 {% include 'business_report.html.j2' %}
@@ -240,6 +245,57 @@ a { color: var(--blue); text-decoration: none; }
   {% endif %}
 </div>
 
+{% if recordings %}
+<!-- Screen Recordings -->
+<div class="section" id="recordings">
+  <div class="section-header" onclick="toggleSection(this)">
+    全流程真机录屏回放 ({{ recordings|length }})
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body">
+    <div style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center;padding:12px 0;">
+      {% for rec in recordings %}
+      <div style="flex:1;min-width:280px;max-width:480px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:14px;box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span style="font-weight:600;font-size:0.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ rec.filename }}">{{ rec.filename }}</span>
+          <span style="font-size:0.8rem;color:var(--text2);">{{ rec.size_mb }} MB</span>
+        </div>
+        <div style="border-radius:8px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;">
+          <video {% if loop.first %}id="main-recording-video"{% endif %} controls preload="metadata" style="width:100%;max-height:560px;object-fit:contain;" src="{{ rec.rel_path }}"></video>
+        </div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:4px;">
+            <span style="font-size:.75rem;color:var(--text2);font-weight:600;">审片倍速:</span>
+            <button type="button" class="btn-sm vid-speed-btn" data-speed="1" onclick="setVideoSpeed(1.0, this)">1.0x</button>
+            <button type="button" class="btn-sm vid-speed-btn" data-speed="1.5" onclick="setVideoSpeed(1.5, this)" style="border-color:var(--blue);color:var(--blue);font-weight:700;">1.5x 推荐</button>
+            <button type="button" class="btn-sm vid-speed-btn" data-speed="2" onclick="setVideoSpeed(2.0, this)">2.0x</button>
+          </div>
+          <span id="video-chapter-active" style="display:none;font-size:.78rem;color:var(--blue);font-weight:700;"></span>
+          <a class="btn-sm" href="{{ rec.rel_path }}" download style="text-decoration:none;margin-left:auto;">下载视频</a>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if scene.scenes and scene.scenes|length > 1 %}
+      <div style="flex:1;min-width:280px;max-width:520px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;">
+        <div style="font-weight:700;font-size:.92rem;color:var(--text);">🎬 场景录像章节导航（点击直接跳转到对应秒数播放）</div>
+        <div style="font-size:.78rem;color:var(--text2);">当前长视频包含 {{ scene.scenes|length }} 个子场景实录，点击下方任意章节可直接定位进度条：</div>
+        <div class="video-chapter-bar" style="margin-top:2px;">
+          {% for sc in scene.scenes %}
+          <button type="button" class="video-chapter-pill {{ 'fail' if sc.status != 'PASS' else '' }}" onclick="if(window.seekVideoToScene)window.seekVideoToScene({{ sc.video_offset_s }}, '{{ sc.title|e }}')">
+            <span>{{ '✖' if sc.status != 'PASS' else '▶' }}</span>
+            <span style="font-family:monospace;">{{ sc.video_time_label }}</span>
+            <span>#{{ sc.index }} {{ sc.title }}</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <!-- Steps Timeline -->
 <div class="section" id="steps">
   <div class="section-header" onclick="toggleSection(this)">
@@ -270,14 +326,23 @@ a { color: var(--blue); text-decoration: none; }
 {% if gallery_items %}
 <div class="section" id="gallery">
   <div class="section-header" onclick="toggleSection(this)">
-    截图画廊 ({{ gallery_items|length }})
-    <span class="chevron">&#9660;</span>
+    <span>截图画廊与点击落点标注 ({{ gallery_items|length }})</span>
+    <span style="display:flex;align-items:center;gap:10px;" onclick="event.stopPropagation();">
+      <button type="button" class="btn-sm" onclick="toggleBullseyeOverlay(this)">🎯 隐藏点击靶心</button>
+      <span class="chevron" onclick="toggleSection(this.closest('.section-header'))">&#9660;</span>
+    </span>
   </div>
   <div class="section-body">
-    <div class="gallery">
+    <div class="gallery" id="screenshot-gallery-grid">
       {% for gi in gallery_items %}
       <div>
-        <img src="screenshots/{{ gi.filename }}" alt="{{ gi.filename }}" data-idx="{{ loop.index0 }}" onclick="openLightbox({{ loop.index0 }})">
+        <div class="shot-annot-wrap" style="border:none;background:transparent;">
+          <img src="screenshots/{{ gi.filename }}" alt="{{ gi.filename }}" data-idx="{{ loop.index0 }}" onclick="openLightbox({{ loop.index0 }})">
+          {% if gi.annotation and gi.annotation.has_coords %}
+          <div class="tap-bullseye gallery-bullseye" style="left:{{ gi.annotation.tap_x_pct }}%;top:{{ gi.annotation.tap_y_pct }}%;"></div>
+          <div class="tap-bullseye-tag gallery-bullseye" style="left:{{ gi.annotation.tap_x_pct }}%;top:{{ gi.annotation.tap_y_pct }}%;">{{ gi.annotation.label }}</div>
+          {% endif %}
+        </div>
         <div class="caption">
           {% if gi.step_num %}<span class="cap-step">{{ gi.step_num }}</span> {{ gi.step_action or "" }}{% if gi.step_detail %}: {{ gi.step_detail }}{% endif %}{% else %}{{ gi.filename }}{% endif %}
         </div>
@@ -289,38 +354,66 @@ a { color: var(--blue); text-decoration: none; }
 {% endif %}
 
 <!-- Logs -->
-{% if logcat_files or console_tail %}
+{% if logcat_files or key_acceptance_logs or console_tail %}
 <div class="section" id="logs">
   <div class="section-header" onclick="toggleSection(this)">
-    日志
+    日志与关键业务判定
     <span class="chevron">&#9660;</span>
   </div>
   <div class="section-body">
     {% if logcat_files %}
-    <h4 style="margin-bottom:8px;font-size:.9rem">Logcat 文件</h4>
+    <h4 style="margin-bottom:8px;font-size:.9rem">📄 Logcat 原始日志文件</h4>
     {% for lf in logcat_files %}
     <div class="log-file-item">
-      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis">{{ lf.name }}</span>
+      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:.82rem;">{{ lf.name }}</span>
       <div class="log-actions">
         <span style="color:var(--text2);font-size:.8rem;white-space:nowrap">{{ lf.lines }} 行 &middot; {{ lf.size_kb }}KB</span>
+        {% if lf.rel_path %}
+        <a class="btn-sm" href="{{ lf.rel_path }}" target="_blank" style="text-decoration:none">在浏览器查看</a>
+        {% endif %}
         {% if lf.abs_path %}
         <button class="btn-sm" data-copy-path="{{ lf.abs_path }}" onclick="copyToClipboard(this.dataset.copyPath)">复制路径</button>
-        <button class="btn-sm" data-copy-path="{{ lf.abs_dir }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
+        <button class="btn-sm" data-copy-path="{{ lf.abs_path }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
         {% endif %}
       </div>
     </div>
     {% endfor %}
     {% endif %}
 
+    {% if key_acceptance_logs %}
+    <div style="margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+        <h4 style="margin:0;font-size:.92rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span>🎯 关键业务判定日志（SDK 生命周期回调 / 曝光计费 / 商业化上报）</span>
+          <span style="font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--green-bg);color:var(--green);">已提纯 {{ key_acceptance_log_count }} 条核心日志 · 自动剔除 ADB 轮询噪音</span>
+        </h4>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <input type="text" id="key-log-filter" placeholder="🔍 过滤关键字 (如 LOAD_SUCCESS / IMPRESSION / s_vld)" oninput="filterKeyAcceptanceLogs(this.value)" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.78rem;width:280px;outline:none;">
+          <button class="btn-sm" onclick="copyToClipboard(document.getElementById('key-acceptance-log-preview').textContent)">复制关键日志</button>
+          {% if console_log_abs %}
+          <button class="btn-sm" data-copy-path="{{ console_log_abs }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
+          {% elif run_dir_abs %}
+          <button class="btn-sm" data-copy-path="{{ run_dir_abs }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
+          {% endif %}
+        </div>
+      </div>
+      <div class="log-preview" id="key-acceptance-log-preview" data-raw-logs="{{ key_acceptance_logs|e }}" style="max-height:380px;color:#d1fae5;border:1px solid #1e293b;">{{ key_acceptance_logs }}</div>
+    </div>
+    {% endif %}
+
     {% if console_tail %}
-    <h4 style="margin:16px 0 8px;font-size:.9rem">
-      控制台输出（末尾 {{ console_tail_lines }} 行）
-      {% if console_log_abs %}
-      <button class="btn-sm" style="margin-left:8px" data-copy-path="{{ console_log_abs }}" onclick="copyToClipboard(this.dataset.copyPath)">复制路径</button>
-      <button class="btn-sm" data-copy-path="{{ run_dir_abs }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
-      {% endif %}
-    </h4>
-    <div class="log-preview">{{ console_tail }}</div>
+    <details style="margin-top:14px;border:1px solid var(--border);border-radius:8px;padding:10px 14px;background:var(--bg);">
+      <summary style="cursor:pointer;font-size:.84rem;font-weight:600;color:var(--text2);user-select:none;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <span>🛠️ 展开查看底层控制台原始流水（末尾 {{ console_tail_lines }} 行 · 含 ADB 命令与轮询记录，日常验收无需关注）</span>
+        <span style="display:flex;gap:6px;" onclick="event.stopPropagation();">
+          {% if console_log_abs %}
+          <button class="btn-sm" data-copy-path="{{ console_log_abs }}" onclick="copyToClipboard(this.dataset.copyPath)">复制路径</button>
+          <button class="btn-sm" data-copy-path="{{ console_log_abs }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
+          {% endif %}
+        </span>
+      </summary>
+      <div class="log-preview" style="margin-top:10px;">{{ console_tail }}</div>
+    </details>
     {% endif %}
   </div>
 </div>
@@ -606,6 +699,8 @@ a { color: var(--blue); text-decoration: none; }
 </div>
 {% endif %}
 
+{% include 'scene_restore_drawer.html.j2' %}
+
 <!-- Footer -->
 <div class="footer">
   {% if meta.git.commit %}git {{ meta.git.branch or "" }}@{{ meta.git.commit }}{% if meta.git.dirty %} (dirty, {{ meta.git.dirty_files_count }} files){% endif %} &middot; {% endif %}
@@ -699,14 +794,96 @@ function _fallbackCopy(text) {
   document.body.removeChild(ta);
 }
 
-/* Open directory in Finder (only works from file:// protocol) */
+/* Open file or directory in macOS Finder */
 function openInFinder(dirPath) {
-  /* For file:// protocol pages, attempt to open via link; for http:// just copy path */
-  if (window.location.protocol === 'file:') {
-    window.open('file://' + dirPath, '_blank');
+  if (!dirPath) return;
+  if (window.location.protocol !== 'file:') {
+    fetch('/api/open-finder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: new URLSearchParams({ path: dirPath })
+    })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        if (res.ok && res.data && res.data.ok) {
+          showToast('📂 已在 macOS Finder 中打开并定位目标文件');
+        } else {
+          copyToClipboard(dirPath);
+          showToast('已复制路径: ' + dirPath);
+        }
+      })
+      .catch(function() {
+        copyToClipboard(dirPath);
+        showToast('已复制路径: ' + dirPath);
+      });
   } else {
-    copyToClipboard(dirPath);
-    showToast('路径已复制（通过 Web 服务打开时无法直接跳转 Finder）');
+    /* file:// protocol: try local web service on 127.0.0.1:8686 first, fallback to copy */
+    fetch('http://127.0.0.1:8686/api/open-finder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: new URLSearchParams({ path: dirPath })
+    })
+      .then(function(r) {
+        if (r.ok) {
+          showToast('📂 已在 macOS Finder 中打开并定位目标文件');
+        } else {
+          copyToClipboard(dirPath);
+        }
+      })
+      .catch(function() {
+        copyToClipboard(dirPath);
+        showToast('已复制路径（启动 Web 控制台后可直接唤起 Finder）');
+      });
+  }
+}
+
+/* Filter key acceptance logs by keyword (preserving syntax highlighting) */
+function filterKeyAcceptanceLogs(keyword) {
+  var box = document.getElementById('key-acceptance-log-preview');
+  if (!box) return;
+  var raw = box.getAttribute('data-raw-logs') || '';
+  var q = (keyword || '').trim().toLowerCase();
+  var textOut = raw;
+  if (q) {
+    var matched = raw.split('\n').filter(function(line) {
+      return line.toLowerCase().indexOf(q) !== -1;
+    });
+    textOut = matched.length ? matched.join('\n') : '（未找到包含 "' + keyword + '" 的关键日志）';
+  }
+  if (window.highlightLogHtml) {
+    box.innerHTML = window.highlightLogHtml(textOut);
+  } else {
+    box.textContent = textOut;
+  }
+}
+
+/* Set playback rate on all recording videos */
+function setVideoSpeed(rate, btnEl) {
+  document.querySelectorAll('#recordings video').forEach(function(v) {
+    v.playbackRate = Number(rate) || 1.0;
+  });
+  document.querySelectorAll('.vid-speed-btn').forEach(function(b) {
+    b.style.borderColor = '';
+    b.style.color = '';
+    b.style.fontWeight = '';
+  });
+  if (btnEl) {
+    btnEl.style.borderColor = 'var(--blue)';
+    btnEl.style.color = 'var(--blue)';
+    btnEl.style.fontWeight = '700';
+  }
+  showToast('⚡ 视频审片倍速已切换为 ' + rate + 'x');
+}
+
+/* Toggle tap bullseye overlays in screenshot gallery */
+var _bullseyeVisible = true;
+function toggleBullseyeOverlay(btnEl) {
+  _bullseyeVisible = !_bullseyeVisible;
+  document.querySelectorAll('.gallery-bullseye').forEach(function(el) {
+    el.style.display = _bullseyeVisible ? '' : 'none';
+  });
+  if (btnEl) {
+    btnEl.textContent = _bullseyeVisible ? '🎯 隐藏点击靶心' : '🎯 显示点击靶心';
   }
 }
 

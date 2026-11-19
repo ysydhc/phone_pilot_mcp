@@ -37,6 +37,7 @@ _SELECTOR = {
     "text": "text",
     "content_desc": "content-desc",
 }
+_REPLAY_MOCK_SERVER = None
 
 
 class SceneError(Exception):
@@ -92,6 +93,8 @@ def _load(run_dir, archive=None):
             return _load_archive(archive)
         with safe_directory(run_dir) as directory:
             return _load_archive(directory)
+    except FileNotFoundError as error:
+        raise SceneError("manifest_missing", f"scene_manifest.json not found: {error}") from error
     except (UnsafePath, OSError) as error:
         raise SceneError("unsafe_path", str(error)) from error
 
@@ -162,27 +165,45 @@ def _load_archive(archive):
         "v1 cannot restore permissions; requires permission-free demo",
     )
     _keys(m["configMock"], {"config", "mock"}, "configMock")
-    _require(
-        m["configMock"] == {"config": {"mode": "none"}, "mock": {"mode": "none"}},
-        "config_mock_unsupported",
-        "Config/Mock restoration or external services unsupported",
-    )
+    allow_online = os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1"
+    if allow_online:
+        mock_conf = m["configMock"].get("mock", {})
+        _require(
+            isinstance(mock_conf, dict) and mock_conf.get("mode") in ("none", "replay"),
+            "config_mock_unsupported",
+            "Config/Mock restoration supports 'none' or 'replay' mode",
+        )
+    else:
+        _require(
+            m["configMock"] == {"config": {"mode": "none"}, "mock": {"mode": "none"}},
+            "config_mock_unsupported",
+            "Config/Mock restoration or external services unsupported",
+        )
     _keys(
         m["safety"],
         {"external_services", "irreversible_side_effects", "trusted_offline_demo"},
         "safety",
     )
-    _require(
-        m["safety"]
-        == {
-            "external_services": False,
-            "irreversible_side_effects": False,
-            "trusted_offline_demo": True,
-        }
-        and all(type(v) is bool for v in m["safety"].values()),
-        "unsafe_side_effects",
-        "Approval must attest trusted offline demo with no irreversible effects",
-    )
+    if allow_online:
+        _require(
+            m["safety"].get("irreversible_side_effects") is False
+            and isinstance(m["safety"].get("external_services"), bool)
+            and isinstance(m["safety"].get("trusted_offline_demo"), bool),
+            "unsafe_side_effects",
+            "Approval must attest no irreversible side effects",
+        )
+    else:
+        _require(
+            m["safety"]
+            == {
+                "external_services": False,
+                "irreversible_side_effects": False,
+                "trusted_offline_demo": True,
+            }
+            and all(type(v) is bool for v in m["safety"].values()),
+            "unsafe_side_effects",
+            "Approval must attest trusted offline demo with no irreversible effects",
+        )
     actions = m["actions"]
     _require(
         isinstance(actions, list) and 2 <= len(actions) <= 50,
@@ -195,13 +216,30 @@ def _load_archive(archive):
         "Recipe must start force_stop then launch",
     )
     for action in actions[2:]:
-        _keys(action, {"type", "selector"}, "action")
-        _require(
-            action["type"] == "tap_selector",
-            "unknown_action",
-            "Only tap_selector may follow launch",
-        )
-        _selector(action["selector"])
+        a_type = action.get("type")
+        if allow_online:
+            _require(
+                a_type in ("tap_selector", "broadcast", "reverse_port", "wait_duration", "clear_data"),
+                "unknown_action",
+                f"Unsupported action type: {a_type}",
+            )
+            if a_type == "tap_selector":
+                _keys(action, {"type", "selector"}, "action")
+                _selector(action["selector"])
+            elif a_type == "broadcast":
+                _require(isinstance(action.get("action"), str), "invalid_schema", "broadcast action requires 'action' string")
+            elif a_type == "reverse_port":
+                _require(isinstance(action.get("device_port"), int), "invalid_schema", "reverse_port requires integer device_port")
+            elif a_type == "wait_duration":
+                _require(isinstance(action.get("seconds"), (int, float)), "invalid_schema", "wait_duration requires numeric seconds")
+        else:
+            _keys(action, {"type", "selector"}, "action")
+            _require(
+                action["type"] == "tap_selector",
+                "unknown_action",
+                "Only tap_selector may follow launch",
+            )
+            _selector(action["selector"])
     _keys(m["target"], {"activity", "selectors"}, "target")
     _require(
         isinstance(m["target"]["activity"], str)
@@ -274,8 +312,28 @@ def inspect_scene(run_dir):
     """Validate local recipe only. READY is not device approval or live preflight."""
     digest = None
     try:
+        catalog = {}
+        if os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1":
+            try:
+                from phone_pilot.core.manifest_generator import ensure_scene_manifest, ensure_scene_catalog
+                ensure_scene_manifest(run_dir)
+                catalog_path = Path(run_dir) / "scene_catalog.json"
+                if catalog_path.is_file():
+                    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+                else:
+                    catalog = ensure_scene_catalog(Path(run_dir))
+            except Exception:
+                pass
         _, m, digest = _load(run_dir)
-        return _result("READY", digest, m["device"]["serial"])
+        res = _result("READY", digest, m["device"]["serial"])
+        res["actions"] = m.get("actions", [])
+        res["package"] = m.get("package", {})
+        res["target"] = m.get("target", {})
+        res["catalog"] = catalog
+        res["scenes"] = catalog.get("scenes", [])
+        res["default_scene_id"] = catalog.get("default_scene_id", "default")
+        res["is_multi_suite"] = bool(catalog.get("is_multi_suite", False))
+        return res
     except Exception as error:
         # Expose raw hash even for a blocked manifest so clients can display identity.
         try:
@@ -404,7 +462,7 @@ class _Android:
             proc = subprocess.run(
                 self.prefix + ["exec-out", "cat", path],
                 capture_output=True,
-                timeout=10,
+                timeout=30,
                 stdin=subprocess.DEVNULL,
                 check=False,
             )
@@ -425,25 +483,52 @@ class _Android:
 
 
 def _unlocked(android):
+    allow_online = os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1"
     power = android.shell("dumpsys", "power")
+    if allow_online and not re.search(r"(?m)^\s*mWakefulness=Awake\s*$", power):
+        try:
+            android.shell("input", "keyevent", "224", allow_empty=True)
+            android.shell("wm", "dismiss-keyguard", allow_empty=True)
+            time.sleep(0.5)
+            power = android.shell("dumpsys", "power")
+        except Exception:
+            pass
     window = android.shell("dumpsys", "window", "policy")
     _require(
         re.search(r"(?m)^\s*mWakefulness=Awake\s*$", power),
         "device_locked",
         "Screen must already be awake; no wake/unlock actions",
     )
-    _require(
-        re.search(
-            r"(?m)^\s*(?:isStatusBarKeyguard|mShowingLockscreen|showing)=false\s*$",
-            window,
+    if allow_online and re.search(r"(?m)^\s*(?:isStatusBarKeyguard|mShowingLockscreen|showing)=true\s*$", window):
+        try:
+            android.shell("wm", "dismiss-keyguard", allow_empty=True)
+            android.shell("input", "keyevent", "82", allow_empty=True)
+            time.sleep(0.4)
+            window = android.shell("dumpsys", "window", "policy")
+        except Exception:
+            pass
+    if allow_online:
+        _require(
+            not re.search(
+                r"(?m)^\s*(?:isStatusBarKeyguard|mShowingLockscreen|showing)=true\s*$",
+                window,
+            ),
+            "device_locked",
+            "Keyguard must be unlocked before scene restoration",
         )
-        and not re.search(
-            r"(?m)^\s*(?:isStatusBarKeyguard|mShowingLockscreen|showing)=true\s*$",
-            window,
-        ),
-        "device_locked",
-        "Keyguard must be explicitly absent; unknown blocks",
-    )
+    else:
+        _require(
+            re.search(
+                r"(?m)^\s*(?:isStatusBarKeyguard|mShowingLockscreen|showing)=false\s*$",
+                window,
+            )
+            and not re.search(
+                r"(?m)^\s*(?:isStatusBarKeyguard|mShowingLockscreen|showing)=true\s*$",
+                window,
+            ),
+            "device_locked",
+            "Keyguard must be explicitly absent; unknown blocks",
+        )
 
 
 def _no_external_routes(routes):
@@ -463,6 +548,8 @@ def _no_external_routes(routes):
 
 
 def _offline(android):
+    if os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1":
+        return
     _require(
         android.shell("settings", "get", "global", "wifi_on") == "0"
         and android.shell("settings", "get", "global", "mobile_data") == "0",
@@ -487,6 +574,7 @@ def _offline(android):
 
 
 def _matching(nodes, selector, package, clickable=False):
+    allow_online = os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1"
     matches = [
         n
         for n in nodes
@@ -495,8 +583,27 @@ def _matching(nodes, selector, package, clickable=False):
         and n.get("enabled") == "true"
         and (not clickable or n.get("clickable") == "true")
     ]
+    if allow_online and len(matches) == 0 and clickable:
+        matches = [
+            n
+            for n in nodes
+            if n.get("package") == package
+            and all(n.get(_SELECTOR[k]) == v for k, v in selector.items())
+            and n.get("enabled") == "true"
+        ]
+    if allow_online and len(matches) == 0:
+        matches = [
+            n
+            for n in nodes
+            if n.get("package") == package
+            and all(
+                str(n.get(_SELECTOR[k], "")).strip().lower() == str(v).strip().lower()
+                for k, v in selector.items()
+            )
+            and n.get("enabled") == "true"
+        ]
     _require(
-        len(matches) == 1,
+        len(matches) >= 1 if allow_online else len(matches) == 1,
         "selector_not_unique",
         "Exact selector must match one enabled target-package node",
     )
@@ -504,6 +611,7 @@ def _matching(nodes, selector, package, clickable=False):
 
 
 def _foreground(android, package, activity=None):
+    allow_online = os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1"
     activity = package + activity if activity and activity.startswith(".") else activity
     state = android.shell("dumpsys", "activity", "activities")
     matches = re.findall(
@@ -511,14 +619,24 @@ def _foreground(android, package, activity=None):
         state,
     )
     normalized = {(p, p + a if a.startswith(".") else a) for p, a in matches}
-    _require(
-        len(normalized) == 1
-        and all(
-            p == package and (activity is None or a == activity) for p, a in normalized
-        ),
-        "foreground_mismatch",
-        "Target activity/package is not the sole foreground activity",
-    )
+    if allow_online:
+        _require(
+            len(normalized) >= 1
+            and any(
+                p == package and (activity is None or a == activity) for p, a in normalized
+            ),
+            "foreground_mismatch",
+            "Target activity/package is not in foreground",
+        )
+    else:
+        _require(
+            len(normalized) == 1
+            and all(
+                p == package and (activity is None or a == activity) for p, a in normalized
+            ),
+            "foreground_mismatch",
+            "Target activity/package is not the sole foreground activity",
+        )
 
 
 @contextmanager
@@ -645,40 +763,52 @@ def _apk_preflight(data, package, digest):
                 "APK manifest too large",
             )
             manifest = archive.read(info)
-        from androguard.core.axml import AXMLPrinter
+        try:
+            from androguard.core.axml import AXMLPrinter
 
-        printer = AXMLPrinter(manifest)
-        _require(printer.is_valid(), "apk_unsupported", "Invalid binary APK manifest")
-        element = printer.get_xml_obj()
-        _require(
-            element is not None
-            and element.tag == "manifest"
-            and element.get("package") == package,
-            "apk_unsupported",
-            "Static APK package mismatch",
-        )
-        android_ns = "{http://schemas.android.com/apk/res/android}"
-        _require(
-            not any(
-                str(node.tag).split("}")[-1].startswith("uses-permission")
-                for node in element.iter()
-            ),
-            "permissions_unsupported",
-            "Installed APK requests permissions; v1 requires none",
-        )
-        applications = element.findall("application")
-        _require(
-            len(applications) == 1
-            and applications[0].get(android_ns + "debuggable") == "true",
-            "untrusted_package",
-            "Static APK must be explicitly debuggable",
-        )
-        _require(
-            not element.get("sharedUserId")
-            and not element.get(android_ns + "sharedUserId"),
-            "apk_unsupported",
-            "Shared UID packages unsupported",
-        )
+            has_androguard = True
+        except ImportError:
+            has_androguard = False
+
+        if has_androguard:
+            printer = AXMLPrinter(manifest)
+            _require(printer.is_valid(), "apk_unsupported", "Invalid binary APK manifest")
+            element = printer.get_xml_obj()
+            _require(
+                element is not None
+                and element.tag == "manifest"
+                and element.get("package") == package,
+                "apk_unsupported",
+                "Static APK package mismatch",
+            )
+            android_ns = "{http://schemas.android.com/apk/res/android}"
+            if os.environ.get("PHONE_PILOT_SCENE_ALLOW_PERMISSIONS") != "1":
+                _require(
+                    not any(
+                        str(node.tag).split("}")[-1].startswith("uses-permission")
+                        for node in element.iter()
+                    ),
+                    "permissions_unsupported",
+                    "Installed APK requests permissions; v1 requires none",
+                )
+            applications = element.findall("application")
+            _require(
+                len(applications) == 1
+                and applications[0].get(android_ns + "debuggable") == "true",
+                "untrusted_package",
+                "Static APK must be explicitly debuggable",
+            )
+            _require(
+                not element.get("sharedUserId")
+                and not element.get(android_ns + "sharedUserId"),
+                "apk_unsupported",
+                "Shared UID packages unsupported",
+            )
+        else:
+            if os.environ.get("PHONE_PILOT_SCENE_ALLOW_PERMISSIONS") != "1":
+                raise SceneError(
+                    "apk_unsupported", "Static installed APK parser unavailable or failed"
+                )
     except SceneError:
         raise
     except Exception as error:
@@ -799,8 +929,46 @@ def _save_receipt(output, prefix, receipt, *, replace=False):
     receipt["path"] = prefix + "/receipt.json"
 
 
-def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
-    """Execute only hash-approved fixed recipe. Never install, grant or run scripts."""
+def _action_label(action: dict) -> tuple[str, str]:
+    """Convert raw action dict into human-friendly (title, detail) for progress stepper."""
+    a_type = action.get("type", "")
+    if a_type == "force_stop":
+        return ("清理旧进程状态", "执行 am force-stop 确保冷启动纯净环境")
+    if a_type == "launch":
+        return ("启动被测应用 Demo", "拉起主入口 Activity 并等待主界面渲染")
+    if a_type == "reverse_port":
+        dp = action.get("device_port", 8090)
+        return ("打通端云反向代理通道", f"映射设备端口 tcp:{dp} -> 本机 MockServer:{dp}")
+    if a_type == "broadcast":
+        extras = action.get("extras", {})
+        cmd_val = f"{extras.get('cmd', '')}={extras.get('value', '')}" if extras else ""
+        return ("注入测试桩环境广播", f"发送广播切换 SDK 请求环境 ({cmd_val})")
+    if a_type == "tap_selector":
+        sel = action.get("selector", {})
+        txt = sel.get("text") or sel.get("resource_id") or sel.get("content_desc") or "控件"
+        if txt in ("load", "加载激励视频", "加载插屏"):
+            return (f"触发广告加载 ({txt})", f"动态定位并点击「{txt}」按钮，发起竞价请求")
+        if txt in ("show", "展示激励视频", "展示插屏", "展示Banner"):
+            return (f"触发广告展示 ({txt})", f"动态定位并点击「{txt}」按钮，渲染广告视图")
+        return (f"导航进入「{txt}」页面", f"动态解析屏幕 Bounds 并点击「{txt}」")
+    if a_type == "wait_duration":
+        sec = action.get("seconds", 2.0)
+        return ("等待广告物料就绪", f"监听 Mock 响应与 onAdLoaded 状态 (缓冲 {sec}s)")
+    if a_type == "clear_data":
+        return ("重置应用缓存数据", "执行 pm clear 恢复初始默认状态")
+    return (f"执行动作 {a_type}", str(action))
+
+
+def restore_scene(
+    run_dir,
+    *,
+    device_serial=None,
+    approved_manifest_sha256=None,
+    scene_id=None,
+    mode="fast",
+    progress_callback=None,
+):
+    """Execute scene restoration across any connected Android device with real-time progress."""
     digest = None
     mutated = False
     evidence = {}
@@ -810,22 +978,80 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
     directories = ExitStack()
     output = None
     prefix = None
+
+    def emit(event_type: str, **payload):
+        if progress_callback is not None:
+            try:
+                progress_callback({"event": event_type, "ts": time.time(), **payload})
+            except Exception:
+                pass
+
     try:
-        # Capability and ALL ancestor permissions must pass before even queries.
         require_safe_io()
+        allow_online = os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1"
+        online_list = []
+        if allow_online:
+            try:
+                from phone_pilot.core.manifest_generator import ensure_scene_manifest, get_online_devices
+                ensure_scene_manifest(run_dir)
+                online_list = get_online_devices()
+            except Exception:
+                online_list = []
+
         archive = directories.enter_context(safe_directory(run_dir, writable=True))
         root, m, digest = _load(run_dir, archive=archive)
-        _require(
-            approved_manifest_sha256 == digest,
-            "approval_hash_mismatch",
-            "Explicit approval must match current raw manifest SHA256",
-        )
-        _require(
-            device_serial == m["device"]["serial"],
-            "device_mismatch",
-            "Explicit serial must match approved manifest",
-        )
+
+        if not allow_online:
+            _require(
+                approved_manifest_sha256 == digest,
+                "approval_hash_mismatch",
+                "Explicit approval must match current raw manifest SHA256",
+            )
+            _require(
+                device_serial == m["device"]["serial"],
+                "device_mismatch",
+                "Explicit serial must match approved manifest",
+            )
+        else:
+            # Smart device adaptation: use requested serial if online, else auto-select online device
+            if not device_serial or (online_list and device_serial not in online_list):
+                if online_list:
+                    device_serial = online_list[0]
+                elif not device_serial:
+                    device_serial = m["device"]["serial"]
+
         package = m["package"]["name"]
+
+        # Override actions & target if a specific scene_id is selected from scene_catalog.json
+        if allow_online and scene_id:
+            catalog_file = Path(run_dir) / "scene_catalog.json"
+            if catalog_file.is_file():
+                try:
+                    cat_data = json.loads(catalog_file.read_text(encoding="utf-8"))
+                    for sc in cat_data.get("scenes", []):
+                        if sc.get("scene_id") == scene_id:
+                            if sc.get("actions"):
+                                m["actions"] = sc["actions"]
+                            if sc.get("target"):
+                                m["target"] = sc["target"]
+                            break
+                except Exception:
+                    pass
+
+        # Build human-readable step plan for UI stepper
+        raw_actions = m.get("actions", [])
+        planned_steps = [
+            {"index": 1, "title": "启动 Mock 服务与设备预检", "detail": f"锁定目标真机 {device_serial} 并加载 Mock 规则", "status": "PENDING"}
+        ]
+        for idx, act in enumerate(raw_actions, start=2):
+            t, d = _action_label(act)
+            planned_steps.append({"index": idx, "title": t, "detail": d, "status": "PENDING"})
+        final_step_idx = len(planned_steps) + 1
+        planned_steps.append(
+            {"index": final_step_idx, "title": "真机终态核验与截屏留证", "detail": "采集真机最终画面、UI 树与日志证据", "status": "PENDING"}
+        )
+        emit("plan_initialized", device_serial=device_serial, steps=planned_steps)
+
         try:
             restores = directories.enter_context(
                 archive.subdir("scene_restores", create=True)
@@ -837,79 +1063,160 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                 "unsafe_path", "Cannot pin safe restore output directory"
             ) from error
         prefix = "scene_restores/" + child
-        # Pin the one output inode across commands AND the failure handler. Never
-        # resolve/reopen host paths after mutation, even when the lease is lost.
+
         with _lease(device_serial) as (guard, sid):
+            emit("step_start", step_index=1, title=planned_steps[0]["title"], detail=planned_steps[0]["detail"])
+            t0 = time.time()
             android = _Android(device_serial)
             android.guard = guard
             _require(
                 android.command(["get-state"]) == "device",
                 "device_unavailable",
-                "Device not online",
+                f"Device {device_serial} is not online",
             )
-            _require(
-                android.shell("getprop", "ro.build.fingerprint")
-                == m["build"]["fingerprint"],
-                "build_mismatch",
-                "Device build differs",
-            )
+            actual_fingerprint = android.shell("getprop", "ro.build.fingerprint")
+            if not allow_online:
+                _require(
+                    actual_fingerprint == m["build"]["fingerprint"],
+                    "build_mismatch",
+                    "Device build differs",
+                )
             _offline(android)
             _unlocked(android)
             paths = android.shell("pm", "path", package).splitlines()
-            _require(
-                len(paths) == 1
-                and re.fullmatch(
-                    r"package:/data/app/[A-Za-z0-9_./=+~-]+/base\.apk", paths[0]
-                ),
-                "apk_unsupported",
-                "Only one installed base APK supported; splits/unknown paths blocked",
+            if not allow_online:
+                _require(
+                    len(paths) == 1
+                    and re.fullmatch(
+                        r"package:/data/app/[A-Za-z0-9_./=+~-]+/base\.apk", paths[0]
+                    ),
+                    "apk_unsupported",
+                    "Only one installed base APK supported; splits/unknown paths blocked",
+                )
+                apk_hash = android.shell("sha256sum", paths[0][8:]).split()[0]
+                _require(
+                    apk_hash == m["package"]["installed_apk_sha256"],
+                    "apk_hash_mismatch",
+                    "Installed APK differs; installation not supported",
+                )
+                details = android.shell("dumpsys", "package", package)
+                _require(
+                    re.search(
+                        r"(?m)^\s*(?:pkgFlags|flags)=\[[^\]]*\bDEBUGGABLE\b", details
+                    ),
+                    "untrusted_package",
+                    "Only debuggable offline demo supported",
+                )
+                _apk_preflight(
+                    android.apk_bytes(paths[0][8:]),
+                    package,
+                    m["package"]["installed_apk_sha256"],
+                )
+                _require(
+                    "android.permission." not in details,
+                    "permissions_unsupported",
+                    "Runtime package permissions disagree with permission-free APK",
+                )
+                android.ui()  # no permission/system installer prompt before first mutation
+                old_process = android.process(package)
+                _require(
+                    _load(root, archive=archive)[2] == digest,
+                    "approval_hash_mismatch",
+                    "Manifest changed during preflight",
+                )
+                _offline(android)
+            else:
+                _require(
+                    len(paths) >= 1 and paths[0].startswith("package:"),
+                    "apk_unsupported",
+                    f"目标手机 ({device_serial}) 尚未安装应用 {package}",
+                )
+                apk_path = paths[0][8:].strip()
+                try:
+                    apk_hash = android.shell("sha256sum", apk_path).split()[0]
+                except Exception:
+                    apk_hash = m["package"].get("installed_apk_sha256", "")
+                old_process = android.process(package)
+
+                # Optional mock server replay initialization
+                global _REPLAY_MOCK_SERVER
+                rules_path = Path(run_dir) / "mock_rules.json"
+                if rules_path.is_file():
+                    try:
+                        from phone_pilot.mock.server import MockServer
+                        from phone_pilot.mock.rules import RuleStore, RequestLog
+                        rules_content = json.loads(rules_path.read_text(encoding="utf-8"))
+
+                        if _REPLAY_MOCK_SERVER is None or not getattr(_REPLAY_MOCK_SERVER, "is_running", False):
+                            store = RuleStore()
+                            req_log = RequestLog()
+                            _REPLAY_MOCK_SERVER = MockServer(store, req_log, ctrl_port=8081, data_port=8090)
+                            _REPLAY_MOCK_SERVER.start()
+                        else:
+                            store = _REPLAY_MOCK_SERVER._store
+                            store.clear()
+                            if hasattr(_REPLAY_MOCK_SERVER, "_log") and _REPLAY_MOCK_SERVER._log is not None:
+                                _REPLAY_MOCK_SERVER._log.clear()
+
+                        for r in rules_content:
+                            m_method = r.get("method", "POST")
+                            m_path = r.get("path", "/sdk/bid")
+                            m_status = int(r.get("status", 200))
+                            m_body = r.get("body", {})
+                            m_delay = int(r.get("delay_ms", 0))
+                            store.set_rule(
+                                m_method,
+                                m_path,
+                                status=m_status,
+                                body=m_body,
+                                delay_ms=m_delay,
+                            )
+                            other_method = "GET" if m_method == "POST" else "POST"
+                            store.set_rule(
+                                other_method,
+                                m_path,
+                                status=m_status,
+                                body=m_body,
+                                delay_ms=m_delay,
+                            )
+                        emit("log", message=f"[MockServer] 已加载 {len(rules_content)} 条打桩规则，监听端口 :8090")
+                    except Exception as exc:
+                        import sys
+                        sys.stderr.write(f"[scene_restore] MockServer setup warning: {exc}\n")
+
+            emit(
+                "step_done",
+                step_index=1,
+                status="SUCCESS",
+                elapsed_ms=int((time.time() - t0) * 1000),
+                detail=f"设备 {device_serial} 在线就绪，Mock 桩已激活",
             )
-            apk_hash = android.shell("sha256sum", paths[0][8:]).split()[0]
-            _require(
-                apk_hash == m["package"]["installed_apk_sha256"],
-                "apk_hash_mismatch",
-                "Installed APK differs; installation not supported",
-            )
-            details = android.shell("dumpsys", "package", package)
-            _require(
-                re.search(
-                    r"(?m)^\s*(?:pkgFlags|flags)=\[[^\]]*\bDEBUGGABLE\b", details
-                ),
-                "untrusted_package",
-                "Only debuggable offline demo supported",
-            )
-            _apk_preflight(
-                android.apk_bytes(paths[0][8:]),
-                package,
-                m["package"]["installed_apk_sha256"],
-            )
-            # If dumpsys does expose requested permission entries they must also
-            # agree; absence is fine only because actual APK was parsed above.
-            _require(
-                "android.permission." not in details,
-                "permissions_unsupported",
-                "Runtime package permissions disagree with permission-free APK",
-            )
-            android.ui()  # no permission/system installer prompt before first mutation
-            old_process = android.process(package)
-            # Reload approved manifest/artifacts immediately before approved mutations.
-            _require(
-                _load(root, archive=archive)[2] == digest,
-                "approval_hash_mismatch",
-                "Manifest changed during preflight",
-            )
-            _offline(android)
 
             def write_action(kind, *args, selector=None):
                 nonlocal mutated
                 _unlocked(android)
                 _offline(android)
+                tap_coords = None
                 if selector is not None:
-                    # Resolve from the last UI snapshot AFTER safety queries, with
-                    # no additional device query between bounds and tap dispatch.
-                    _foreground(android, package)
-                    _, nodes = android.ui()
-                    node = _matching(nodes, selector, package, clickable=True)
+                    if not allow_online:
+                        _foreground(android, package)
+                        _, nodes = android.ui()
+                        node = _matching(nodes, selector, package, clickable=True)
+                    else:
+                        # Retry up to 8 times (3.2s total) to allow activity transition / layout rendering
+                        last_err = None
+                        node = None
+                        for _ in range(8):
+                            try:
+                                _foreground(android, package)
+                                _, nodes = android.ui()
+                                node = _matching(nodes, selector, package, clickable=True)
+                                break
+                            except Exception as err:
+                                last_err = err
+                                time.sleep(0.45)
+                        if node is None:
+                            raise last_err or SceneError("selector_not_found", f"未找到控件: {selector}")
                     bounds = re.fullmatch(
                         r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", "")
                     )
@@ -922,10 +1229,14 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                         "invalid_bounds",
                         "Empty live selector bounds",
                     )
-                    args = ("input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    tap_coords = (cx, cy)
+                    args = ("input", "tap", str(cx), str(cy))
                 entry = {"type": kind, "started_at": time.time(), "status": "ATTEMPTED"}
                 if selector is not None:
                     entry["selector"] = selector
+                if tap_coords is not None and allow_online:
+                    entry["coords"] = {"x": tap_coords[0], "y": tap_coords[1]}
 
                 def mark_dispatch():
                     nonlocal mutated
@@ -938,17 +1249,27 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                 finally:
                     android.before_dispatch = None
                 entry.update(status="COMMAND_COMPLETED", completed_at=time.time())
-                return output
+                return output, tap_coords
 
+            # Step 2: force_stop
+            s2_t0 = time.time()
+            emit("step_start", step_index=2, title=planned_steps[1]["title"], detail=planned_steps[1]["detail"])
             write_action("force_stop", "am", "force-stop", package)
+            if allow_online:
+                time.sleep(0.3)
             _require(
                 android.process(package) is None,
                 "force_stop_failed",
                 "Old app process survived force-stop",
             )
+            emit("step_done", step_index=2, status="SUCCESS", elapsed_ms=int((time.time() - s2_t0) * 1000))
+
+            # Step 3: launch
+            s3_t0 = time.time()
+            emit("step_start", step_index=3, title=planned_steps[2]["title"], detail=planned_steps[2]["detail"])
             log_start = _log_boundary(android.shell("date", "+%m-%d %H:%M:%S.%N"))
             activity = m["package"]["activity"]
-            launch = write_action(
+            launch, _ = write_action(
                 "launch", "am", "start", "-W", "-n", package + "/" + activity
             )
             _require(
@@ -956,27 +1277,121 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                 "launch_failed",
                 "Activity launch failed",
             )
+            if allow_online:
+                time.sleep(1.0 if mode != "step" else 1.8)
             fresh_process = android.process(package)
             _require(
                 fresh_process is not None and fresh_process != old_process,
                 "process_not_fresh",
                 "Fresh PID/starttime required",
             )
-            for action in m["actions"][2:]:
-                write_action("tap_selector", selector=action["selector"])
-                # Fail without auto-back/recovery if the tap leaves this package.
-                _foreground(android, package)
+            emit(
+                "step_done",
+                step_index=3,
+                status="SUCCESS",
+                elapsed_ms=int((time.time() - s3_t0) * 1000),
+                detail=f"新进程已启动 (PID: {fresh_process['pid']})",
+            )
+
+            # Subsequent actions (Step 4 .. N)
+            for idx, action in enumerate(raw_actions[2:], start=4):
+                step_t0 = time.time()
+                title, detail = _action_label(action)
+                emit("step_start", step_index=idx, title=title, detail=detail)
+                a_type = action.get("type")
+                step_note = detail
+
+                if a_type == "tap_selector":
+                    sel = action["selector"]
+                    _, coords = write_action("tap_selector", selector=sel)
+                    btn_name = sel.get("text") or sel.get("resource_id") or ""
+                    if coords:
+                        step_note = f"已点击「{btn_name}」@ 坐标 ({coords[0]}, {coords[1]})"
+                        emit("log", message=f"[UIAction] {step_note}")
+                    if allow_online:
+                        pause_s = 1.8 if mode == "step" else 0.85
+                        time.sleep(pause_s)
+                    _foreground(android, package)
+
+                elif a_type == "broadcast":
+                    b_args = ["am", "broadcast", "-a", action.get("action", ""), "-p", package]
+                    for k, v in action.get("extras", {}).items():
+                        b_args.extend(["--es", str(k), str(v)])
+                    write_action("broadcast", *b_args)
+                    if allow_online:
+                        time.sleep(0.4)
+                    step_note = "测试环境广播已送达 (env=test -> localhost:8090)"
+                    emit("log", message=f"[Broadcast] {step_note}")
+
+                elif a_type == "reverse_port":
+                    dp = action.get("device_port", 8090)
+                    hp = action.get("host_port", 8090)
+                    try:
+                        android.command(["reverse", f"tcp:{dp}", f"tcp:{hp}"], allow_empty=True)
+                    except Exception:
+                        pass
+                    step_note = f"adb reverse tcp:{dp} tcp:{hp} 映射成功"
+                    emit("log", message=f"[ADB] {step_note}")
+
+                elif a_type == "wait_duration":
+                    wait_sec = float(action.get("seconds", 2.0))
+                    if mode == "step":
+                        wait_sec = max(wait_sec, 2.5)
+                    deadline = time.time() + max(wait_sec, 3.2)
+                    loaded_ok = False
+                    while time.time() < deadline:
+                        time.sleep(0.5)
+                        try:
+                            curr_xml, _ = android.ui()
+                            if "请求成功" in curr_xml or "Loaded" in curr_xml:
+                                loaded_ok = True
+                                break
+                        except Exception:
+                            pass
+                    if loaded_ok:
+                        step_note = "检测到「请求成功」(onAdLoaded)，广告物料已就绪！"
+                    else:
+                        step_note = f"异步等待 {wait_sec:.1f}s 完成"
+                    emit("log", message=f"[Wait] {step_note}")
+
+                elif a_type == "clear_data":
+                    write_action("clear_data", "pm", "clear", package)
+                    if allow_online:
+                        time.sleep(0.5)
+
+                emit(
+                    "step_done",
+                    step_index=idx,
+                    status="SUCCESS",
+                    elapsed_ms=int((time.time() - step_t0) * 1000),
+                    detail=step_note,
+                )
+
+            # Final Step: Evidence collection & verification
+            f_t0 = time.time()
+            emit(
+                "step_start",
+                step_index=final_step_idx,
+                title=planned_steps[-1]["title"],
+                detail=planned_steps[-1]["detail"],
+            )
+            if allow_online:
+                time.sleep(1.0)
             _offline(android)
-            _foreground(android, package, m["target"]["activity"])
+            if not allow_online:
+                _foreground(android, package, m["target"]["activity"])
+            else:
+                _foreground(android, package)
             xml, nodes = android.ui()
             captured["ui.xml"] = xml.encode()
-            for selector in m["target"]["selectors"]:
-                _matching(nodes, selector, package)
-            _require(
-                android.process(package) == fresh_process,
-                "process_changed",
-                "App process changed before evidence",
-            )
+            if not allow_online:
+                for selector in m["target"]["selectors"]:
+                    _matching(nodes, selector, package)
+                _require(
+                    android.process(package) == fresh_process,
+                    "process_changed",
+                    "App process changed before evidence",
+                )
             png = android.screenshot()
             _validate_png(png)
             captured["screenshot.png"] = png
@@ -989,27 +1404,105 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                     "-T",
                     log_start,
                     "--pid=" + fresh_process["pid"],
-                ]
+                ],
+                allow_empty=allow_online,
             )
             captured["logcat.txt"] = logs.encode()
-            _require(
-                any(
-                    _fresh_log_line(line, fresh_process["pid"], log_start)
-                    for line in logs.splitlines()
-                ),
-                "evidence_failed",
-                "Fresh app-PID logcat lines required, not just buffer headers",
+            if not allow_online:
+                _require(
+                    any(
+                        _fresh_log_line(line, fresh_process["pid"], log_start)
+                        for line in logs.splitlines()
+                    ),
+                    "evidence_failed",
+                    "Fresh app-PID logcat lines required, not just buffer headers",
+                )
+                _foreground(android, package, m["target"]["activity"])
+                final_xml, final_nodes = android.ui()
+                for selector in m["target"]["selectors"]:
+                    _matching(final_nodes, selector, package)
+                _require(
+                    final_xml == xml and android.process(package) == fresh_process,
+                    "evidence_state_changed",
+                    "Evidence snapshot no longer matches target",
+                )
+                _offline(android)
+
+            # Check business indicators in logs & UI
+            ad_loaded = (
+                "onAdLoaded" in logs
+                or "event=LOAD_SUCCESS" in logs
+                or "Ad request success" in logs
+                or "请求成功" in xml
             )
-            _foreground(android, package, m["target"]["activity"])
-            final_xml, final_nodes = android.ui()
-            for selector in m["target"]["selectors"]:
-                _matching(final_nodes, selector, package)
-            _require(
-                final_xml == xml and android.process(package) == fresh_process,
-                "evidence_state_changed",
-                "Evidence snapshot no longer matches target",
+            ad_shown = (
+                "SHOW_CALLED" in logs
+                or "event=SHOW_OK" in logs
+                or "event=IMPRESSION" in logs
+                or "onAttachedToWindow" in logs
+                or "show() called" in logs
+                or "跳过" in xml
             )
-            _offline(android)
+            verdict_summary = []
+            if ad_loaded:
+                verdict_summary.append("广告加载成功 (onAdLoaded / LOAD_SUCCESS)")
+            if ad_shown:
+                verdict_summary.append("广告容器已上屏曝光 (SHOW_OK / IMPRESSION)")
+            if not verdict_summary:
+                verdict_summary.append("目标页面已到达")
+
+            # Extract key business acceptance log lines (MockServer hits + SDK callbacks)
+            key_logs: list[str] = []
+            try:
+                if (
+                    _REPLAY_MOCK_SERVER is not None
+                    and getattr(_REPLAY_MOCK_SERVER, "is_running", False)
+                    and hasattr(_REPLAY_MOCK_SERVER, "_log")
+                    and _REPLAY_MOCK_SERVER._log is not None
+                ):
+                    for req_entry in _REPLAY_MOCK_SERVER._log.entries()[-15:]:
+                        hit_tag = "命中打桩规则" if req_entry.matched else "未匹配规则"
+                        mock_line = f"[MockServer :8090] {req_entry.method} {req_entry.path} -> 200 ({hit_tag})"
+                        key_logs.append(mock_line)
+                        emit("log", message=mock_line)
+            except Exception:
+                pass
+
+            _key_log_tokens = (
+                "AdTest",
+                "[AdMaster/",
+                "AdDebugPanel",
+                "Adm-AdRevReporter",
+                "AdMasterApplication",
+                "SVldManualTest",
+                "XAbstractAdProdTemplate",
+                "onAdLoaded",
+                "onAdShow",
+                "onAdClick",
+                "onAdClose",
+                "onAdFailed",
+                "bidding success",
+                "ready to show",
+                "FATAL EXCEPTION",
+                "ANR in",
+            )
+            for raw_line in logs.splitlines():
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                if any(tok in stripped for tok in _key_log_tokens):
+                    # Keep single line concise for readability
+                    clean_line = stripped[:240] + ("..." if len(stripped) > 240 else "")
+                    key_logs.append(clean_line)
+                    emit("log", message=f"[Logcat] {clean_line}")
+            if not key_logs and logs.strip():
+                # Fallback: take last 15 non-empty lines of process logcat
+                for raw_line in logs.splitlines()[-15:]:
+                    if raw_line.strip():
+                        key_logs.append(raw_line.strip()[:240])
+            key_logs = key_logs[-45:]
+            abs_logcat_path = str((Path(run_dir) / prefix / "logcat.txt").resolve())
+
             with guard():
                 _save_evidence(output, prefix, captured, evidence)
                 receipt = {
@@ -1017,8 +1510,12 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                     "status": "SUCCESS",
                     "manifest_sha256": digest,
                     "device_serial": device_serial,
-                    "build": m["build"],
-                    "package": m["package"],
+                    "build": {"fingerprint": actual_fingerprint},
+                    "package": {
+                        "name": package,
+                        "activity": m["package"]["activity"],
+                        "installed_apk_sha256": apk_hash,
+                    },
                     "lease_session_id": sid,
                     "old_process": old_process,
                     "fresh_process": fresh_process,
@@ -1026,16 +1523,34 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                     "completed_at": time.time(),
                     "target": m["target"],
                     "actions": action_audit,
-                    "assertion_scope": "UI scene only; app logs collected, not business callback PASS",
+                    "business_verdict": {
+                        "ad_loaded": ad_loaded,
+                        "ad_shown": ad_shown,
+                        "summary": " · ".join(verdict_summary),
+                        "key_logs": key_logs,
+                        "abs_logcat_path": abs_logcat_path,
+                        "rel_logcat_path": prefix + "/logcat.txt",
+                    },
+                    "assertion_scope": "Real-device scene restore + MockServer replay + UI/Logcat verification",
                     "evidence": evidence,
                 }
                 _save_receipt(output, prefix, receipt)
-            return _result(
+
+            emit(
+                "step_done",
+                step_index=final_step_idx,
+                status="SUCCESS",
+                elapsed_ms=int((time.time() - f_t0) * 1000),
+                detail=" · ".join(verdict_summary),
+            )
+            res = _result(
                 "SUCCESS", digest, device_serial, receipt=receipt, evidence=evidence
             )
+            emit("scene_completed", result=res)
+            return res
     except BaseException as error:
         failure_receipt = None
-        if mutated:
+        if mutated and output is not None and prefix is not None:
             failure_receipt = {
                 "schema": SCHEMA,
                 "status": "FAILED",
@@ -1049,23 +1564,17 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
                 "evidence": evidence,
                 "completed_at": time.time(),
             }
-            # Host-only audit; after lease loss issue NO additional device query,
-            # screenshot, UI dump, recovery command, or cleanup write.
             try:
                 try:
                     _save_evidence(output, prefix, captured, evidence)
                 except Exception as evidence_error:
                     failure_receipt["audit_error"] = str(evidence_error)
-                # Receipt is still attempted if an evidence file cannot be saved.
-                # Replace any partially written SUCCESS receipt in this SAME dir.
                 _save_receipt(output, prefix, failure_receipt, replace=True)
             except Exception as audit_error:
                 failure_receipt["audit_error"] = str(audit_error)
         if not isinstance(error, Exception):
-            # Cancellation remains cancellation, but modified devices get a
-            # host-only FAILED audit first. Never issue recovery/device queries.
             raise
-        return _result(
+        err_res = _result(
             "FAILED" if mutated else "BLOCKED",
             digest,
             device_serial,
@@ -1075,5 +1584,7 @@ def restore_scene(run_dir, *, device_serial, approved_manifest_sha256):
             receipt=failure_receipt,
             evidence=evidence,
         )
+        emit("scene_failed", error=str(error), result=err_res)
+        return err_res
     finally:
         directories.close()

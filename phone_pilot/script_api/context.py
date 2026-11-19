@@ -28,6 +28,53 @@ from phone_pilot.core.log import _log as _runner_log
 # ---------------------------------------------------------------------------
 
 
+def _optimize_mp4_for_web(mp4_path: pathlib.Path) -> None:
+    """Remux/transcode Android screenrecord MP4 so HTML5 <video> supports instant seeking (+faststart & dense keyframes)."""
+    import shutil
+    import subprocess
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin or not mp4_path.exists() or mp4_path.stat().st_size == 0:
+        return
+    out_tmp = mp4_path.with_suffix(".faststart.mp4")
+    try:
+        proc = subprocess.run(
+            [
+                ffmpeg_bin,
+                "-y",
+                "-i",
+                str(mp4_path),
+                "-map",
+                "0:v:0",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-g",
+                "15",
+                "-keyint_min",
+                "15",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(out_tmp),
+            ],
+            capture_output=True,
+            timeout=45,
+        )
+        if proc.returncode == 0 and out_tmp.exists() and out_tmp.stat().st_size > 0:
+            out_tmp.replace(mp4_path)
+    except Exception:
+        pass
+    finally:
+        if out_tmp.exists():
+            try:
+                out_tmp.unlink()
+            except OSError:
+                pass
+
+
 def _annotate_screenshot(png_bytes: bytes, element: Any) -> bytes:
     """在截图上标注找到的元素位置（绿色矩形 + 标签）/ Annotate found element on screenshot."""
     try:
@@ -619,6 +666,7 @@ class ScriptContext:
                 with safe_directory(capture.parent) as source:
                     if source.stat(capture.name).st_size == 0:
                         raise ValueError("host recording empty")
+                _optimize_mp4_for_web(capture)
                 with safe_directory(self._session.run_dir, writable=True) as root:
                     with root.subdir("recordings", create=True) as folder:
                         folder.copy_file(filename, capture)
@@ -636,19 +684,75 @@ class ScriptContext:
 
         # Keep at least one recoverable copy until successful safe archival.
         archived = False
+        remote_segments = result.get("remote_segments") if isinstance(result, dict) else None
+        if not remote_segments and remote:
+            remote_segments = [remote]
+
         if self._session and remote and result.get("ok"):
             temporary = tempfile.TemporaryDirectory(prefix="pp-record-", delete=False)
-            capture = pathlib.Path(temporary.name).resolve() / "capture.mp4"
+            temp_dir = pathlib.Path(temporary.name).resolve()
+            capture = temp_dir / "capture.mp4"
             try:
                 time.sleep(1)  # 等设备文件写入完成
                 filename = f"{_safe(name)}_{uuid.uuid4().hex}.mp4"
                 local_path = self._session.recordings_dir / filename
-                pulled = self.driver.pull_file(remote, str(capture))
-                if isinstance(pulled, dict) and not pulled.get("ok"):
-                    raise ValueError(pulled.get("error", "recording pull failed"))
-                with safe_directory(capture.parent) as source:
-                    if source.stat(capture.name).st_size == 0:
-                        raise ValueError("recording capture empty")
+                if remote_segments and len(remote_segments) > 1:
+                    import shutil
+                    import subprocess
+
+                    valid_seg_paths: list[pathlib.Path] = []
+                    for idx, seg_remote in enumerate(remote_segments):
+                        seg_local = temp_dir / f"seg_{idx:03d}.mp4"
+                        pulled = self.driver.pull_file(seg_remote, str(seg_local))
+                        if isinstance(pulled, dict) and not pulled.get("ok"):
+                            continue
+                        if seg_local.is_file() and seg_local.stat().st_size > 0:
+                            _optimize_mp4_for_web(seg_local)
+                            valid_seg_paths.append(seg_local)
+                    if not valid_seg_paths:
+                        raise ValueError("recording segments empty")
+                    if len(valid_seg_paths) == 1:
+                        valid_seg_paths[0].replace(capture)
+                    else:
+                        concat_list = temp_dir / "concat.txt"
+                        concat_list.write_text(
+                            "\n".join(f"file '{p.name}'" for p in valid_seg_paths) + "\n",
+                            encoding="utf-8",
+                        )
+                        ffmpeg_bin = shutil.which("ffmpeg")
+                        if ffmpeg_bin:
+                            proc = subprocess.run(
+                                [
+                                    ffmpeg_bin,
+                                    "-y",
+                                    "-f",
+                                    "concat",
+                                    "-safe",
+                                    "0",
+                                    "-i",
+                                    str(concat_list),
+                                    "-c",
+                                    "copy",
+                                    "-movflags",
+                                    "+faststart",
+                                    str(capture),
+                                ],
+                                cwd=str(temp_dir),
+                                capture_output=True,
+                                timeout=60,
+                            )
+                            if proc.returncode != 0 or not capture.is_file() or capture.stat().st_size == 0:
+                                valid_seg_paths[0].replace(capture)
+                        else:
+                            valid_seg_paths[0].replace(capture)
+                else:
+                    pulled = self.driver.pull_file(remote, str(capture))
+                    if isinstance(pulled, dict) and not pulled.get("ok"):
+                        raise ValueError(pulled.get("error", "recording pull failed"))
+                    with safe_directory(capture.parent) as source:
+                        if source.stat(capture.name).st_size == 0:
+                            raise ValueError("recording capture empty")
+                    _optimize_mp4_for_web(capture)
                 with safe_directory(self._session.run_dir, writable=True) as root:
                     with root.subdir("recordings", create=True) as folder:
                         folder.copy_file(filename, capture)
@@ -681,11 +785,12 @@ class ScriptContext:
                 result, ok=False, error="recording remote path missing; not archived"
             )
 
-        if archived and remote:
-            try:
-                self.driver.remove_remote_file(remote)
-            except Exception:
-                pass
+        if archived and remote_segments:
+            for seg_rem in remote_segments:
+                try:
+                    self.driver.remove_remote_file(seg_rem)
+                except Exception:
+                    pass
         return result
 
     # ---- logcat 捕获控制 ----

@@ -179,7 +179,9 @@ def _list_real_serials() -> List[str]:
         _real_serials_cache = (now, [])
         return []
     try:
-        proc = runner.run([exe, "usbmux", "list", "--no-color"], timeout_s=10.0)
+        proc = runner.run([exe, "usbmux", "list"], timeout_s=10.0)
+        if proc.returncode != 0:
+            proc = runner.run([exe, "usbmux", "list", "--no-color"], timeout_s=10.0)
     except Exception:
         _real_serials_cache = (now, [])
         return []
@@ -314,7 +316,9 @@ def probe_tunnel(serial: str) -> dict:
         return _tunnel_unavailable()
 
     try:
-        proc = runner.run([exe, "remote", "tunnel-info", "--no-color"], timeout_s=8.0)
+        proc = runner.run([exe, "remote", "tunnel-info"], timeout_s=8.0)
+        if proc.returncode != 0:
+            proc = runner.run([exe, "remote", "tunnel-info", "--no-color"], timeout_s=8.0)
     except Exception:
         return _tunnel_unavailable()
 

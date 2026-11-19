@@ -113,7 +113,7 @@ class AndroidScreenDriver:
         return size
 
     def start_screenrecord(self, path: str, **kwargs) -> dict:
-        """Start screen recording.
+        """Start screen recording with automatic 180s segment chaining for long runs (>3 min).
 
         Args:
             path: Filename (e.g. ``record_123456.mp4``).
@@ -121,35 +121,62 @@ class AndroidScreenDriver:
         Returns:
             dict with ``remote_path`` – the actual on-device path.
         """
-        # Import here to avoid circular deps
         from phone_pilot.android.adb.utils import adb_prefix
         import subprocess
+        import threading
 
         time_limit = kwargs.get("time_limit_s", 180)
         bitrate = kwargs.get("bitrate", "4M")
 
         remote_path = f"/sdcard/{path}"
-
-        # Start recording in background
-        cmd = adb_prefix(self._device_serial) + [
-            "shell",
-            "screenrecord",
-            "--time-limit",
-            str(time_limit),
-            "--bit-rate",
-            str(bitrate),
-            remote_path,
-        ]
+        stem = path[:-4] if path.endswith(".mp4") else path
 
         self._recording_path = path
         self._recording_remote = remote_path
-        # Use Popen for background process
-        self._recording_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
+        self._recording_segments = [remote_path]
+        self._recording_stop_evt = threading.Event()
+
+        def _spawn_seg(r_path: str):
+            cmd = adb_prefix(self._device_serial) + [
+                "shell",
+                "screenrecord",
+                "--time-limit",
+                str(time_limit),
+                "--bit-rate",
+                str(bitrate),
+                r_path,
+            ]
+            return subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+            )
+
+        self._recording_process = _spawn_seg(remote_path)
+
+        def _chain_worker():
+            seg_idx = 1
+            while not self._recording_stop_evt.is_set():
+                proc = self._recording_process
+                if proc is None:
+                    break
+                rc = proc.poll()
+                if rc is None:
+                    self._recording_stop_evt.wait(0.5)
+                    continue
+                if self._recording_stop_evt.is_set():
+                    break
+                # Previous 180s segment finished naturally while test is still running -> chain next segment
+                next_remote = f"/sdcard/{stem}_seg{seg_idx}.mp4"
+                seg_idx += 1
+                self._recording_segments.append(next_remote)
+                self._recording_process = _spawn_seg(next_remote)
+
+        self._recording_thread = threading.Thread(
+            target=_chain_worker, name="pp-screenrecord-chain", daemon=True
         )
+        self._recording_thread.start()
 
         return {
             "ok": True,
@@ -160,28 +187,40 @@ class AndroidScreenDriver:
         }
 
     def stop_screenrecord(self) -> dict:
-        """Stop current screen recording."""
+        """Stop current screen recording and return all chained segments."""
         import time
 
-        if self._recording_process is None:
+        if self._recording_process is None and not getattr(self, "_recording_segments", None):
             return {"ok": False, "error": "no_recording_in_progress"}
 
-        # Send SIGINT to stop recording gracefully
-        self._recording_process.terminate()
-        try:
-            self._recording_process.wait(timeout=5)
-        except Exception:
-            self._recording_process.kill()
+        stop_evt = getattr(self, "_recording_stop_evt", None)
+        if stop_evt is not None:
+            stop_evt.set()
 
-        time.sleep(0.5)  # Let file finalize
+        proc = self._recording_process
+        if proc is not None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+
+        chain_thread = getattr(self, "_recording_thread", None)
+        if chain_thread is not None and chain_thread.is_alive():
+            chain_thread.join(timeout=2.0)
+
+        time.sleep(0.6)  # Let file finalize
 
         path = self._recording_path
+        segments = list(getattr(self, "_recording_segments", []) or ([self._recording_remote] if self._recording_remote else []))
         self._recording_process = None
         self._recording_path = None
+        self._recording_segments = []
 
         return {
             "ok": True,
             "path": path,
+            "remote_segments": segments,
             "device_serial": self._device_serial,
         }
 

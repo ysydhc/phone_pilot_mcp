@@ -291,3 +291,70 @@ def test_report_view_and_generation_flags_are_independent(tmp_path, monkeypatch)
         assert ".btn-gen[data-run]" in dashboard  # existing batch selector survives
     finally:
         (runs / "readonly").chmod(0o700)
+
+
+def test_acceptance_profile_generic_and_custom_override(tmp_path, monkeypatch):
+    from phone_pilot.core.acceptance_profile import (
+        build_markdown_report_summary,
+        evaluate_lifecycle_pills,
+        extract_step_annotations,
+        load_acceptance_profile,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    run_dir = tmp_path / "runs" / "20261119_sample"
+    run_dir.mkdir(parents=True)
+    # 1. Default zero-config universal profile
+    profile = load_acceptance_profile(run_dir)
+    assert profile["profile_id"] == "generic_app"
+    pills = evaluate_lifecycle_pills(
+        profile,
+        ["I/ActivityTaskManager: Displayed com.example/.MainActivity", "D/MockServer: 200 OK"],
+        status="PASS",
+        actions=[{"type": "tap", "x": 540, "y": 960}],
+        detail_text="[PASS] Checkout verified",
+    )
+    assert len(pills) == 5
+    assert all(p["status"] == "PASS" for p in pills)
+
+    annotations = extract_step_annotations(
+        [{"step": 1, "action": "tap", "x": 540, "y": 1200, "screenshot": "screenshots/001_tap.png"}],
+        screen_w=1080,
+        screen_h=2400,
+    )
+    assert "001_tap.png" in annotations
+    assert annotations["001_tap.png"]["tap_x_pct"] == 50.0
+    assert annotations["001_tap.png"]["tap_y_pct"] == 50.0
+
+    md = build_markdown_report_summary(
+        "20261119_sample",
+        {"status": "PASSED", "duration_s": 12.3, "steps": {"passed": 5, "total": 5}},
+        {},
+        {"total_scenes": 1, "passed_scenes": 1, "scenes": [{"index": 1, "title": "Scene 1", "status": "PASS", "detail": "All good", "elapsed_s": 4.2}]},
+        ["[PASS] Checkout verified"],
+        profile,
+    )
+    assert "Universal App Profile" in md
+    assert "Scene 1" in md
+
+    # 2. Custom project acceptance_profile.json override
+    custom_cfg = {
+        "profile_id": "custom.sdk.v1",
+        "profile_name": "Custom Domain Profile",
+        "lifecycle_stages": [
+            {"id": "req", "label": "Request", "patterns": ["bidding_start"]},
+            {"id": "imp", "label": "Impression", "patterns": ["onAdImpression"]},
+        ],
+    }
+    (tmp_path / "acceptance_profile.json").write_text(json.dumps(custom_cfg), encoding="utf-8")
+    loaded_custom = load_acceptance_profile(run_dir)
+    assert loaded_custom["profile_id"] == "custom.sdk.v1"
+    custom_pills = evaluate_lifecycle_pills(
+        loaded_custom,
+        ["bidding_start ok"],
+        status="PASS",
+    )
+    assert len(custom_pills) == 2
+    assert custom_pills[0]["status"] == "PASS"
+    assert custom_pills[1]["status"] == "NA"
+

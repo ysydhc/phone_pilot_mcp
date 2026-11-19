@@ -1,0 +1,579 @@
+<!-- 底部可折叠抽屉：真机现场一键复原控制台 (默认收起隐藏，按需唤醒) -->
+<section id="scene-restore" class="restore-section-anchor" data-run-name="{{ run_name }}" data-manifest-sha="{{ scene.manifest_sha256 or '' }}" data-default-serial="{{ scene.device_serial or meta.device.serial or '' }}" data-default-scene="{{ scene.default_scene_id or 'default' }}">
+  <details class="restore-drawer" id="scene-restore-drawer">
+    <summary class="restore-drawer-summary">
+      <div class="drawer-summary-left">
+        <span class="drawer-icon">📱</span>
+        <span class="drawer-title">真机现场一键复原工具箱</span>
+        <span class="drawer-tag">支持任意换机 &amp; 自动 Mock 打桩</span>
+        <span class="restore-badge" id="scene-plan-badge">
+          ● 已就绪 {{ scene.scenes|length if scene.scenes else 1 }} 个可复原场景配方
+        </span>
+      </div>
+      <div class="drawer-summary-right">
+        <span class="drawer-hint">平时自动收起不占版面 · 点击展开在手边手机上实景重现</span>
+        <span class="drawer-toggle-btn">🛠️ 展开复原控制台 <span class="drawer-arrow">&#9660;</span></span>
+      </div>
+    </summary>
+
+    <div class="restore-console">
+      <div class="restore-header">
+        <div class="restore-title-group">
+          <h2>📱 真机现场一键复原控制台 <span id="current-scene-pill" style="font-size:.78rem;font-weight:600;color:var(--blue);background:rgba(59,130,246,.12);padding:3px 10px;border-radius:6px;">当前选中场景</span></h2>
+          <p>
+            自动在您当前连接的 Android 手机上重启被测应用、启动本地 Mock 广告服务 (:8090)，并按所选场景配方真实执行<strong>「进入目标广告页 &rarr; 触发 Load 加载 &rarr; 触发 Show 展现」</strong>。
+            <span style="opacity:.75;">（注：重建受限 Android 离线 Demo 的语义目标状态；不是打开历史截图、播放录像，也不恢复内存或远端历史。）</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- 本地文件查看模式提示横幅 -->
+      <div id="file-protocol-box" style="display:none;background:#1e293b;border:1px solid #3b82f6;border-radius:10px;padding:14px 18px;margin-bottom:16px;color:#f8fafc;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+          <div>
+            <div style="color:#93c5fd;font-weight:700;font-size:.9rem;margin-bottom:4px;">💡 当前是以本地静态文件 (file://) 打开的报告</div>
+            <div style="font-size:.8rem;color:#cbd5e1;">驱动真机执行 ADB 点击与 Mock 打桩需要连接本机后台服务 (127.0.0.1:8686)，点击右侧按钮即可一键切换！</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button type="button" id="switch-to-web-btn" style="background:#2563eb;color:#fff;border:none;padding:8px 16px;border-radius:7px;cursor:pointer;font-weight:700;font-size:.84rem;">🚀 一键切换到在线控制台 (127.0.0.1:8686)</button>
+            <button type="button" id="copy-cmd-btn" style="background:#334155;color:#f8fafc;border:1px solid #475569;padding:8px 14px;border-radius:7px;cursor:pointer;font-size:.8rem;">📋 复制服务启动命令</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 控制栏：场景选择 + 设备下拉框 + 模式选择 + 启动按钮 -->
+      <div class="restore-controls">
+        <div class="control-field scene-field" {% if not scene.scenes or scene.scenes|length <= 1 %}style="flex:0 1 260px;"{% endif %}>
+          <label for="scene-id-select">
+            <span>1. 选择要复原的业务场景（共 {{ scene.scenes|length if scene.scenes else 1 }} 个场景）</span>
+          </label>
+          <select id="scene-id-select" class="device-select">
+            {% if scene.scenes %}
+              {% for sc in scene.scenes %}
+              <option value="{{ sc.scene_id }}" {% if sc.scene_id == scene.default_scene_id %}selected{% endif %}>
+                {{ '❌ [待排查] ' if sc.status != 'PASS' else '✔ ' }}#{{ sc.index }} {{ sc.title }} ({{ sc.group_label }})
+              </option>
+              {% endfor %}
+            {% else %}
+              <option value="default">✔ 默认主测试场景</option>
+            {% endif %}
+          </select>
+        </div>
+
+        <div class="control-field">
+          <label for="scene-serial-select">
+            <span>2. 选择目标真机设备（换机后点刷新自动识别）</span>
+            <span id="device-count-hint" style="color:var(--green);font-weight:700;"></span>
+          </label>
+          <div class="device-select-row">
+            <select id="scene-serial-select" class="device-select">
+              {% if scene.online_devices %}
+                {% for dev in scene.online_devices %}
+                <option value="{{ dev.serial }}">{{ dev.display_name }}{% if dev.app_installed %} · 已装Demo{% else %} · 未装Demo{% endif %}</option>
+                {% endfor %}
+              {% else %}
+                <option value="{{ scene.device_serial or meta.device.serial or '' }}">📱 {{ scene.device_serial or meta.device.serial or '自动识别当前连接手机' }}</option>
+              {% endif %}
+            </select>
+            <button type="button" id="refresh-devices-btn" class="btn-refresh" title="重新扫描当前 USB 连接的 Android 手机">🔄 刷新设备</button>
+          </div>
+        </div>
+
+        <div class="control-field mode-field">
+          <label for="scene-mode-select">3. 选择执行速度模式</label>
+          <select id="scene-mode-select" class="device-select">
+            <option value="fast">⚡ 极速复现到终态（推荐 · 约 8 秒完成）</option>
+            <option value="step">🐢 逐步慢放调试（每步停顿 1.8 秒 · 便于肉眼看清点击）</option>
+          </select>
+        </div>
+
+        <div class="control-action">
+          <button type="button" id="scene-button" class="btn-launch-restore">🚀 立即在手机上复原现场</button>
+        </div>
+      </div>
+
+      <!-- 可视化步骤步进器 (Stepper) -->
+      <div class="stepper-title">
+        <span>真机自动执行动作序列（切换上方场景可实时预览对应步骤）</span>
+        <span id="stepper-progress-text" style="color:var(--blue);font-weight:700;">待启动</span>
+      </div>
+      <div class="stepper-grid" id="scene-stepper-grid">
+        {% for s in scene.planned_steps %}
+        <div class="step-card-item" data-step-idx="{{ s.index }}">
+          <div class="step-idx-dot">{{ s.index }}</div>
+          <div class="step-card-body">
+            <div class="step-card-title">{{ s.index }}. {{ s.title }}</div>
+            <div class="step-card-desc">{{ s.detail }}</div>
+            <div class="step-card-time"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      <!-- 实时复原执行控制台流水 (执行期间实时滚动显示，支持换行) -->
+      <div id="restore-live-console" style="display:none;background:#0f172a;color:#e2e8f0;font-family:var(--mono);font-size:.76rem;line-height:1.6;padding:12px 16px;border-radius:10px;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #334155;margin-top:6px;"></div>
+
+      <!-- 复原终态结果卡片 (执行完成后展示真机实拍截图、结论与关键业务判定日志) -->
+      <div id="scene-outcome-card" class="restore-outcome-card">
+        <div class="outcome-layout">
+          <div>
+            <div class="shot-annot-wrap">
+              <img id="outcome-screenshot" class="outcome-shot" style="border:none;" src="" alt="真机复原终态实拍图" onclick="if(window.openLightbox)openLightbox(this.src)">
+              <div id="outcome-tap-bullseye" class="tap-bullseye" style="display:none;"></div>
+              <div id="outcome-tap-tag" class="tap-bullseye-tag" style="display:none;"></div>
+            </div>
+          </div>
+          <div style="min-width:0;">
+            <div id="outcome-badge" style="font-size:1.05rem;font-weight:700;color:var(--green);margin-bottom:8px;">✅ 真机现场复原成功！</div>
+            <p id="outcome-summary" style="font-size:.88rem;color:var(--text);margin-bottom:10px;line-height:1.5;"></p>
+            <div id="outcome-meta" style="font-size:.8rem;color:var(--text2);line-height:1.7;background:var(--bg);padding:10px 14px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;"></div>
+
+            <!-- 关键业务判定日志面板 -->
+            <div id="outcome-key-logs-box" style="display:none;margin-top:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                <span style="font-size:.82rem;font-weight:700;color:var(--text);">🎯 关键业务判定日志（SDK 生命周期回调 / 曝光计费 / Mock 命中）</span>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <a id="outcome-open-log-btn" href="#" target="_blank" class="btn-sm" style="text-decoration:none;display:none;">📄 查看完整进程 Logcat</a>
+                  <button type="button" id="outcome-finder-log-btn" class="btn-sm" style="display:none;">📂 在 Finder 中打开</button>
+                  <button type="button" id="outcome-copy-log-btn" class="btn-sm">📋 复制关键日志</button>
+                </div>
+              </div>
+              <div id="outcome-key-logs" style="background:#0f172a;color:#a7f3d0;font-family:var(--mono);font-size:.75rem;line-height:1.6;padding:12px 14px;border-radius:8px;max-height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #1e293b;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </details>
+</section>
+
+<script id="scene-catalog-json" type="application/json">{{ (scene.scenes or [])|tojson }}</script>
+
+<script>
+(function(){
+  const restorePanel = document.getElementById('scene-restore');
+  const drawer = document.getElementById('scene-restore-drawer');
+  const button = document.getElementById('scene-button');
+  const sceneSelect = document.getElementById('scene-id-select');
+  const serialSelect = document.getElementById('scene-serial-select');
+  const modeSelect = document.getElementById('scene-mode-select');
+  const refreshBtn = document.getElementById('refresh-devices-btn');
+  const deviceCountHint = document.getElementById('device-count-hint');
+  const currentScenePill = document.getElementById('current-scene-pill');
+  const stepperGrid = document.getElementById('scene-stepper-grid');
+  const progressText = document.getElementById('stepper-progress-text');
+  const outcomeCard = document.getElementById('scene-outcome-card');
+  const outcomeShot = document.getElementById('outcome-screenshot');
+  const outcomeBadge = document.getElementById('outcome-badge');
+  const outcomeSummary = document.getElementById('outcome-summary');
+  const outcomeMeta = document.getElementById('outcome-meta');
+  const liveConsole = document.getElementById('restore-live-console');
+  const outcomeKeyLogsBox = document.getElementById('outcome-key-logs-box');
+  const outcomeKeyLogs = document.getElementById('outcome-key-logs');
+  const outcomeOpenLogBtn = document.getElementById('outcome-open-log-btn');
+  const outcomeFinderLogBtn = document.getElementById('outcome-finder-log-btn');
+  const outcomeCopyLogBtn = document.getElementById('outcome-copy-log-btn');
+
+  const fileBox = document.getElementById('file-protocol-box');
+  const switchBtn = document.getElementById('switch-to-web-btn');
+  const copyBtn = document.getElementById('copy-cmd-btn');
+
+  if (!restorePanel) return;
+  const runName = restorePanel.dataset.runName;
+  const dashboardUrl = 'http://127.0.0.1:8686/run/' + encodeURIComponent(runName) + '/report.html';
+  const autoApproveCmd = 'python3 -m phone_pilot.web --auto-approve';
+
+  let catalogScenes = [];
+  try {
+    const rawCat = document.getElementById('scene-catalog-json');
+    if (rawCat && rawCat.textContent) {
+      catalogScenes = JSON.parse(rawCat.textContent) || [];
+    }
+  } catch (e) {}
+
+  function renderStepper(steps) {
+    if (!steps || !steps.length || !stepperGrid) return;
+    stepperGrid.innerHTML = steps.map(s => {
+      const st = (s.status || 'PENDING').toUpperCase();
+      let cls = '';
+      let icon = s.index;
+      if (st === 'RUNNING') { cls = 'running'; icon = '⏳'; }
+      else if (st === 'SUCCESS') { cls = 'done'; icon = '✔'; }
+      else if (st === 'FAILED') { cls = 'failed'; icon = '✖'; }
+      const timeHtml = s.elapsed_ms ? `<div class="step-card-time">耗时 ${s.elapsed_ms} ms</div>` : '';
+      return `
+        <div class="step-card-item ${cls}" data-step-idx="${s.index}">
+          <div class="step-idx-dot">${icon}</div>
+          <div class="step-card-body">
+            <div class="step-card-title">${s.index}. ${s.title || ''}</div>
+            <div class="step-card-desc">${s.detail || ''}</div>
+            ${timeHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function syncSelectedScenePreview() {
+    if (!sceneSelect) return;
+    const sid = sceneSelect.value;
+    const found = catalogScenes.find(s => s.scene_id === sid);
+    if (found) {
+      if (currentScenePill) {
+        currentScenePill.textContent = `当前配方：#${found.index} ${found.title}`;
+      }
+      if (found.planned_steps && found.planned_steps.length) {
+        renderStepper(found.planned_steps);
+      }
+      if (progressText) {
+        progressText.textContent = `已加载「${found.title}」配方 (${(found.planned_steps || []).length} 步)`;
+      }
+    }
+  }
+
+  if (sceneSelect) {
+    sceneSelect.addEventListener('change', () => {
+      if (outcomeCard) outcomeCard.style.display = 'none';
+      syncSelectedScenePreview();
+    });
+    syncSelectedScenePreview();
+  }
+
+  // Global helper: open bottom restore drawer & pre-select target scene
+  window.openRestoreForScene = function(sceneId) {
+    if (drawer) {
+      drawer.open = true;
+    }
+    if (sceneSelect && sceneId) {
+      const hasOpt = Array.from(sceneSelect.options).some(o => o.value === sceneId);
+      if (hasOpt) {
+        sceneSelect.value = sceneId;
+        syncSelectedScenePreview();
+      }
+    }
+    if (restorePanel) {
+      restorePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  // Global helper: seek video player to specific scenario timestamp
+  window.seekVideoToScene = function(offsetSec, sceneTitle) {
+    const recSection = document.getElementById('recordings');
+    const vid = document.getElementById('main-recording-video') || document.querySelector('#recordings video');
+    if (recSection) {
+      recSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (vid) {
+      const targetSec = Math.max(0, Number(offsetSec) || 0);
+      const banner = document.getElementById('video-chapter-active');
+      const mm = String(Math.floor(targetSec / 60)).padStart(2, '0');
+      const ss = String(Math.floor(targetSec % 60)).padStart(2, '0');
+
+      const doSeek = () => {
+        try {
+          const dur = Number(vid.duration) || 0;
+          if (dur > 0 && targetSec >= dur - 0.5) {
+            const durMm = String(Math.floor(dur / 60)).padStart(2, '0');
+            const durSs = String(Math.floor(dur % 60)).padStart(2, '0');
+            if (banner) {
+              banner.textContent = `⚠️ 历史视频仅录制了前 ${durMm}:${durSs}（受旧版 Android screenrecord 180秒单次上限截断），未覆盖 ${mm}:${ss} 的「${sceneTitle || ''}」片段；请点击该卡片的【📱 复现此场景】在真机重现！`;
+              banner.style.color = 'var(--amber)';
+              banner.style.display = 'inline-block';
+            }
+            return;
+          }
+          vid.currentTime = targetSec;
+          vid.play().catch(() => {});
+          if (banner) {
+            banner.textContent = `🎬 正在播放场景片段：${sceneTitle || ''} (起点 ${mm}:${ss})`;
+            banner.style.color = 'var(--blue)';
+            banner.style.display = 'inline-block';
+          }
+        } catch (e) {}
+      };
+      if (vid.readyState >= 1) {
+        doSeek();
+      } else {
+        vid.addEventListener('loadedmetadata', doSeek, { once: true });
+        vid.load();
+      }
+    }
+  };
+
+  // Auto-open drawer when clicking top nav #scene-restore link
+  document.querySelectorAll('a[href="#scene-restore"]').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.openRestoreForScene(sceneSelect ? sceneSelect.value : 'default');
+    });
+  });
+
+  async function refreshDevices() {
+    if (location.protocol === 'file:') return;
+    if (refreshBtn) {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = '扫描中...';
+    }
+    try {
+      const res = await (await fetch('/api/devices')).json();
+      const devs = res.devices || [];
+      if (deviceCountHint) {
+        deviceCountHint.textContent = devs.length ? `已连接 ${devs.length} 台在线手机` : '未检测到 USB 设备';
+        deviceCountHint.style.color = devs.length ? 'var(--green)' : 'var(--red)';
+      }
+      if (devs.length && serialSelect) {
+        const prev = serialSelect.value;
+        serialSelect.innerHTML = devs.map(d => {
+          const appTag = d.app_installed ? ' · 已装Demo' : ' · 未装Demo';
+          return `<option value="${d.serial}">${d.display_name}${appTag}</option>`;
+        }).join('');
+        if (devs.some(d => d.serial === prev)) {
+          serialSelect.value = prev;
+        } else {
+          serialSelect.value = devs[0].serial;
+        }
+      }
+    } catch (e) {
+      console.warn('Device scan failed:', e);
+    } finally {
+      if (refreshBtn) {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 刷新设备';
+      }
+    }
+  }
+
+  if (location.protocol === 'file:') {
+    if (fileBox) fileBox.style.display = 'block';
+  } else {
+    refreshDevices();
+    fetch('/api/scene-plan?name=' + encodeURIComponent(runName))
+      .then(r => r.json())
+      .then(plan => {
+        if (plan.scenes && plan.scenes.length) {
+          catalogScenes = plan.scenes;
+          syncSelectedScenePreview();
+        } else if (plan.planned_steps && plan.planned_steps.length) {
+          renderStepper(plan.planned_steps);
+        }
+      })
+      .catch(() => {});
+  }
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', refreshDevices);
+  }
+
+  if (switchBtn) {
+    switchBtn.addEventListener('click', async () => {
+      switchBtn.disabled = true;
+      const oldText = switchBtn.textContent;
+      switchBtn.textContent = '正在连接 127.0.0.1:8686...';
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1500);
+        await fetch('http://127.0.0.1:8686/api/scene-plan?name=' + encodeURIComponent(runName), { signal: controller.signal, mode: 'cors' });
+        clearTimeout(timeoutId);
+        window.location.href = dashboardUrl;
+      } catch (e) {
+        switchBtn.textContent = oldText;
+        switchBtn.disabled = false;
+        if (navigator.clipboard) navigator.clipboard.writeText(autoApproveCmd);
+        alert('本机服务 (127.0.0.1:8686) 尚未启动。\n已自动复制启动命令：\n' + autoApproveCmd + '\n\n请在终端运行后重试！');
+      }
+    });
+  }
+
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(autoApproveCmd).then(() => {
+          const old = copyBtn.textContent;
+          copyBtn.textContent = '✅ 已复制！';
+          setTimeout(() => { copyBtn.textContent = old; }, 2000);
+        });
+      }
+    });
+  }
+
+  if (button) {
+    button.addEventListener('click', async () => {
+      if (location.protocol === 'file:') {
+        if (switchBtn) switchBtn.click();
+        return;
+      }
+      button.disabled = true;
+      const oldBtnText = button.textContent;
+      button.textContent = '⏳ 正在真机上执行复原...';
+      if (outcomeCard) outcomeCard.style.display = 'none';
+      if (outcomeKeyLogsBox) outcomeKeyLogsBox.style.display = 'none';
+      if (liveConsole) {
+        liveConsole.style.display = 'block';
+        liveConsole.textContent = '▶ 正在连接目标真机并初始化 Mock 广告打桩环境...\n';
+      }
+      if (progressText) progressText.textContent = '正在准备设备与 Mock 服务...';
+
+      try {
+        const plan = await (await fetch('/api/scene-plan?name=' + encodeURIComponent(runName))).json();
+        if (!plan.enabled || plan.status !== 'READY') {
+          throw new Error('复原计划未就绪：' + JSON.stringify(plan.blockers || plan));
+        }
+        const serial = serialSelect ? serialSelect.value.trim() : (plan.device_serial || '');
+        const mode = modeSelect ? modeSelect.value : 'fast';
+        const sceneId = sceneSelect ? sceneSelect.value : 'default';
+
+        const body = new URLSearchParams({
+          name: runName,
+          serial: serial,
+          manifest_sha256: plan.manifest_sha256,
+          token: plan.token,
+          mode: mode,
+          scene_id: sceneId
+        });
+        const job = await (await fetch('/api/restore-scene', { method: 'POST', body })).json();
+        if (!job.job_id) {
+          throw new Error('任务提交失败：' + (job.error || JSON.stringify(job)));
+        }
+
+        let result;
+        do {
+          await new Promise(resolve => setTimeout(resolve, 450));
+          result = await (await fetch('/api/scene-result?job_id=' + encodeURIComponent(job.job_id))).json();
+          if (result.progress) {
+            if (result.progress.steps && result.progress.steps.length) {
+              renderStepper(result.progress.steps);
+              const doneCount = result.progress.steps.filter(s => s.status === 'SUCCESS').length;
+              if (progressText) progressText.textContent = `执行进度：${doneCount} / ${result.progress.steps.length} 步`;
+            }
+            if (liveConsole && result.progress.logs && result.progress.logs.length) {
+              liveConsole.textContent = result.progress.logs.join('\n');
+              liveConsole.scrollTop = liveConsole.scrollHeight;
+            }
+          }
+        } while (result.status === 'RUNNING' || result.status === 'QUEUED');
+
+        if (result.status === 'SUCCESS') {
+          if (progressText) progressText.textContent = '✅ 全部步骤执行完成！';
+          if (outcomeCard) {
+            outcomeCard.className = 'restore-outcome-card';
+            outcomeCard.style.display = 'block';
+          }
+          const shotPath = result.evidence && result.evidence['screenshot.png'] ? result.evidence['screenshot.png'].path : '';
+          if (shotPath && outcomeShot) {
+            outcomeShot.src = '/run/' + encodeURIComponent(runName) + '/' + shotPath + '?t=' + Date.now();
+          }
+          // Render tap bullseye on restored screenshot from receipt.actions
+          const outBullseye = document.getElementById('outcome-tap-bullseye');
+          const outTapTag = document.getElementById('outcome-tap-tag');
+          const recActions = (result.receipt && result.receipt.actions) || [];
+          const tappedActs = recActions.filter(a => a && a.coords && typeof a.coords.x === 'number');
+          if (outBullseye && outTapTag && tappedActs.length) {
+            const lastTap = tappedActs[tappedActs.length - 1];
+            const txPct = Math.min(96, Math.max(4, Math.round((lastTap.coords.x / 1080) * 1000) / 10));
+            const tyPct = Math.min(96, Math.max(4, Math.round((lastTap.coords.y / 2400) * 1000) / 10));
+            const selTxt = (lastTap.selector && (lastTap.selector.text || lastTap.selector.resource_id)) || '目标控件';
+            outBullseye.style.display = 'flex';
+            outBullseye.style.left = txPct + '%';
+            outBullseye.style.top = tyPct + '%';
+            outTapTag.style.display = 'block';
+            outTapTag.style.left = txPct + '%';
+            outTapTag.style.top = tyPct + '%';
+            outTapTag.textContent = `🎯 终步点击「${selTxt}」(${lastTap.coords.x}, ${lastTap.coords.y})`;
+          } else {
+            if (outBullseye) outBullseye.style.display = 'none';
+            if (outTapTag) outTapTag.style.display = 'none';
+          }
+          const bVerdict = (result.receipt && result.receipt.business_verdict) || {};
+          const selectedObj = catalogScenes.find(s => s.scene_id === sceneId);
+          const sceneLabel = selectedObj ? selectedObj.title : '目标场景';
+          if (outcomeBadge) {
+            outcomeBadge.textContent = `✅ 真机现场复原成功！（${sceneLabel}）`;
+            outcomeBadge.style.color = 'var(--green)';
+          }
+          if (outcomeSummary) {
+            outcomeSummary.textContent = bVerdict.summary || '已完成冷启动、Mock 规则注入、进入页面与触发展示全链路。';
+          }
+          const freshPid = result.receipt && result.receipt.fresh_process ? result.receipt.fresh_process.pid : '-';
+          const usedSerial = result.device_serial || serial;
+          if (outcomeMeta) {
+            outcomeMeta.innerHTML = `
+              <div><strong>复原场景：</strong>${sceneLabel}</div>
+              <div><strong>执行真机：</strong>${usedSerial}</div>
+              <div><strong>应用包名：</strong>${(result.receipt && result.receipt.package && result.receipt.package.name) || 'cc.admaster.android.demo'} (全新进程 PID: ${freshPid})</div>
+              <div><strong>触发动作数：</strong>共完成 ${(result.receipt && result.receipt.actions && result.receipt.actions.length) || 0} 个端侧原子操作</div>
+              <div><strong>现场证据：</strong>已自动归档实时截屏、UI Hierarchy 树与进程级 Logcat</div>
+            `;
+          }
+
+          // Render Key Acceptance Logs from SDK & MockServer
+          const keyLogsList = bVerdict.key_logs || [];
+          const logcatRel = (result.evidence && result.evidence['logcat.txt'] && result.evidence['logcat.txt'].path) || bVerdict.rel_logcat_path || '';
+          const logcatAbs = bVerdict.abs_logcat_path || '';
+          if (outcomeKeyLogsBox && outcomeKeyLogs) {
+            outcomeKeyLogsBox.style.display = 'block';
+            const logText = keyLogsList.length
+              ? keyLogsList.join('\n')
+              : ((result.progress && result.progress.logs && result.progress.logs.join('\n')) || '进程已启动，暂无额外过滤命中日志');
+            if (window.highlightLogHtml) {
+              outcomeKeyLogs.innerHTML = window.highlightLogHtml(logText);
+            } else {
+              outcomeKeyLogs.textContent = logText;
+            }
+            if (outcomeOpenLogBtn) {
+              if (logcatRel) {
+                outcomeOpenLogBtn.href = '/run/' + encodeURIComponent(runName) + '/' + logcatRel;
+                outcomeOpenLogBtn.style.display = 'inline-block';
+              } else {
+                outcomeOpenLogBtn.style.display = 'none';
+              }
+            }
+            if (outcomeFinderLogBtn) {
+              if (logcatAbs) {
+                outcomeFinderLogBtn.style.display = 'inline-block';
+                outcomeFinderLogBtn.onclick = () => {
+                  if (window.openInFinder) window.openInFinder(logcatAbs);
+                };
+              } else {
+                outcomeFinderLogBtn.style.display = 'none';
+              }
+            }
+            if (outcomeCopyLogBtn) {
+              outcomeCopyLogBtn.onclick = () => {
+                if (window.copyToClipboard) window.copyToClipboard(logText);
+              };
+            }
+          }
+        } else {
+          if (progressText) progressText.textContent = '✖ 复原未完成 (' + result.status + ')';
+          if (outcomeCard) {
+            outcomeCard.className = 'restore-outcome-card failed';
+            outcomeCard.style.display = 'block';
+          }
+          if (outcomeBadge) {
+            outcomeBadge.textContent = '⚠️ 真机复原遇到异常 (' + result.status + ')';
+            outcomeBadge.style.color = 'var(--red)';
+          }
+          const errMsg = (result.blockers && result.blockers[0] && result.blockers[0].message) || result.error || JSON.stringify(result);
+          if (outcomeSummary) outcomeSummary.textContent = '原因：' + errMsg;
+          if (outcomeMeta) outcomeMeta.innerHTML = '请检查手机屏幕是否处于解锁亮屏状态，且已安装被测应用。';
+        }
+      } catch (error) {
+        if (progressText) progressText.textContent = '✖ 执行出错';
+        if (outcomeCard) {
+          outcomeCard.className = 'restore-outcome-card failed';
+          outcomeCard.style.display = 'block';
+        }
+        if (outcomeBadge) {
+          outcomeBadge.textContent = '⚠️ 真机复原调用失败';
+          outcomeBadge.style.color = 'var(--red)';
+        }
+        if (outcomeSummary) outcomeSummary.textContent = error.message;
+        if (outcomeMeta) outcomeMeta.innerHTML = '请确认本机后台服务 (127.0.0.1:8686) 已启动且手机连接正常。';
+      } finally {
+        button.disabled = false;
+        button.textContent = oldBtnText;
+      }
+    });
+  }
+})();
+</script>

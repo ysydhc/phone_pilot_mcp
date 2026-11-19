@@ -35,7 +35,7 @@ def generate_html_report(run_dir: str | Path) -> Path:
         FileNotFoundError: run_dir 不存在 / run_dir does not exist
         ImportError: jinja2 未安装 / jinja2 not installed
     """
-    run_dir = Path(run_dir).expanduser().absolute()
+    run_dir = Path(run_dir).expanduser().resolve()
     if not run_dir.is_dir():
         raise FileNotFoundError(f"Run directory not found: {run_dir}")
 
@@ -50,7 +50,7 @@ def generate_html_report(run_dir: str | Path) -> Path:
 
 def render_html_report(run_dir: str | Path) -> str:
     """Render a trusted template in memory; viewing archives never writes back."""
-    directory = Path(run_dir).expanduser().absolute()
+    directory = Path(run_dir).expanduser().resolve()
     with safe_directory(directory):
         return _render_html(_load_run_data(directory))
 
@@ -120,7 +120,37 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
             data["business_error"] = str(error)
             business = {}
     data["business"] = business_projection(run_dir, business) if business else {}
-    data["scene"] = inspect_scene(run_dir)
+    from phone_pilot.core.manifest_generator import ensure_scene_manifest, get_online_devices_detailed
+    from phone_pilot.core.scene_restore import _action_label
+    try:
+        ensure_scene_manifest(run_dir)
+    except Exception:
+        pass
+    scene_info = inspect_scene(run_dir)
+    raw_actions = scene_info.get("actions", [])
+    planned_steps = [
+        {"index": 1, "title": "启动 Mock 服务与设备预检", "detail": "锁定目标真机并加载本地 Mock 规则 (:8090)", "status": "PENDING"}
+    ]
+    for idx, act in enumerate(raw_actions, start=2):
+        t, d = _action_label(act)
+        planned_steps.append({"index": idx, "title": t, "detail": d, "status": "PENDING"})
+    planned_steps.append(
+        {"index": len(planned_steps) + 1, "title": "真机终态核验与截屏留证", "detail": "采集真机最终画面、UI 树与日志证据", "status": "PENDING"}
+    )
+    scene_info["planned_steps"] = planned_steps
+    scenes_list = scene_info.get("scenes") or []
+    default_sid = scene_info.get("default_scene_id")
+    if scenes_list and default_sid:
+        for sc in scenes_list:
+            if sc.get("scene_id") == default_sid and sc.get("planned_steps"):
+                scene_info["planned_steps"] = sc["planned_steps"]
+                break
+    try:
+        pkg_name = (scene_info.get("package") or {}).get("name", "cc.admaster.android.demo")
+        scene_info["online_devices"] = get_online_devices_detailed(target_package=pkg_name)
+    except Exception:
+        scene_info["online_devices"] = []
+    data["scene"] = scene_info
     data["run_name"] = run_dir.name
 
     # ---- Duration display ----
@@ -186,7 +216,16 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
                 is_portrait = h > w * 1.2  # Portrait if height > 1.2x width
             except Exception:
                 pass
-    # Build screenshot -> step mapping for gallery captions
+    # Build screenshot -> step mapping for gallery captions & tap bullseye annotations
+    from phone_pilot.core.acceptance_profile import (
+        load_acceptance_profile,
+        evaluate_lifecycle_pills,
+        extract_step_annotations,
+        extract_scene_specific_logs,
+        build_markdown_report_summary,
+    )
+
+    step_annots = extract_step_annotations(steps)
     step_by_screenshot = {s["screenshot"]: s for s in steps if s.get("screenshot")}
     gallery_items: list[dict] = []
     for img_name in screenshots:
@@ -195,6 +234,7 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
             "step_num": None,
             "step_action": None,
             "step_detail": None,
+            "annotation": step_annots.get(img_name),
         }
         # Explicit artifact identity, never a numeric filename-prefix guess:
         # repeated tool counters and actions retain independent observations.
@@ -211,6 +251,28 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     data["screenshots"] = screenshots
     data["gallery_items"] = gallery_items
     data["is_portrait"] = is_portrait
+
+    # ---- Screen recordings ----
+    recordings_dir = run_dir / "recordings"
+    recordings: list[dict[str, Any]] = []
+    if recordings_dir.is_dir():
+        for name in _safe_files(recordings_dir):
+            if Path(name).suffix.lower() in (".mp4", ".webm", ".mkv"):
+                f = recordings_dir / name
+                size_mb = 0.0
+                try:
+                    with safe_directory(recordings_dir) as folder:
+                        size_mb = round(folder.stat(name).st_size / (1024 * 1024), 2)
+                except Exception:
+                    pass
+                recordings.append({
+                    "filename": name,
+                    "rel_path": f"recordings/{name}",
+                    "size_mb": size_mb,
+                    "abs_path": str(f),
+                })
+    data["recordings"] = recordings
+    data["meta"]["artifacts"]["screen_recordings"] = len(recordings)
 
     # ---- Logcat files ----
     logcat_dir = run_dir / "logcat"
@@ -231,6 +293,7 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
                 logcat_files.append(
                     {
                         "name": f.name,
+                        "rel_path": f"logcat/{f.name}",
                         "lines": lines,
                         "size_kb": size_kb,
                         "abs_path": str(f),
@@ -260,6 +323,58 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
             pass
     data["console_tail"] = console_tail
     data["console_tail_lines"] = console_tail_lines
+
+    # ---- Key Business Acceptance Logs & Pluggable Acceptance Profile ----
+    profile = load_acceptance_profile(run_dir)
+    data["acceptance_profile"] = profile
+    key_log_lines = _extract_key_acceptance_logs(run_dir, console_path, logcat_files, profile=profile)
+    data["key_acceptance_logs"] = "\n".join(key_log_lines)
+    data["key_acceptance_log_count"] = len(key_log_lines)
+
+    # Enrich scenes with lifecycle_pills & scene_logs if missing from older cached scene_catalog.json
+    gate_summary = _read_json(run_dir / "release_gate_summary.json")
+    for sc in scene_info.get("scenes") or []:
+        if not sc.get("scene_logs"):
+            sc["scene_logs"] = extract_scene_specific_logs(
+                profile, run_dir, sc, key_log_lines, gate_summary=gate_summary
+            )
+        if not sc.get("lifecycle_pills"):
+            sc["lifecycle_pills"] = evaluate_lifecycle_pills(
+                profile,
+                sc.get("scene_logs") or key_log_lines,
+                status=sc.get("status", "PASS"),
+                actions=sc.get("actions", []),
+                detail_text=f"{sc.get('title', '')} {sc.get('detail', '')}",
+            )
+        if "video_highlight_s" not in sc:
+            offset_s = int(sc.get("video_offset_s", 0))
+            el_s = float(sc.get("elapsed_s", 0.0))
+            hl_s = offset_s + max(0, int(el_s - 6.0)) if el_s >= 9.0 else offset_s
+            sc["video_highlight_s"] = hl_s
+            sc["video_highlight_label"] = f"{hl_s // 60:02d}:{hl_s % 60:02d}"
+        if sc.get("screenshot") and not sc.get("tap_annotation"):
+            sc["tap_annotation"] = step_annots.get(Path(str(sc["screenshot"])).name)
+
+    overall_status = (
+        "PASS"
+        if (scene_info.get("catalog") or {}).get("gate_pass", meta.get("exit_code") == 0)
+        else "FAIL"
+    )
+    data["global_lifecycle_pills"] = evaluate_lifecycle_pills(
+        profile,
+        key_log_lines,
+        status=overall_status,
+        actions=raw_actions,
+        detail_text=str(meta.get("script_name", "")),
+    )
+    data["markdown_summary"] = build_markdown_report_summary(
+        run_dir.name,
+        meta,
+        data.get("business") or {},
+        scene_info.get("catalog") or {"scenes": scene_info.get("scenes") or []},
+        key_log_lines,
+        profile,
+    )
 
     # ---- Meminfo files (structured) ----
     data["memory"] = _load_memory_data(run_dir / "meminfo")
@@ -604,3 +719,154 @@ def _read_json(path: Path) -> Optional[dict]:
         return json.loads(_read_bytes(path))
     except Exception:
         return None
+
+
+def _extract_key_acceptance_logs(
+    run_dir: Path,
+    console_path: Path,
+    logcat_files: list[dict],
+    *,
+    profile: Optional[dict] = None,
+) -> list[str]:
+    """提取人眼验收最关心的关键业务判定日志（由 AcceptanceProfile 驱动，剔除轮询刷屏噪音）。"""
+    out: list[str] = []
+    seen: set[str] = set()
+    log_filter = (profile or {}).get("log_filter") or {}
+    custom_includes = tuple(log_filter.get("include_tokens") or ())
+    custom_excludes = tuple(log_filter.get("exclude_tokens") or ())
+
+    def _add(line: str) -> None:
+        s = line.strip()
+        if not s or s in seen:
+            return
+        seen.add(s)
+        out.append(s[:260] + ("..." if len(s) > 260 else ""))
+
+    # 1. Extract verified logcat hit_lines from release_gate_summary.json / suite_summary.json
+    gate_summary = _read_json(run_dir / "release_gate_summary.json") or _read_json(
+        run_dir / "suite_summary.json"
+    )
+    if isinstance(gate_summary, dict):
+        suites = gate_summary.get("suites") or []
+        for st in suites:
+            if not isinstance(st, dict):
+                continue
+            s_name = st.get("suite") or st.get("key") or "Suite"
+            s_status = "PASS" if st.get("passed") else "FAIL"
+            _add(f"━━━ [门禁套件: {s_name}] 判定结果: {s_status} ({st.get('pass_count', 0)}/{st.get('total', 0)} 项通过) ━━━")
+            for detail in st.get("details") or []:
+                if not isinstance(detail, dict):
+                    continue
+                d_label = detail.get("label") or detail.get("name") or ""
+                d_ok = "✔ PASS" if detail.get("passed") else "✖ FAIL"
+                hit_lines = detail.get("hit_lines") or {}
+                if isinstance(hit_lines, dict) and hit_lines:
+                    _add(f"  [{d_ok}] 场景「{d_label}」关键日志命中：")
+                    for pat, hit in hit_lines.items():
+                        if hit:
+                            _add(f"    🎯 ({pat}) -> {hit}")
+                elif detail.get("reason"):
+                    _add(f"  [{d_ok}] 场景「{d_label}」：{detail.get('reason')}")
+
+    # 2. Extract high-signal milestones from console.log (excluding [cmd] adb & polling noise)
+    if console_path.is_file():
+        try:
+            raw_console = _read_bytes(console_path).decode("utf-8", errors="replace")
+            _noise_tokens = custom_excludes or (
+                "[cmd] adb",
+                "logcat 等待中",
+                "uiautomator dump",
+                "screencap -p",
+            )
+            _milestone_tokens = custom_includes or (
+                ">> logcat 发现",
+                ">> am broadcast",
+                ">>> 套件：",
+                "结果：",
+                "[PASS]",
+                "[FAIL]",
+                "RELEASE GATE:",
+                "=== [",
+                "MockServer",
+                "onAdLoaded",
+                "LOAD_SUCCESS",
+                "SHOW_OK",
+                "IMPRESSION",
+                "CLICK_OK",
+                "AD_CLOSE",
+                "app_ad_rev",
+                "s_vld=",
+            )
+            console_hits: list[str] = []
+            for line in raw_console.splitlines():
+                s = line.strip()
+                if not s or any(nt in s for nt in _noise_tokens):
+                    continue
+                if any(mt in s for mt in _milestone_tokens):
+                    console_hits.append(s)
+            if console_hits:
+                if out:
+                    _add("━━━ [测试执行关键判定流水 (已自动过滤 ADB 轮询噪音)] ━━━")
+                for ch in console_hits[-80:]:
+                    _add(ch)
+        except Exception:
+            pass
+
+    # 3. Extract lifecycle callbacks from logcat/*.log or latest scene_restores/*/logcat.txt
+    _sdk_tokens = custom_includes or (
+        "ActivityTaskManager",
+        "Displayed",
+        "AdTest",
+        "[AdMaster/",
+        "AdDebugPanel",
+        "Adm-AdRevReporter",
+        "AdMasterApplication",
+        "SVldManualTest",
+        "onAdLoaded",
+        "onAdShow",
+        "onAdClick",
+        "onAdClose",
+        "bidding success",
+        "ready to show",
+        "FATAL EXCEPTION",
+        "ANR in",
+    )
+    candidate_logs: list[Path] = []
+    for lf in logcat_files:
+        p = Path(lf.get("abs_path", ""))
+        if p.is_file():
+            candidate_logs.append(p)
+    restores_dir = run_dir / "scene_restores"
+    if restores_dir.is_dir():
+        try:
+            restore_logs = sorted(
+                restores_dir.glob("*/logcat.txt"),
+                key=lambda x: x.stat().st_mtime,
+                reverse=True,
+            )
+            if restore_logs:
+                candidate_logs.append(restore_logs[0])
+        except Exception:
+            pass
+
+    for log_path in candidate_logs[:3]:
+        try:
+            raw_lc = _read_bytes(log_path).decode("utf-8", errors="replace")
+            sdk_hits = [
+                ln.strip()
+                for ln in raw_lc.splitlines()
+                if ln.strip() and any(tok in ln for tok in _sdk_tokens)
+            ]
+            if sdk_hits:
+                src_label = (
+                    "最新真机复原进程 Logcat"
+                    if "scene_restores" in str(log_path)
+                    else f"Logcat ({log_path.name})"
+                )
+                _add(f"━━━ [{src_label} SDK 关键回调摘录] ━━━")
+                for sh in sdk_hits[-45:]:
+                    _add(sh)
+        except Exception:
+            pass
+
+    return out[:160]
