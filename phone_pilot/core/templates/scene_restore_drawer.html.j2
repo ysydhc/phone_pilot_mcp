@@ -92,23 +92,25 @@
         </div>
       </div>
 
-      <!-- 可视化步骤步进器 (Stepper) -->
-      <div class="stepper-title">
-        <span>真机自动执行动作序列（切换上方场景可实时预览对应步骤）</span>
-        <span id="stepper-progress-text" style="color:var(--blue);font-weight:700;">待启动</span>
-      </div>
-      <div class="stepper-grid" id="scene-stepper-grid">
-        {% for s in scene.planned_steps %}
-        <div class="step-card-item" data-step-idx="{{ s.index }}">
-          <div class="step-idx-dot">{{ s.index }}</div>
-          <div class="step-card-body">
-            <div class="step-card-title">{{ s.index }}. {{ s.title }}</div>
-            <div class="step-card-desc">{{ s.detail }}</div>
-            <div class="step-card-time"></div>
+      <!-- 可视化步骤步进器 (Stepper，默认折叠减少干扰) -->
+      <details style="margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--surface);">
+        <summary class="stepper-title" style="cursor:pointer;list-style:none;margin:0;">
+          <span>🛠️ 查看真机复原动作序列</span>
+          <span id="stepper-progress-text" style="color:var(--blue);font-weight:700;">待启动</span>
+        </summary>
+        <div class="stepper-grid" id="scene-stepper-grid" style="margin-top:10px;">
+          {% for s in scene.planned_steps %}
+          <div class="step-card-item" data-step-idx="{{ s.index }}">
+            <div class="step-idx-dot">{{ s.index }}</div>
+            <div class="step-card-body">
+              <div class="step-card-title">{{ s.index }}. {{ s.title }}</div>
+              <div class="step-card-desc">{{ s.detail }}</div>
+              <div class="step-card-time"></div>
+            </div>
           </div>
+          {% endfor %}
         </div>
-        {% endfor %}
-      </div>
+      </details>
 
       <!-- 实时复原执行控制台流水 (执行期间实时滚动显示，支持换行) -->
       <div id="restore-live-console" style="display:none;background:#0f172a;color:#e2e8f0;font-family:var(--mono);font-size:.76rem;line-height:1.6;padding:12px 16px;border-radius:10px;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #334155;margin-top:6px;"></div>
@@ -117,6 +119,7 @@
       <div id="scene-outcome-card" class="restore-outcome-card">
         <div class="outcome-layout">
           <div>
+            <video id="restore-outcome-video" controls playsinline preload="metadata" style="width:100%;max-height:360px;border-radius:8px;background:#000;display:none;margin-bottom:8px;border:1px solid var(--border);"></video>
             <div class="shot-annot-wrap">
               <img id="outcome-screenshot" class="outcome-shot" style="border:none;" src="" alt="真机复原终态实拍图" onclick="if(window.openLightbox)openLightbox(this.src)">
               <div id="outcome-tap-bullseye" class="tap-bullseye" style="display:none;"></div>
@@ -125,20 +128,21 @@
           </div>
           <div style="min-width:0;">
             <div id="outcome-badge" style="font-size:1.05rem;font-weight:700;color:var(--green);margin-bottom:8px;">✅ 真机现场复原成功！</div>
-            <p id="outcome-summary" style="font-size:.88rem;color:var(--text);margin-bottom:10px;line-height:1.5;"></p>
-            <div id="outcome-meta" style="font-size:.8rem;color:var(--text2);line-height:1.7;background:var(--bg);padding:10px 14px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;"></div>
+            <p id="outcome-summary" style="font-size:.88rem;color:var(--text);margin-bottom:8px;line-height:1.5;"></p>
+            <div id="outcome-meta" style="font-size:.78rem;color:var(--text2);line-height:1.6;background:var(--bg);padding:8px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:10px;"></div>
 
-            <!-- 关键业务判定日志面板 -->
-            <div id="outcome-key-logs-box" style="display:none;margin-top:10px;">
+            <!-- 关键业务判定日志面板（支持与复原录屏时间双向联动） -->
+            <div id="outcome-key-logs-box" style="display:none;margin-top:8px;">
               <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
-                <span style="font-size:.82rem;font-weight:700;color:var(--text);">🎯 关键业务判定日志（SDK 生命周期回调 / 曝光计费 / Mock 命中）</span>
+                <span style="font-size:.82rem;font-weight:700;color:var(--text);">🎯 实时业务日志 &amp; Mock 回执</span>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                  <a id="outcome-open-log-btn" href="#" target="_blank" class="btn-sm" style="text-decoration:none;display:none;">📄 查看完整进程 Logcat</a>
-                  <button type="button" id="outcome-finder-log-btn" class="btn-sm" style="display:none;">📂 在 Finder 中打开</button>
-                  <button type="button" id="outcome-copy-log-btn" class="btn-sm">📋 复制关键日志</button>
+                  <button type="button" id="outcome-log-sync-btn" class="btn-sm" style="display:none;border-color:var(--blue);color:var(--blue);">⏱️ 随视频时间同步</button>
+                  <a id="outcome-open-log-btn" href="#" target="_blank" class="btn-sm" style="text-decoration:none;display:none;">📄 查看完整 Logcat</a>
+                  <button type="button" id="outcome-finder-log-btn" class="btn-sm" style="display:none;">📂 Finder</button>
+                  <button type="button" id="outcome-copy-log-btn" class="btn-sm">📋 复制日志</button>
                 </div>
               </div>
-              <div id="outcome-key-logs" style="background:#0f172a;color:#a7f3d0;font-family:var(--mono);font-size:.75rem;line-height:1.6;padding:12px 14px;border-radius:8px;max-height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #1e293b;"></div>
+              <div id="outcome-key-logs" style="background:#0f172a;color:#a7f3d0;font-family:var(--mono);font-size:.75rem;line-height:1.6;padding:12px 14px;border-radius:8px;max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #1e293b;"></div>
             </div>
           </div>
         </div>
@@ -453,10 +457,29 @@
         } while (result.status === 'RUNNING' || result.status === 'QUEUED');
 
         if (result.status === 'SUCCESS') {
-          if (progressText) progressText.textContent = '✅ 全部步骤执行完成！';
+          if (progressText) progressText.textContent = '✅ 复原完成';
+          if (liveConsole) liveConsole.style.display = 'none';
           if (outcomeCard) {
             outcomeCard.className = 'restore-outcome-card';
             outcomeCard.style.display = 'block';
+          }
+          const selectedObj = catalogScenes.find(s => s.scene_id === sceneId);
+          const outVideo = document.getElementById('restore-outcome-video');
+          const outSyncBtn = document.getElementById('outcome-log-sync-btn');
+          const restoreVidPath = (result.evidence && result.evidence['restore.mp4'] && result.evidence['restore.mp4'].path)
+            ? ('/run/' + encodeURIComponent(runName) + '/' + result.evidence['restore.mp4'].path + '?t=' + Date.now())
+            : (selectedObj && selectedObj.video_rel_path ? ('/run/' + encodeURIComponent(runName) + '/' + selectedObj.video_rel_path) : '');
+          const hasOutVideo = Boolean(restoreVidPath && outVideo);
+          if (outVideo) {
+            if (hasOutVideo) {
+              outVideo.style.display = 'block';
+              outVideo.src = restoreVidPath;
+              outVideo.currentTime = 0;
+            } else {
+              outVideo.pause();
+              outVideo.removeAttribute('src');
+              outVideo.style.display = 'none';
+            }
           }
           const shotPath = result.evidence && result.evidence['screenshot.png'] ? result.evidence['screenshot.png'].path : '';
           if (shotPath && outcomeShot) {
@@ -484,41 +507,90 @@
             if (outTapTag) outTapTag.style.display = 'none';
           }
           const bVerdict = (result.receipt && result.receipt.business_verdict) || {};
-          const selectedObj = catalogScenes.find(s => s.scene_id === sceneId);
           const sceneLabel = selectedObj ? selectedObj.title : '目标场景';
           if (outcomeBadge) {
             outcomeBadge.textContent = `✅ 真机现场复原成功！（${sceneLabel}）`;
             outcomeBadge.style.color = 'var(--green)';
           }
           if (outcomeSummary) {
-            outcomeSummary.textContent = bVerdict.summary || '已完成冷启动、Mock 规则注入、进入页面与触发展示全链路。';
+            outcomeSummary.textContent = bVerdict.summary || '已完成冷启动、Mock 规则注入与展示全链路。';
           }
           const freshPid = result.receipt && result.receipt.fresh_process ? result.receipt.fresh_process.pid : '-';
           const usedSerial = result.device_serial || serial;
+          const pkgName = (result.receipt && result.receipt.package && result.receipt.package.name) || '';
           if (outcomeMeta) {
-            outcomeMeta.innerHTML = `
-              <div><strong>复原场景：</strong>${sceneLabel}</div>
-              <div><strong>执行真机：</strong>${usedSerial}</div>
-              <div><strong>应用包名：</strong>${(result.receipt && result.receipt.package && result.receipt.package.name) || 'cc.admaster.android.demo'} (全新进程 PID: ${freshPid})</div>
-              <div><strong>触发动作数：</strong>共完成 ${(result.receipt && result.receipt.actions && result.receipt.actions.length) || 0} 个端侧原子操作</div>
-              <div><strong>现场证据：</strong>已自动归档实时截屏、UI Hierarchy 树与进程级 Logcat</div>
-            `;
+            outcomeMeta.innerHTML = `<span><strong>真机：</strong>${usedSerial}</span> · <span><strong>应用：</strong>${pkgName} (PID: ${freshPid})</span>`;
           }
 
-          // Render Key Acceptance Logs from SDK & MockServer
+          // Render Key Acceptance Logs with Video <-> Log Time Sync
           const keyLogsList = bVerdict.key_logs || [];
+          const tlOutLogs = (bVerdict.timeline_logs && bVerdict.timeline_logs.length)
+            ? bVerdict.timeline_logs
+            : (keyLogsList.length
+                ? keyLogsList.map((ln, i) => ({ t: Number((i * 0.5).toFixed(2)), line: ln }))
+                : ((selectedObj && selectedObj.timeline_logs) || []));
           const logcatRel = (result.evidence && result.evidence['logcat.txt'] && result.evidence['logcat.txt'].path) || bVerdict.rel_logcat_path || '';
           const logcatAbs = bVerdict.abs_logcat_path || '';
           if (outcomeKeyLogsBox && outcomeKeyLogs) {
             outcomeKeyLogsBox.style.display = 'block';
-            const logText = keyLogsList.length
-              ? keyLogsList.join('\n')
-              : ((result.progress && result.progress.logs && result.progress.logs.join('\n')) || '进程已启动，暂无额外过滤命中日志');
-            if (window.highlightLogHtml) {
-              outcomeKeyLogs.innerHTML = window.highlightLogHtml(logText);
-            } else {
-              outcomeKeyLogs.textContent = logText;
+            const fmtOutT = (sec) => {
+              const s = Math.max(0, Number(sec || 0));
+              return `${String(Math.floor(s / 60)).padStart(2, '0')}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+            };
+            const logText = tlOutLogs.length
+              ? tlOutLogs.map(item => `[${fmtOutT(item.t)}] ${item.line}`).join('\n')
+              : (keyLogsList.join('\n') || '复原完成');
+            let outSync = hasOutVideo;
+            const renderOutLogs = (curT) => {
+              if (!tlOutLogs.length) {
+                outcomeKeyLogs.innerHTML = window.highlightLogHtml ? window.highlightLogHtml(logText) : logText;
+                return;
+              }
+              let activeIdx = -1;
+              if (hasOutVideo) {
+                for (let i = 0; i < tlOutLogs.length; i++) {
+                  if (Number(tlOutLogs[i].t || 0) <= curT + 0.15) activeIdx = i;
+                }
+              }
+              const rows = tlOutLogs.map((item, i) => {
+                const t = Number(item.t || 0);
+                const isFuture = hasOutVideo && t > curT + 0.15;
+                if (outSync && isFuture && i > 0) return '';
+                const cls = ['qi-log-line'];
+                if (i === activeIdx) cls.push('active-time');
+                else if (!outSync && isFuture) cls.push('future-time');
+                const hl = window.highlightLogHtml ? window.highlightLogHtml(item.line) : item.line;
+                return `<div class="${cls.join(' ')}" data-t="${t}" title="点击跳转视频 ${fmtOutT(t)}"><span class="qi-log-ts">[${fmtOutT(t)}]</span>${hl}</div>`;
+              }).filter(Boolean);
+              outcomeKeyLogs.innerHTML = rows.join('');
+              outcomeKeyLogs.querySelectorAll('.qi-log-line').forEach(el => {
+                el.addEventListener('click', () => {
+                  if (outVideo && hasOutVideo) {
+                    outVideo.currentTime = Number(el.dataset.t || 0);
+                    outVideo.play().catch(() => {});
+                  }
+                });
+              });
+              if (outSync) outcomeKeyLogs.scrollTop = outcomeKeyLogs.scrollHeight;
+            };
+            const updateOutSync = () => {
+              const curT = (outVideo && hasOutVideo) ? Number(outVideo.currentTime || 0) : 0;
+              if (outSyncBtn) {
+                outSyncBtn.style.display = hasOutVideo ? 'inline-flex' : 'none';
+                outSyncBtn.textContent = outSync ? '⏱️ 随视频时间同步' : '📜 显示完整日志';
+                outSyncBtn.style.borderColor = outSync ? 'var(--blue)' : 'var(--border)';
+                outSyncBtn.style.color = outSync ? 'var(--blue)' : 'var(--text2)';
+              }
+              renderOutLogs(curT);
+            };
+            if (outVideo) {
+              outVideo.ontimeupdate = updateOutSync;
+              outVideo.onseeked = updateOutSync;
             }
+            if (outSyncBtn) {
+              outSyncBtn.onclick = () => { outSync = !outSync; updateOutSync(); };
+            }
+            updateOutSync();
             if (outcomeOpenLogBtn) {
               if (logcatRel) {
                 outcomeOpenLogBtn.href = '/run/' + encodeURIComponent(runName) + '/' + logcatRel;

@@ -22,6 +22,65 @@ from pathlib import Path
 from typing import Any, Optional
 
 
+def _write_launcher_script(run_dir: Path) -> Path:
+    """Write a double-clickable macOS .command / bash launcher next to report.html."""
+    import shlex
+    import sys
+
+    py_bin = shlex.quote(sys.executable)
+    run_name = run_dir.name
+    script = f"""#!/usr/bin/env bash
+set -euo pipefail
+RUN_DIR="$(cd "$(dirname "$0")" && pwd)"
+REC_DIR="$(cd "$RUN_DIR/../.." && pwd)"
+RUN_NAME={shlex.quote(run_name)}
+BASE_PORT="${{PP_WEB_PORT:-8686}}"
+PORT=""
+
+for p in $(seq "$BASE_PORT" $((BASE_PORT + 15))); do
+  CAND_URL="http://127.0.0.1:${{p}}/run/${{RUN_NAME}}/report.html"
+  if lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
+    CODE="$(curl -s -o /dev/null -w "%{{http_code}}" "$CAND_URL" 2>/dev/null || echo 000)"
+    if [ "$CODE" = "200" ]; then
+      echo "[pp] 服务已在 :$p 运行且匹配当前报告，直接打开: $CAND_URL"
+      open "$CAND_URL" >/dev/null 2>&1 || true
+      exit 0
+    fi
+    continue
+  fi
+  PORT="$p"
+  break
+done
+
+if [ -z "$PORT" ]; then
+  echo "[pp] 错误: 端口 ${{BASE_PORT}}..$((BASE_PORT + 15)) 均被其他目录占用" >&2
+  exit 1
+fi
+
+REPORT_URL="http://127.0.0.1:${{PORT}}/run/${{RUN_NAME}}/report.html"
+echo "[pp] 正在启动 phone_pilot Web 服务 (recordings=$REC_DIR, port=$PORT)..."
+(
+  for _ in $(seq 1 30); do
+    if lsof -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      open "$REPORT_URL" >/dev/null 2>&1 || true
+      break
+    fi
+    sleep 0.2
+  done
+) &
+
+exec {py_bin} -m phone_pilot.web --recordings-dir "$REC_DIR" --port "$PORT" --no-browser --auto-approve
+"""
+    with safe_directory(run_dir, writable=True) as folder:
+        folder.write_bytes("open_pp_server.command", script.encode("utf-8"), replace=True)
+    launcher = run_dir / "open_pp_server.command"
+    try:
+        os.chmod(launcher, 0o755)
+    except OSError:
+        pass
+    return launcher
+
+
 def generate_html_report(run_dir: str | Path) -> Path:
     """生成 HTML 可视化报告 / Generate HTML visual report.
 
@@ -45,6 +104,7 @@ def generate_html_report(run_dir: str | Path) -> Path:
     report_path = run_dir / "report.html"
     with safe_directory(run_dir, writable=True) as folder:
         folder.write_bytes("report.html", html.encode("utf-8"), replace=True)
+    _write_launcher_script(run_dir)
     return report_path
 
 
@@ -103,6 +163,16 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
         },
     )
     data["meta"] = meta
+
+    # ---- task_context.json (需求/Bugfix 上下文说明) ----
+    task_ctx = _read_json(run_dir / "task_context.json") or meta.get("task_context") or {}
+    data["task_context"] = task_ctx if isinstance(task_ctx, dict) else {}
+
+    # ---- freshness_gate.json & visual_judgments.json (P1 门禁与 VLM 裁判) ----
+    freshness = _read_json(run_dir / "freshness_gate.json")
+    data["freshness_gate"] = freshness if isinstance(freshness, dict) else {}
+    vlm_raw = _read_json(run_dir / "visual_judgments.json")
+    data["visual_judgments"] = vlm_raw if isinstance(vlm_raw, list) else []
 
     from phone_pilot.core.report_evidence import business_projection
     from phone_pilot.core.scene_restore import inspect_scene

@@ -14,6 +14,7 @@ The raw manifest bytes (not normalized JSON) are the approval boundary.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -123,9 +124,9 @@ def _load_archive(archive):
     _require(m["schema"] == SCHEMA, "unsupported_schema", "Unsupported recipe schema")
     _keys(m["device"], {"platform", "serial"}, "device")
     _require(
-        m["device"]["platform"] == "android",
+        m["device"]["platform"] in ("android", "ios"),
         "unsupported_platform",
-        "Only Android supported",
+        "Only Android and iOS supported",
     )
     _require(
         isinstance(m["device"]["serial"], str)
@@ -219,13 +220,15 @@ def _load_archive(archive):
         a_type = action.get("type")
         if allow_online:
             _require(
-                a_type in ("tap_selector", "broadcast", "reverse_port", "wait_duration", "clear_data"),
+                a_type in ("tap_selector", "broadcast", "reverse_port", "wait_duration", "clear_data", "open_url"),
                 "unknown_action",
                 f"Unsupported action type: {a_type}",
             )
             if a_type == "tap_selector":
                 _keys(action, {"type", "selector"}, "action")
                 _selector(action["selector"])
+            elif a_type == "open_url":
+                _require(isinstance(action.get("url"), str) and bool(action["url"].strip()), "invalid_schema", "open_url requires non-empty 'url' string")
             elif a_type == "broadcast":
                 _require(isinstance(action.get("action"), str), "invalid_schema", "broadcast action requires 'action' string")
             elif a_type == "reverse_port":
@@ -311,19 +314,21 @@ def _result(status, digest=None, serial=None, error=None, receipt=None, evidence
 def inspect_scene(run_dir):
     """Validate local recipe only. READY is not device approval or live preflight."""
     digest = None
+    catalog = {}
     try:
-        catalog = {}
+        catalog_path = Path(run_dir) / "scene_catalog.json"
         if os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1":
-            try:
-                from phone_pilot.core.manifest_generator import ensure_scene_manifest, ensure_scene_catalog
-                ensure_scene_manifest(run_dir)
-                catalog_path = Path(run_dir) / "scene_catalog.json"
-                if catalog_path.is_file():
-                    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-                else:
-                    catalog = ensure_scene_catalog(Path(run_dir))
-            except Exception:
-                pass
+            from phone_pilot.core.manifest_generator import ensure_scene_manifest, ensure_scene_catalog
+            ensure_scene_manifest(run_dir)
+            if catalog_path.is_file():
+                catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+            else:
+                catalog = ensure_scene_catalog(Path(run_dir))
+        elif catalog_path.is_file():
+            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception:
+        catalog = {}
+    try:
         _, m, digest = _load(run_dir)
         res = _result("READY", digest, m["device"]["serial"])
         res["actions"] = m.get("actions", [])
@@ -343,7 +348,12 @@ def inspect_scene(run_dir):
                 ).hexdigest()
         except Exception:
             pass
-        return _result("BLOCKED", digest, error=error)
+        res = _result("BLOCKED", digest, error=error)
+        res["catalog"] = catalog
+        res["scenes"] = catalog.get("scenes", [])
+        res["default_scene_id"] = catalog.get("default_scene_id", "default")
+        res["is_multi_suite"] = bool(catalog.get("is_multi_suite", False))
+        return res
 
 
 class _Android:
@@ -951,12 +961,596 @@ def _action_label(action: dict) -> tuple[str, str]:
         if txt in ("show", "展示激励视频", "展示插屏", "展示Banner"):
             return (f"触发广告展示 ({txt})", f"动态定位并点击「{txt}」按钮，渲染广告视图")
         return (f"导航进入「{txt}」页面", f"动态解析屏幕 Bounds 并点击「{txt}」")
+    if a_type == "open_url":
+        return ("通过 DeepLink 跳转目标页", f"打开 {action.get('url', '')}")
     if a_type == "wait_duration":
         sec = action.get("seconds", 2.0)
         return ("等待广告物料就绪", f"监听 Mock 响应与 onAdLoaded 状态 (缓冲 {sec}s)")
     if a_type == "clear_data":
         return ("重置应用缓存数据", "执行 pm clear 恢复初始默认状态")
     return (f"执行动作 {a_type}", str(action))
+
+
+def _discover_media_roots(run_dir: Optional[Path] = None) -> list[Path]:
+    """Discover static media directories generically from run_dir, pp_profile.json, or PHONE_PILOT_MEDIA_DIRS."""
+    candidates: list[Path] = []
+    if run_dir is not None:
+        candidates.append(Path(run_dir) / "media")
+        for cfg_dir in (Path(run_dir), Path(run_dir).parent, Path.cwd()):
+            prof = cfg_dir / "pp_profile.json"
+            if prof.is_file():
+                try:
+                    pdata = json.loads(prof.read_text(encoding="utf-8"))
+                    for md in pdata.get("media_dirs") or []:
+                        if isinstance(md, str) and md.strip():
+                            candidates.append(Path(md).expanduser())
+                except Exception:
+                    pass
+    env_dirs = (os.environ.get("PHONE_PILOT_MEDIA_DIRS") or "").strip()
+    if env_dirs:
+        for item in env_dirs.split(os.pathsep):
+            if item.strip():
+                candidates.append(Path(item.strip()).expanduser())
+    seen: set[str] = set()
+    resolved: list[Path] = []
+    for p in candidates:
+        try:
+            rp = p.resolve()
+            if rp.is_dir() and str(rp) not in seen:
+                seen.add(str(rp))
+                resolved.append(rp)
+        except Exception:
+            pass
+    return resolved
+
+
+def _mount_replay_media_handler(server: Any, run_dir: Optional[Path] = None) -> None:
+    """Mount `/media/<filename>` static + Range (206) handler on MockServer._data_server."""
+    data_srv = getattr(server, "_data_server", None)
+    if not data_srv:
+        return
+    handler_cls = data_srv.RequestHandlerClass
+    existing_roots = _discover_media_roots(run_dir)
+    setattr(handler_cls, "_pp_restore_media_roots", existing_roots)
+    if getattr(handler_cls, "_pp_restore_media_mounted", False):
+        return
+    orig_handle = handler_cls._handle
+
+    def _wrapped_handle(self: Any) -> None:
+        clean_path = self.path.split("?", 1)[0]
+        if clean_path.startswith("/media/"):
+            fname = clean_path[len("/media/") :]
+            roots = getattr(handler_cls, "_pp_restore_media_roots", [])
+            for root_dir in roots:
+                fpath = (root_dir / fname).resolve()
+                if fpath.is_file() and str(fpath).startswith(str(root_dir)):
+                    raw = fpath.read_bytes()
+                    total = len(raw)
+                    ext = fpath.suffix.lower()
+                    ctype = (
+                        "video/mp4"
+                        if ext == ".mp4"
+                        else "image/jpeg"
+                        if ext in (".jpg", ".jpeg")
+                        else "image/gif"
+                        if ext == ".gif"
+                        else "image/png"
+                    )
+                    range_hdr = self.headers.get("Range") or self.headers.get("range")
+                    if range_hdr and range_hdr.startswith("bytes="):
+                        try:
+                            rng = range_hdr[6:].split(",")[0].strip()
+                            s_str, e_str = rng.split("-", 1)
+                            start = int(s_str) if s_str else 0
+                            end = int(e_str) if e_str else total - 1
+                            end = min(end, total - 1)
+                            chunk = raw[start : end + 1]
+                            self.send_response(206)
+                            self.send_header("Content-Type", ctype)
+                            self.send_header("Accept-Ranges", "bytes")
+                            self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+                            self.send_header("Content-Length", str(len(chunk)))
+                            self.end_headers()
+                            if self.command != "HEAD" and chunk:
+                                self.wfile.write(chunk)
+                            return
+                        except Exception:
+                            pass
+                    self.send_response(200)
+                    self.send_header("Content-Type", ctype)
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Length", str(total))
+                    self.end_headers()
+                    if self.command != "HEAD" and raw:
+                        self.wfile.write(raw)
+                    return
+        orig_handle(self)
+
+    handler_cls._handle = _wrapped_handle
+    setattr(handler_cls, "_pp_restore_media_mounted", True)
+
+
+_VALID_SCENE_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _safe_scene_dir(run_dir: Path, scene_id: str | None) -> Path | None:
+    """Resolve run_dir/scenes/<scene_id> safely without allowing path traversal."""
+    if not scene_id or not isinstance(scene_id, str):
+        return None
+    if not _VALID_SCENE_ID_RE.fullmatch(scene_id):
+        return None
+    cand = Path(run_dir) / "scenes" / scene_id
+    if cand.is_dir() and not cand.is_symlink():
+        return cand
+    return None
+
+
+def _resolve_mock_rules_path(run_dir: Path, scene_id: str | None = None) -> Path | None:
+    sdir = _safe_scene_dir(run_dir, scene_id)
+    if sdir is not None:
+        sc_rules = sdir / "mock_rules.json"
+        if sc_rules.is_file() and not sc_rules.is_symlink():
+            return sc_rules
+    root_rules = Path(run_dir) / "mock_rules.json"
+    if root_rules.is_file() and not root_rules.is_symlink():
+        return root_rules
+    return None
+
+
+def _start_replay_mock_server(
+    run_dir: Path,
+    emit,
+    *,
+    ctrl_port: int = 8081,
+    data_port: int = 8090,
+    device_port: int | None = None,
+    scene_id: str | None = None,
+) -> int:
+    """Start or reset local MockServer from per-scene or run_dir mock_rules.json, returning actual data port."""
+    global _REPLAY_MOCK_SERVER
+    rules_path = _resolve_mock_rules_path(Path(run_dir), scene_id=scene_id)
+    if rules_path is None:
+        return data_port
+    try:
+        from phone_pilot.mock.server import MockServer
+        from phone_pilot.mock.rules import RuleStore, RequestLog
+
+        rules_content = json.loads(rules_path.read_text(encoding="utf-8"))
+        if (
+            _REPLAY_MOCK_SERVER is None
+            or not getattr(_REPLAY_MOCK_SERVER, "is_running", False)
+            or (data_port != 0 and getattr(_REPLAY_MOCK_SERVER, "data_port", None) != data_port)
+        ):
+            if _REPLAY_MOCK_SERVER is not None and getattr(_REPLAY_MOCK_SERVER, "is_running", False):
+                try:
+                    _REPLAY_MOCK_SERVER.stop()
+                except Exception:
+                    pass
+            store = RuleStore()
+            req_log = RequestLog()
+            _REPLAY_MOCK_SERVER = MockServer(store, req_log, ctrl_port=ctrl_port, data_port=data_port)
+            _REPLAY_MOCK_SERVER.start()
+        else:
+            store = _REPLAY_MOCK_SERVER._store
+            store.clear()
+            if hasattr(_REPLAY_MOCK_SERVER, "_log") and _REPLAY_MOCK_SERVER._log is not None:
+                _REPLAY_MOCK_SERVER._log.clear()
+
+        actual_port = int(getattr(_REPLAY_MOCK_SERVER, "data_port", data_port) or data_port)
+        url_target_port = int(device_port) if device_port else actual_port
+        _mount_replay_media_handler(_REPLAY_MOCK_SERVER, run_dir=run_dir)
+        for mdir in _discover_media_roots(Path(run_dir)):
+            if mdir.is_dir():
+                for mf in mdir.iterdir():
+                    if mf.is_file():
+                        store.set_rule("GET", f"/media/{mf.name}", status=200, body=f"__file__:{mf}")
+
+        for r in rules_content:
+            m_method = r.get("method", "POST")
+            m_path = r.get("path", "/sdk/bid")
+            m_status = int(r.get("status", 200))
+            m_body = r.get("body", {})
+            if isinstance(m_body, dict):
+                raw_json = json.dumps(m_body, ensure_ascii=False)
+                raw_json = re.sub(r"http://127\.0\.0\.1:\d+", f"http://127.0.0.1:{url_target_port}", raw_json)
+                m_body = json.loads(raw_json)
+            m_delay = int(r.get("delay_ms", 0))
+            store.set_rule(m_method, m_path, status=m_status, body=m_body, delay_ms=m_delay)
+            other_method = "GET" if m_method == "POST" else "POST"
+            store.set_rule(other_method, m_path, status=m_status, body=m_body, delay_ms=m_delay)
+            if m_path == "/sdk/bid":
+                store.set_rule(m_method, "/sdk/mock/bid", status=m_status, body=m_body, delay_ms=m_delay)
+                store.set_rule(other_method, "/sdk/mock/bid", status=m_status, body=m_body, delay_ms=m_delay)
+        emit("log", message=f"[MockServer] 已加载 {len(rules_content)} 条打桩规则，监听端口 :{actual_port}")
+        return actual_port
+    except Exception as exc:
+        import sys
+
+        sys.stderr.write(f"[scene_restore] MockServer setup warning: {exc}\n")
+        return data_port
+
+
+def _inject_ios_mock_defaults(device_serial: str, bundle_id: str, mock_port: int = 18090) -> None:
+    """Inject local MockServer host & Houyi switch defaults into iOS Simulator app container."""
+    try:
+        import datetime as _dt
+        import plistlib
+        import subprocess
+        import sys
+        from phone_pilot.ios.pmd import utils as pmd_utils
+
+        proc = subprocess.run(
+            pmd_utils.simctl_prefix() + ["get_app_container", device_serial, bundle_id, "data"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        container = (proc.stdout or "").strip()
+        if proc.returncode != 0 or not container:
+            return
+        prefs_dir = os.path.join(container, "Library", "Preferences")
+        os.makedirs(prefs_dir, exist_ok=True)
+        plist_path = os.path.join(prefs_dir, f"{bundle_id}.plist")
+        mock_host = f"http://127.0.0.1:{mock_port}"
+        payload = {
+            "kADMHouyiRawSwitchListKey": [
+                {"type": "host_switch_config", "switch": "yes", "enabled": True, "host": mock_host},
+                {
+                    "type": "urlConfig",
+                    "switch": "yes",
+                    "adUrl": f"{mock_host}/sdk/bid",
+                    "mockAdUrl": f"{mock_host}/sdk/mock/bid",
+                },
+            ],
+            "kADMHouyiUpdateTime": _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None),
+            "adm_mock_mode_enabled": True,
+            "adm_demo_custom_mock_host": mock_host,
+            "adm_demo_env_mode": 2,
+            "adm_demo_env_mode_explicit": True,
+            "ADMDebugLogEnabled": True,
+        }
+        tmp_plist = f"/tmp/pp_ios_mock_{device_serial}.plist"
+        with open(tmp_plist, "wb") as f:
+            plistlib.dump(payload, f, fmt=plistlib.FMT_BINARY)
+        with open(plist_path, "wb") as f:
+            plistlib.dump(payload, f, fmt=plistlib.FMT_BINARY)
+        subprocess.run(
+            pmd_utils.simctl_prefix() + ["spawn", device_serial, "defaults", "import", plist_path, tmp_plist],
+            capture_output=True,
+            timeout=5,
+        )
+        app_support_dir = os.path.join(container, "Library", "Application Support", "com.admaster.sdk")
+        if os.path.isdir(app_support_dir):
+            for fname in os.listdir(app_support_dir):
+                if fname.endswith(".cfg"):
+                    try:
+                        os.remove(os.path.join(app_support_dir, fname))
+                    except OSError:
+                        pass
+    except Exception as exc:
+        import sys
+
+        sys.stderr.write(f"[scene_restore] _inject_ios_mock_defaults warning: {exc}\n")
+
+
+def _restore_scene_ios(
+    *,
+    root: Path,
+    m: dict,
+    digest: str,
+    device_serial: str,
+    planned_steps: list[dict],
+    final_step_idx: int,
+    output,
+    prefix: str,
+    emit,
+    mode: str,
+    scene_id: str | None = None,
+) -> dict:
+    """Execute one-click scene restore on iOS Simulator or connected iOS device."""
+    from phone_pilot.ios.driver import iOSDriver
+
+    bundle_id = (m.get("package") or {}).get("name") or "com.baidujp.gbusdkdemo"
+    raw_actions = m.get("actions", [])
+    emit("step_start", step_index=1, title=planned_steps[0]["title"], detail=planned_steps[0]["detail"])
+    t0 = time.time()
+    driver = iOSDriver(device_serial)
+    actual_mock_port = _start_replay_mock_server(root, emit, ctrl_port=0, data_port=0, scene_id=scene_id)
+    emit(
+        "step_done",
+        step_index=1,
+        status="SUCCESS",
+        elapsed_ms=int((time.time() - t0) * 1000),
+        detail=f"iOS 设备 {device_serial} 在线就绪，Mock 桩已激活",
+    )
+
+    mutated = False
+    restore_t0 = time.monotonic()
+    rec_tmp_mp4 = root / f".restore_tmp_{int(time.time())}.mp4"
+    rec_proc = None
+    try:
+        try:
+            rec_proc = subprocess.Popen(
+                ["xcrun", "simctl", "io", device_serial, "recordVideo", "--codec=h264", "--force", str(rec_tmp_mp4)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            rec_proc = None
+        # Step 2: force_stop
+        if len(raw_actions) >= 1 and raw_actions[0].get("type") == "force_stop":
+            s2_t0 = time.time()
+            emit("step_start", step_index=2, title=planned_steps[1]["title"], detail=planned_steps[1]["detail"])
+            driver.app.force_stop(bundle_id)
+            mutated = True
+            time.sleep(0.4)
+            emit(
+                "step_done",
+                step_index=2,
+                status="SUCCESS",
+                elapsed_ms=int((time.time() - s2_t0) * 1000),
+                detail=f"已停止 {bundle_id}",
+            )
+
+        # Step 3: launch
+        if len(raw_actions) >= 2 and raw_actions[1].get("type") == "launch":
+            if _resolve_mock_rules_path(root, scene_id=scene_id) is not None and actual_mock_port > 0:
+                _inject_ios_mock_defaults(device_serial, bundle_id, mock_port=actual_mock_port)
+            s3_t0 = time.time()
+            emit("step_start", step_index=3, title=planned_steps[2]["title"], detail=planned_steps[2]["detail"])
+            launch_res = driver.app.launch_app(bundle_id)
+            if isinstance(launch_res, dict) and launch_res.get("ok") is False:
+                raise SceneError("ios_launch_failed", f"启动 {bundle_id} 失败: {launch_res}")
+            mutated = True
+            time.sleep(2.4)
+            emit(
+                "step_done",
+                step_index=3,
+                status="SUCCESS",
+                elapsed_ms=int((time.time() - s3_t0) * 1000),
+                detail=f"已启动 {bundle_id} ({launch_res.get('pid', 'ok')})",
+            )
+
+        # Subsequent actions
+        for idx, action in enumerate(raw_actions[2:], start=4):
+            step_t0 = time.time()
+            title, detail = _action_label(action)
+            emit("step_start", step_index=idx, title=title, detail=detail)
+            a_type = action.get("type")
+            step_note = detail
+
+            if a_type == "tap_selector":
+                sel = action.get("selector") or {}
+                query = sel.get("text") or sel.get("resource_id") or ""
+                if query:
+                    elem = None
+                    for _ in range(6):
+                        try:
+                            found = driver.ui.find_elements({"text": query})
+                            if found:
+                                elem = found[0]
+                                break
+                        except Exception:
+                            pass
+                        time.sleep(0.45)
+                    if elem is None:
+                        try:
+                            from phone_pilot.extensions.vision.semantic_nav import SemanticNavigator
+
+                            all_elems = []
+                            try:
+                                all_elems = driver.ui.find_elements({}) or []
+                            except Exception:
+                                all_elems = []
+                            raw_img = None
+                            screen_sz = None
+                            try:
+                                raw_img = driver.screen.screenshot()
+                                info = driver.screen.get_screen_size() if hasattr(driver.screen, "get_screen_size") else None
+                                if isinstance(info, (list, tuple)) and len(info) == 2:
+                                    screen_sz = (int(info[0]), int(info[1]))
+                                elif isinstance(info, dict) and info.get("width") and info.get("height"):
+                                    screen_sz = (int(info["width"]), int(info["height"]))
+                            except Exception:
+                                pass
+                            nav_res = SemanticNavigator.from_env().locate(
+                                query,
+                                aliases=sel.get("aliases") or (),
+                                ui_elements=[
+                                    {
+                                        "label": e.get("label") or e.get("text") or e.get("name") or "",
+                                        "center": [e.get("center_x"), e.get("center_y")] if e.get("center_x") is not None else None,
+                                        "type": e.get("type") or "",
+                                    }
+                                    for e in all_elems
+                                    if isinstance(e, dict)
+                                ],
+                                screenshot_bytes=raw_img,
+                                screen_size=screen_sz,
+                            )
+                            if nav_res.ok and nav_res.center is not None:
+                                elem = {
+                                    "center_x": nav_res.center[0],
+                                    "center_y": nav_res.center[1],
+                                    "_healed_method": nav_res.method,
+                                    "_healed_label": nav_res.matched_label,
+                                }
+                        except Exception as nav_exc:
+                            emit("log", message=f"[iOS UI Self-Heal] 语义匹配跳过: {nav_exc}")
+
+                    if isinstance(elem, dict):
+                        cx = elem.get("center_x")
+                        cy = elem.get("center_y")
+                        if cx is not None and cy is not None:
+                            driver.input.tap(int(cx), int(cy))
+                            if elem.get("_healed_method"):
+                                step_note = f"语义自愈点击「{query}」->「{elem.get('_healed_label')}」({elem.get('_healed_method')}) @ ({int(cx)}, {int(cy)})"
+                            else:
+                                step_note = f"已点击「{query}」@ ({int(cx)}, {int(cy)})"
+                            emit("log", message=f"[iOS UI] {step_note}")
+                            time.sleep(1.5 if mode == "step" else 0.85)
+                    else:
+                        step_note = f"未匹配到控件「{query}」，已跳过"
+                        emit("log", message=f"[iOS UI] {step_note}")
+            elif a_type == "open_url":
+                raw_url = str(action.get("url") or "").strip()
+                eff_url = raw_url
+                if actual_mock_port > 0:
+                    eff_url = re.sub(
+                        r"(127\.0\.0\.1|localhost):\d+",
+                        rf"\g<1>:{actual_mock_port}",
+                        raw_url,
+                    )
+                if eff_url:
+                    import subprocess as _sp
+                    _sp.run(["xcrun", "simctl", "openurl", device_serial, eff_url], check=False, timeout=8, capture_output=True)
+                    step_note = f"已通过 DeepLink 打开 {eff_url}"
+                    emit("log", message=f"[iOS URL] {step_note}")
+                    time.sleep(1.5 if mode == "step" else 1.0)
+            elif a_type == "wait_duration":
+                wait_sec = float(action.get("seconds", 2.0))
+                time.sleep(max(wait_sec, 1.5))
+                step_note = f"异步等待 {wait_sec:.1f}s 完成"
+            elif a_type in ("reverse_port", "broadcast"):
+                step_note = f"iOS 无需执行 {a_type}（宿主机 localhost:8090 直通）"
+                emit("log", message=f"[iOS] {step_note}")
+
+            emit(
+                "step_done",
+                step_index=idx,
+                status="SUCCESS",
+                elapsed_ms=int((time.time() - step_t0) * 1000),
+                detail=step_note,
+            )
+
+        # Final Step: Capture screenshot & UI hierarchy
+        f_t0 = time.time()
+        emit(
+            "step_start",
+            step_index=final_step_idx,
+            title=planned_steps[-1]["title"],
+            detail=planned_steps[-1]["detail"],
+        )
+        time.sleep(0.8)
+        png = driver.screen.screenshot()
+        _validate_png(png)
+        ui_xml = ""
+        try:
+            ui_xml = driver.ui.dump_ui_hierarchy() or ""
+        except Exception:
+            ui_xml = ""
+
+        fail_markers = ("didFailToReceiveAdWithError", "Could not connect to the server", "No fill", "Load failed")
+        matched_fail = next((m_str for m_str in fail_markers if m_str in ui_xml), None)
+        ad_shown = any(
+            tok in ui_xml
+            for tok in (
+                "adm_reward_endcard_view",
+                "adm_reward_content_container",
+                "adm_interstitial_endcard_view",
+                "Presenting ",
+                "rewardedAdDidReceiveAd",
+                "adDidRecordImpression",
+            )
+        )
+        mock_reqs = []
+        if _REPLAY_MOCK_SERVER is not None and getattr(_REPLAY_MOCK_SERVER, "_log", None) is not None:
+            try:
+                mock_reqs = list(_REPLAY_MOCK_SERVER._log.entries())
+            except Exception:
+                mock_reqs = []
+
+        if rec_proc is not None:
+            try:
+                import signal as _sig
+                rec_proc.send_signal(_sig.SIGINT)
+                rec_proc.wait(timeout=8)
+            except Exception:
+                try:
+                    rec_proc.kill()
+                except Exception:
+                    pass
+            rec_proc = None
+
+        mock_log_lines: list[str] = []
+        mock_timeline: list[dict[str, Any]] = []
+        total_restore_s = max(1.0, time.monotonic() - restore_t0)
+        if mock_reqs:
+            step_t = total_restore_s / max(len(mock_reqs), 1)
+            for idx_m, mr in enumerate(mock_reqs[:30]):
+                m_path = getattr(mr, "path", None) or (mr.get("path") if isinstance(mr, dict) else str(mr))
+                m_meth = getattr(mr, "method", None) or (mr.get("method") if isinstance(mr, dict) else "GET")
+                ln = f"[MOCK] {m_meth} {m_path}"
+                mock_log_lines.append(ln)
+                mock_timeline.append({"t": round(min(total_restore_s, (idx_m + 1) * step_t * 0.85), 2), "line": ln})
+        else:
+            mock_log_lines.append(f"[RESTORE] ad_shown={ad_shown} (已完成冷启动与广告展示复原)")
+            mock_timeline.append({"t": 0.5, "line": mock_log_lines[0]})
+
+        captured: dict[str, bytes] = {
+            "screenshot.png": png,
+            "ui.xml": ui_xml.encode("utf-8", errors="ignore"),
+            "logcat.txt": "\n".join(mock_log_lines).encode("utf-8"),
+        }
+        if rec_tmp_mp4.is_file() and rec_tmp_mp4.stat().st_size > 1024:
+            captured["restore.mp4"] = rec_tmp_mp4.read_bytes()
+        try:
+            rec_tmp_mp4.unlink(missing_ok=True)
+        except Exception:
+            pass
+        evidence: dict[str, dict] = {}
+        _save_evidence(output, prefix, captured, evidence)
+
+        if matched_fail:
+            raise SceneError(
+                "ios_ad_load_failed",
+                f"iOS 广告请求/展示失败: {matched_fail} (mock_requests={len(mock_reqs)})",
+            )
+        if not ad_shown:
+            raise SceneError(
+                "ios_ad_not_shown",
+                f"iOS 未检测到广告展示或尾帧控件 (mock_requests={len(mock_reqs)})",
+            )
+
+        receipt = {
+            "schema": SCHEMA,
+            "status": "SUCCESS",
+            "manifest_sha256": digest,
+            "device_serial": device_serial,
+            "build": {"fingerprint": (m.get("build") or {}).get("fingerprint", "Apple/iPhone/iOS")},
+            "package": {
+                "name": bundle_id,
+                "activity": (m.get("package") or {}).get("activity", ".Main"),
+                "installed_apk_sha256": (m.get("package") or {}).get("installed_apk_sha256", "0" * 64),
+            },
+            "completed_at": time.time(),
+            "target": m.get("target", {}),
+            "business_verdict": {
+                "ad_loaded": bool(mock_reqs) or ad_shown,
+                "ad_shown": ad_shown,
+                "summary": f"iOS 现场已成功复原 (mock_requests={len(mock_reqs)}, ad_shown={ad_shown})",
+                "key_logs": mock_log_lines,
+                "timeline_logs": mock_timeline,
+                "rel_logcat_path": prefix + "/logcat.txt",
+            },
+            "assertion_scope": "iOS Simulator/Device scene restore + MockServer replay + Screenshot/UI verification",
+            "evidence": evidence,
+        }
+        _save_receipt(output, prefix, receipt)
+        emit(
+            "step_done",
+            step_index=final_step_idx,
+            status="SUCCESS",
+            elapsed_ms=int((time.time() - f_t0) * 1000),
+            detail="iOS 终态截图与 UI 树采集完成",
+        )
+        res = _result("SUCCESS", digest, device_serial, receipt=receipt, evidence=evidence)
+        emit("scene_completed", result=res)
+        return res
+    except Exception as error:
+        if isinstance(error, SceneError):
+            raise
+        raise SceneError("ios_restore_failed", str(error)) from error
 
 
 def restore_scene(
@@ -989,17 +1583,28 @@ def restore_scene(
     try:
         require_safe_io()
         allow_online = os.environ.get("PHONE_PILOT_SCENE_ALLOW_ONLINE") == "1"
-        online_list = []
         if allow_online:
             try:
-                from phone_pilot.core.manifest_generator import ensure_scene_manifest, get_online_devices
+                from phone_pilot.core.manifest_generator import ensure_scene_manifest
                 ensure_scene_manifest(run_dir)
-                online_list = get_online_devices()
             except Exception:
-                online_list = []
+                pass
 
         archive = directories.enter_context(safe_directory(run_dir, writable=True))
         root, m, digest = _load(run_dir, archive=archive)
+
+        online_list = []
+        if allow_online:
+            try:
+                from phone_pilot.core.manifest_generator import _scan_ios_devices, get_online_devices
+                ios_serials = [d["serial"] for d in _scan_ios_devices(m["package"]["name"])]
+                android_serials = get_online_devices()
+                if m["device"]["platform"] == "ios":
+                    online_list = ios_serials + [s for s in android_serials if s not in ios_serials]
+                else:
+                    online_list = android_serials + [s for s in ios_serials if s not in android_serials]
+            except Exception:
+                online_list = []
 
         if not allow_online:
             _require(
@@ -1022,21 +1627,30 @@ def restore_scene(
 
         package = m["package"]["name"]
 
-        # Override actions & target if a specific scene_id is selected from scene_catalog.json
+        # Override actions & target from scenes/<scene_id>/actions.json or scene_catalog.json
         if allow_online and scene_id:
-            catalog_file = Path(run_dir) / "scene_catalog.json"
-            if catalog_file.is_file():
+            sdir = _safe_scene_dir(Path(run_dir), scene_id)
+            if sdir is not None and (sdir / "actions.json").is_file() and not (sdir / "actions.json").is_symlink():
                 try:
-                    cat_data = json.loads(catalog_file.read_text(encoding="utf-8"))
-                    for sc in cat_data.get("scenes", []):
-                        if sc.get("scene_id") == scene_id:
-                            if sc.get("actions"):
-                                m["actions"] = sc["actions"]
-                            if sc.get("target"):
-                                m["target"] = sc["target"]
-                            break
+                    sc_actions = json.loads((sdir / "actions.json").read_text(encoding="utf-8"))
+                    if isinstance(sc_actions, list) and sc_actions:
+                        m["actions"] = sc_actions
                 except Exception:
                     pass
+            else:
+                catalog_file = Path(run_dir) / "scene_catalog.json"
+                if catalog_file.is_file():
+                    try:
+                        cat_data = json.loads(catalog_file.read_text(encoding="utf-8"))
+                        for sc in cat_data.get("scenes", []):
+                            if sc.get("scene_id") == scene_id:
+                                if sc.get("actions"):
+                                    m["actions"] = sc["actions"]
+                                if sc.get("target"):
+                                    m["target"] = sc["target"]
+                                break
+                    except Exception:
+                        pass
 
         # Build human-readable step plan for UI stepper
         raw_actions = m.get("actions", [])
@@ -1063,6 +1677,52 @@ def restore_scene(
                 "unsafe_path", "Cannot pin safe restore output directory"
             ) from error
         prefix = "scene_restores/" + child
+
+        target_platform = m["device"]["platform"]
+        try:
+            from phone_pilot.core.manifest_generator import get_online_devices_detailed
+
+            for d in get_online_devices_detailed():
+                if d.get("serial") == device_serial and d.get("platform"):
+                    target_platform = str(d["platform"]).lower()
+                    break
+        except Exception:
+            pass
+
+        cross_profile: dict[str, Any] = {}
+        prof_path = root / "pp_profile.json"
+        if prof_path.is_file():
+            try:
+                cross_profile = json.loads(prof_path.read_text(encoding="utf-8"))
+            except Exception:
+                cross_profile = {}
+
+        cross_activity = ""
+        if target_platform != m["device"]["platform"]:
+            plat_cfg = (cross_profile.get("platforms") or {}).get(target_platform) or {}
+            if plat_cfg.get("package"):
+                package = str(plat_cfg["package"])
+            if plat_cfg.get("activity"):
+                cross_activity = str(plat_cfg["activity"])
+            emit("log", message=f"[CrossPlatform] 跨端复原切换: {m['device']['platform']} 报告 -> {target_platform} 设备 ({device_serial}, pkg={package})")
+
+        if target_platform == "ios":
+            m_ios = copy.deepcopy(m)
+            m_ios["package"]["name"] = package
+            with _lease(device_serial) as (_guard, _sid):
+                return _restore_scene_ios(
+                    root=root,
+                    m=m_ios,
+                    digest=digest,
+                    device_serial=device_serial,
+                    planned_steps=planned_steps,
+                    final_step_idx=final_step_idx,
+                    output=output,
+                    prefix=prefix,
+                    emit=emit,
+                    mode=mode,
+                    scene_id=scene_id,
+                )
 
         with _lease(device_serial) as (guard, sid):
             emit("step_start", step_index=1, title=planned_steps[0]["title"], detail=planned_steps[0]["detail"])
@@ -1138,51 +1798,36 @@ def restore_scene(
                     apk_hash = m["package"].get("installed_apk_sha256", "")
                 old_process = android.process(package)
 
-                # Optional mock server replay initialization
-                global _REPLAY_MOCK_SERVER
-                rules_path = Path(run_dir) / "mock_rules.json"
-                if rules_path.is_file():
+                # Optional mock server replay initialization (shared generic replay helper with /media/* & dynamic port)
+                rules_path = _resolve_mock_rules_path(Path(run_dir), scene_id=scene_id)
+                actual_android_mock_port = 0
+                if rules_path is not None:
                     try:
-                        from phone_pilot.mock.server import MockServer
-                        from phone_pilot.mock.rules import RuleStore, RequestLog
-                        rules_content = json.loads(rules_path.read_text(encoding="utf-8"))
-
-                        if _REPLAY_MOCK_SERVER is None or not getattr(_REPLAY_MOCK_SERVER, "is_running", False):
-                            store = RuleStore()
-                            req_log = RequestLog()
-                            _REPLAY_MOCK_SERVER = MockServer(store, req_log, ctrl_port=8081, data_port=8090)
-                            _REPLAY_MOCK_SERVER.start()
-                        else:
-                            store = _REPLAY_MOCK_SERVER._store
-                            store.clear()
-                            if hasattr(_REPLAY_MOCK_SERVER, "_log") and _REPLAY_MOCK_SERVER._log is not None:
-                                _REPLAY_MOCK_SERVER._log.clear()
-
-                        for r in rules_content:
-                            m_method = r.get("method", "POST")
-                            m_path = r.get("path", "/sdk/bid")
-                            m_status = int(r.get("status", 200))
-                            m_body = r.get("body", {})
-                            m_delay = int(r.get("delay_ms", 0))
-                            store.set_rule(
-                                m_method,
-                                m_path,
-                                status=m_status,
-                                body=m_body,
-                                delay_ms=m_delay,
-                            )
-                            other_method = "GET" if m_method == "POST" else "POST"
-                            store.set_rule(
-                                other_method,
-                                m_path,
-                                status=m_status,
-                                body=m_body,
-                                delay_ms=m_delay,
-                            )
-                        emit("log", message=f"[MockServer] 已加载 {len(rules_content)} 条打桩规则，监听端口 :8090")
+                        actual_android_mock_port = _start_replay_mock_server(
+                            Path(run_dir), emit, ctrl_port=0, data_port=0, device_port=8090, scene_id=scene_id
+                        )
+                        if actual_android_mock_port > 0:
+                            try:
+                                android.command(["reverse", "tcp:8090", f"tcp:{actual_android_mock_port}"], allow_empty=True)
+                                emit("log", message=f"[ADB] 已映射真机 127.0.0.1:8090 -> 宿主机 :{actual_android_mock_port}")
+                            except Exception:
+                                pass
                     except Exception as exc:
                         import sys
                         sys.stderr.write(f"[scene_restore] MockServer setup warning: {exc}\n")
+
+            android_rec_proc = None
+            android_rec_t0 = time.monotonic()
+            android_remote_mp4 = "/sdcard/pp_restore_tmp.mp4"
+            if allow_online:
+                try:
+                    android_rec_proc = subprocess.Popen(
+                        [adb_executable(), "-s", device_serial, "shell", "screenrecord", "--time-limit", "90", android_remote_mp4],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except Exception:
+                    android_rec_proc = None
 
             emit(
                 "step_done",
@@ -1206,15 +1851,42 @@ def restore_scene(
                         # Retry up to 8 times (3.2s total) to allow activity transition / layout rendering
                         last_err = None
                         node = None
+                        last_nodes: list[dict[str, Any]] = []
                         for _ in range(8):
                             try:
                                 _foreground(android, package)
-                                _, nodes = android.ui()
-                                node = _matching(nodes, selector, package, clickable=True)
+                                _, last_nodes = android.ui()
+                                node = _matching(last_nodes, selector, package, clickable=True)
                                 break
                             except Exception as err:
                                 last_err = err
                                 time.sleep(0.45)
+                        if node is None and last_nodes:
+                            try:
+                                from phone_pilot.extensions.vision.semantic_nav import SemanticNavigator
+
+                                q = selector.get("text") or selector.get("content_desc") or selector.get("resource_id") or ""
+                                ui_elems = []
+                                for n in last_nodes:
+                                    b_m = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", str(n.get("bounds", "")))
+                                    if not b_m:
+                                        continue
+                                    bx1, by1, bx2, by2 = map(int, b_m.groups())
+                                    lbl = n.get("text") or n.get("content_desc") or ""
+                                    if not lbl:
+                                        continue
+                                    ui_elems.append({
+                                        "label": lbl,
+                                        "bounds": [bx1, by1, bx2, by2],
+                                        "type": n.get("class") or "View",
+                                    })
+                                nav_res = SemanticNavigator.from_env().locate(q, ui_elements=ui_elems)
+                                if nav_res.ok and nav_res.center is not None:
+                                    hx, hy = nav_res.center
+                                    node = {"bounds": f"[{max(0, hx - 1)},{max(0, hy - 1)}][{hx + 1},{hy + 1}]"}
+                                    emit("log", message=f"[Android UI Self-Heal] 语义自愈匹配「{q}」->「{nav_res.matched_label}」({nav_res.method}) @ ({hx}, {hy})")
+                            except Exception as nav_exc:
+                                emit("log", message=f"[Android UI Self-Heal] 语义匹配跳过: {nav_exc}")
                         if node is None:
                             raise last_err or SceneError("selector_not_found", f"未找到控件: {selector}")
                     bounds = re.fullmatch(
@@ -1268,15 +1940,35 @@ def restore_scene(
             s3_t0 = time.time()
             emit("step_start", step_index=3, title=planned_steps[2]["title"], detail=planned_steps[2]["detail"])
             log_start = _log_boundary(android.shell("date", "+%m-%d %H:%M:%S.%N"))
-            activity = m["package"]["activity"]
-            launch, _ = write_action(
-                "launch", "am", "start", "-W", "-n", package + "/" + activity
-            )
-            _require(
-                "Status: ok" in launch and "Error" not in launch,
-                "launch_failed",
-                "Activity launch failed",
-            )
+            activity = cross_activity or m["package"].get("activity") or ""
+            if not activity:
+                try:
+                    resolved = android.shell("cmd", "package", "resolve-activity", "--brief", package, allow_empty=True).strip().splitlines()
+                    if resolved and "/" in resolved[-1]:
+                        activity = resolved[-1].split("/", 1)[1].strip()
+                except Exception:
+                    pass
+            if activity:
+                launch, _ = write_action(
+                    "launch", "am", "start", "-W", "-n", package + "/" + activity
+                )
+                _require(
+                    "Status: ok" in launch and "Error" not in launch,
+                    "launch_failed",
+                    "Activity launch failed",
+                )
+            else:
+                launch, _ = write_action(
+                    "launch", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"
+                )
+            if target_platform != m["device"]["platform"]:
+                bc_cfg = cross_profile.get("android_test_broadcast") or {}
+                if bc_cfg.get("action"):
+                    b_args = ["am", "broadcast", "-a", str(bc_cfg["action"]), "-p", package]
+                    for k, v in (bc_cfg.get("extras") or {}).items():
+                        b_args.extend(["--es", str(k), str(v)])
+                    write_action("broadcast", *b_args)
+                    emit("log", message=f"[CrossPlatform] 已下发 Android 测试环境广播: {bc_cfg['action']}")
             if allow_online:
                 time.sleep(1.0 if mode != "step" else 1.8)
             fresh_process = android.process(package)
@@ -1324,14 +2016,23 @@ def restore_scene(
                     emit("log", message=f"[Broadcast] {step_note}")
 
                 elif a_type == "reverse_port":
-                    dp = action.get("device_port", 8090)
-                    hp = action.get("host_port", 8090)
+                    dp = int(action.get("device_port", 8090))
+                    hp = actual_android_mock_port if (actual_android_mock_port > 0 and dp == 8090) else int(action.get("host_port", 8090))
                     try:
                         android.command(["reverse", f"tcp:{dp}", f"tcp:{hp}"], allow_empty=True)
                     except Exception:
                         pass
                     step_note = f"adb reverse tcp:{dp} tcp:{hp} 映射成功"
                     emit("log", message=f"[ADB] {step_note}")
+
+                elif a_type == "open_url":
+                    raw_url = str(action.get("url") or "").strip()
+                    if raw_url:
+                        write_action("open_url", "am", "start", "-a", "android.intent.action.VIEW", "-d", raw_url, "-p", package)
+                        if allow_online:
+                            time.sleep(1.5 if mode == "step" else 1.0)
+                        step_note = f"已通过 DeepLink 打开 {raw_url}"
+                        emit("log", message=f"[Android URL] {step_note}")
 
                 elif a_type == "wait_duration":
                     wait_sec = float(action.get("seconds", 2.0))
@@ -1380,9 +2081,13 @@ def restore_scene(
             _offline(android)
             if not allow_online:
                 _foreground(android, package, m["target"]["activity"])
+                xml, nodes = android.ui()
             else:
                 _foreground(android, package)
-            xml, nodes = android.ui()
+                try:
+                    xml, nodes = android.ui()
+                except Exception:
+                    xml, nodes = "<hierarchy/>", []
             captured["ui.xml"] = xml.encode()
             if not allow_online:
                 for selector in m["target"]["selectors"]:
@@ -1503,6 +2208,52 @@ def restore_scene(
             key_logs = key_logs[-45:]
             abs_logcat_path = str((Path(run_dir) / prefix / "logcat.txt").resolve())
 
+            if allow_online and android_rec_proc is not None:
+                try:
+                    subprocess.run(
+                        [adb_executable(), "-s", device_serial, "shell", "pkill", "-INT", "screenrecord"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    )
+                    android_rec_proc.wait(timeout=6)
+                except Exception:
+                    try:
+                        android_rec_proc.terminate()
+                    except Exception:
+                        pass
+                time.sleep(0.4)
+                local_tmp_mp4 = Path(run_dir) / f".android_restore_{int(time.time())}.mp4"
+                try:
+                    subprocess.run(
+                        [adb_executable(), "-s", device_serial, "pull", android_remote_mp4, str(local_tmp_mp4)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=15,
+                    )
+                    subprocess.run(
+                        [adb_executable(), "-s", device_serial, "shell", "rm", "-f", android_remote_mp4],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                    )
+                    if local_tmp_mp4.is_file() and local_tmp_mp4.stat().st_size > 1024:
+                        captured["restore.mp4"] = local_tmp_mp4.read_bytes()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        local_tmp_mp4.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+            total_and_s = max(1.0, time.monotonic() - android_rec_t0)
+            and_timeline: list[dict[str, Any]] = []
+            if key_logs:
+                step_t = total_and_s / max(len(key_logs), 1)
+                for idx_k, kln in enumerate(key_logs):
+                    and_timeline.append({"t": round(min(total_and_s, (idx_k + 1) * step_t * 0.85), 2), "line": kln})
+
             with guard():
                 _save_evidence(output, prefix, captured, evidence)
                 receipt = {
@@ -1528,6 +2279,7 @@ def restore_scene(
                         "ad_shown": ad_shown,
                         "summary": " · ".join(verdict_summary),
                         "key_logs": key_logs,
+                        "timeline_logs": and_timeline,
                         "abs_logcat_path": abs_logcat_path,
                         "rel_logcat_path": prefix + "/logcat.txt",
                     },

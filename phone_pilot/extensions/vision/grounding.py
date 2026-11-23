@@ -307,6 +307,7 @@ class VisionGroundingClient:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
+            "User-Agent": "curl/8.4.0",
         }
         data = json.dumps(payload).encode("utf-8")
 

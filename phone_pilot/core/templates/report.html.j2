@@ -187,25 +187,121 @@ a { color: var(--blue); text-decoration: none; }
 <!-- Banner -->
 <div class="banner {{ 'passed' if business and business.summary.status == 'PASS' and meta.exit_code == 0 else 'failed' }}">
   <div>
-    <h1>{{ meta.script_name or "Script" }}</h1>
+    <h1>
+      {% if task_context and task_context.card_id %}<span class="badge" style="vertical-align:middle;margin-right:8px;background:rgba(255,255,255,.22);">{{ task_context.card_id }}</span>{% endif %}
+      {{ (task_context.title if task_context and task_context.title else none) or meta.script_name or "Script" }}
+    </h1>
     <div class="meta-row">
-      <span>执行 {{ "EXIT 0" if meta.exit_code == 0 else "FAILED" }} · 业务 {{ business.summary.status if business else 'UNKNOWN' }}</span>
-      <span>{{ duration_display }}</span>
+      <span>{{ "✅ 验收通过" if (business and business.summary.status == "PASS" and meta.exit_code == 0) else "❌ 存在失败/阻塞" }}</span>
+      <span>耗时 {{ duration_display }}</span>
       <span>{{ meta.device.serial or "?" }} ({{ meta.device.platform or "?" }})</span>
-      {% if meta.git.commit %}<span>{{ meta.git.branch or "" }}@{{ meta.git.commit }}{% if meta.git.dirty %} *{% endif %}</span>{% endif %}
+      {% if freshness_gate %}<span>{{ "🛡️ 最新包体" if freshness_gate.ok else "⚠️ 包体过期" }}</span>{% endif %}
     </div>
   </div>
-  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-    <button type="button" class="badge" style="cursor:pointer;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.22);color:#fff;font-weight:700;" onclick="if(window.copyMarkdownSummary)window.copyMarkdownSummary()">
-      📋 一键复制验收结论 (贴 iCafe / IM)
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <a href="#scene-restore-anchor" class="badge" style="text-decoration:none;cursor:pointer;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.26);color:#fff;font-weight:700;" onclick="var d=document.getElementById('scene-restore-drawer');if(d)d.open=true;">
+      ⚡ 手机现场复现
+    </a>
+    <button type="button" class="badge" style="cursor:pointer;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.18);color:#fff;font-weight:700;" onclick="if(window.copyMarkdownSummary)window.copyMarkdownSummary()">
+      📋 复制结论
     </button>
-    <span class="badge">{{ meta.started_at[:19] if meta.started_at else "" }}</span>
+    <button type="button" class="badge" style="cursor:pointer;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:.75rem;" onclick="if(window.copyToClipboard)window.copyToClipboard('bash ' + {{ (meta.run_dir ~ '/open_pp_server.command')|tojson }})">
+      🚀 启动命令
+    </button>
   </div>
 </div>
 
+{% if task_context and (task_context.problem or task_context.expected or task_context.changed_files) %}
+<div class="section" id="task-context" style="margin-bottom:20px;border-left:4px solid var(--accent);">
+  <div class="section-header" onclick="toggleSection(this)">
+    <span>🎯 本次验证解决的问题与预期效果</span>
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body" style="padding:16px 20px;display:grid;gap:10px;font-size:.93rem;">
+    {% if task_context.problem %}
+    <div><strong style="color:var(--red);">修复前问题：</strong>{{ task_context.problem }}</div>
+    {% endif %}
+    {% if task_context.expected %}
+    <div><strong style="color:var(--green);">修复后预期：</strong>{{ task_context.expected }}</div>
+    {% endif %}
+    {% if task_context.changed_files %}
+    <div style="color:var(--text2);font-size:.85rem;">
+      <strong>涉及改动文件：</strong>
+      {% for f in task_context.changed_files %}
+      <code style="background:var(--surface2);padding:2px 6px;border-radius:4px;margin-right:6px;">{{ f }}</code>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if freshness_gate %}
+<div class="section {{ 'collapsed' if freshness_gate.ok else '' }}" id="freshness-gate" style="margin-bottom:16px;border-left:4px solid {{ 'var(--green)' if freshness_gate.ok else 'var(--red)' }};">
+  <div class="section-header" onclick="toggleSection(this)">
+    <span>🛡️ 包体新鲜度校验 — <strong style="color:{{ 'var(--green)' if freshness_gate.ok else 'var(--red)' }}">{{ '✅ 最新包体' if freshness_gate.ok else '❌ 包体过期 (BLOCKED)' }}</strong></span>
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body" style="{{ 'display:none;' if freshness_gate.ok else '' }}padding:14px 20px;display:grid;gap:6px;font-size:.85rem;color:var(--text2);">
+    <div><strong>结论：</strong>{{ freshness_gate.reason }}</div>
+    {% if freshness_gate.details and freshness_gate.details.binary_path %}
+    <div><strong>二进制产物：</strong><code>{{ freshness_gate.details.binary_path }}</code></div>
+    {% endif %}
+    {% if freshness_gate.details and freshness_gate.details.latest_source_file %}
+    <div><strong>最新改动源码：</strong><code>{{ freshness_gate.details.latest_source_file }}</code></div>
+    {% endif %}
+    {% if freshness_gate.symbol_present is not none %}
+    <div><strong>符号探测 ({{ freshness_gate.details.symbol_name if freshness_gate.details else '' }})：</strong>{{ '✅ 已编入' if freshness_gate.symbol_present else '❌ 未找到' }}</div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% if visual_judgments and not (scene and scene.is_multi_suite and scene.scenes) %}
+<div class="section" id="visual-oracle" style="margin-bottom:16px;border-left:4px solid var(--blue);">
+  <div class="section-header" onclick="toggleSection(this)">
+    <span>🤖 AI 视觉验收结论 ({{ visual_judgments|length }})</span>
+    <span class="chevron">&#9660;</span>
+  </div>
+  <div class="section-body" style="padding:14px 18px;display:grid;gap:10px;">
+    {% for vj in visual_judgments %}
+    {% set v_color = 'var(--green)' if vj.verdict == 'PASS' else ('var(--red)' if vj.verdict == 'FAIL' else 'var(--amber)') %}
+    <div style="border:1px solid var(--border);border-radius:10px;padding:10px 14px;background:var(--bg2);">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+        <strong style="font-size:.9rem;">{{ vj.case_id }}</strong>
+        <span style="font-size:.78rem;font-weight:700;padding:2px 9px;border-radius:12px;border:1px solid {{ v_color }};color:{{ v_color }};">{{ vj.verdict }}</span>
+      </div>
+      {% if vj.summary %}
+      <div style="font-size:.88rem;color:var(--text);">{{ vj.summary }}</div>
+      {% endif %}
+      {% if vj.defects %}
+      <div style="font-size:.82rem;color:var(--red);margin-top:4px;"><strong>缺陷：</strong>{{ vj.defects|join('；') }}</div>
+      {% endif %}
+      <details style="margin-top:6px;font-size:.76rem;color:var(--text2);">
+        <summary style="cursor:pointer;">查看技术明细（模型 / 元素 / 像素）</summary>
+        <div style="margin-top:4px;display:grid;gap:3px;">
+          {% if vj.highlights %}<div>可见元素：{{ vj.highlights|join(' · ') }}</div>{% endif %}
+          <div>{% if vj.model %}模型: <code>{{ vj.model }}</code>{% endif %}{% if vj.latency_ms %} · 耗时: {{ vj.latency_ms }}ms{% endif %}{% if vj.pixel_stats and vj.pixel_stats.ok %} · 亮度: {{ vj.pixel_stats.mean_luma }}{% endif %}</div>
+        </div>
+      </details>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {% include 'business_report.html.j2' %}
 
-<!-- Overview Cards -->
+{% if not (scene and scene.is_multi_suite and scene.scenes) %}
+<!-- Overview Cards (only shown for legacy single-script reports) -->
+{% if business %}
+<details class="section" style="margin-bottom:16px;">
+  <summary class="section-header" style="cursor:pointer;list-style:none;">
+    <span>🔧 底层执行统计与技术指标（点击展开）</span>
+    <span class="chevron">&#9660;</span>
+  </summary>
+  <div style="padding:14px;">
+{% endif %}
 <div class="cards" id="overview">
   <!-- Steps pass rate -->
   <div class="card">
@@ -244,6 +340,10 @@ a { color: var(--blue); text-decoration: none; }
   </div>
   {% endif %}
 </div>
+{% if business %}
+  </div>
+</details>
+{% endif %}
 
 {% if recordings %}
 <!-- Screen Recordings -->
@@ -417,6 +517,7 @@ a { color: var(--blue); text-decoration: none; }
     {% endif %}
   </div>
 </div>
+{% endif %}
 {% endif %}
 
 <!-- Memory Analysis -->

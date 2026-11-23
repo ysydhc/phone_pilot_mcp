@@ -34,61 +34,168 @@ def get_online_devices() -> list[str]:
         return []
 
 
-def get_online_devices_detailed(target_package: str = "cc.admaster.android.demo") -> list[dict[str, Any]]:
-    """Scan all connected ADB devices with human-friendly model, OS, resolution, and app status."""
-    serials = get_online_devices()
+def _scan_ios_devices(target_bundle_id: str = "com.baidujp.gbusdkdemo") -> list[dict[str, Any]]:
+    """Scan booted iOS simulators (simctl) and connected iOS real devices (pymobiledevice3)."""
     devices: list[dict[str, Any]] = []
-    for s in serials:
-        info: dict[str, Any] = {
-            "serial": s,
-            "status": "online",
-            "brand": "",
-            "model": s,
-            "release": "",
-            "resolution": "",
-            "app_installed": False,
-            "display_name": s,
-        }
-        try:
-            cmd = (
-                f"getprop ro.product.brand; "
-                f"getprop ro.product.model; "
-                f"getprop ro.build.version.release; "
-                f"wm size; "
-                f"pm path {target_package}"
-            )
-            out = subprocess.run(
-                ["adb", "-s", s, "shell", cmd],
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
-            lines = [line.strip() for line in out.stdout.splitlines() if line.strip()]
-            if len(lines) >= 3:
-                info["brand"] = lines[0]
-                info["model"] = lines[1]
-                info["release"] = lines[2]
-            for line in lines:
-                if "Physical size:" in line:
-                    info["resolution"] = line.split("Physical size:")[-1].strip()
-                elif line.startswith("package:"):
-                    info["app_installed"] = True
-            brand_cap = info["brand"].upper() if len(info["brand"]) <= 4 else info["brand"].capitalize()
-            model_str = info["model"]
-            if brand_cap and not model_str.lower().startswith(brand_cap.lower()):
-                label = f"{brand_cap} {model_str}"
-            else:
-                label = model_str
-            meta_parts = []
-            if info["release"]:
-                meta_parts.append(f"Android {info['release']}")
-            if info["resolution"]:
-                meta_parts.append(info["resolution"])
-            meta_suffix = f" ({' · '.join(meta_parts)})" if meta_parts else ""
-            info["display_name"] = f"📱 {label}{meta_suffix} [{s}]"
-        except Exception:
-            pass
-        devices.append(info)
+    bundle_id = target_bundle_id if target_bundle_id and target_bundle_id != "cc.admaster.android.demo" else "com.baidujp.gbusdkdemo"
+
+    # 1. Booted iOS Simulators via simctl
+    try:
+        from phone_pilot.ios.pmd.utils import simctl_prefix
+
+        prefix = simctl_prefix()
+        proc = subprocess.run(
+            prefix + ["list", "devices", "booted", "-j"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            payload = json.loads(proc.stdout)
+            for runtime_key, devs in (payload.get("devices") or {}).items():
+                os_ver = ""
+                if "SimRuntime.iOS-" in runtime_key:
+                    os_ver = runtime_key.split("SimRuntime.iOS-")[-1].replace("-", ".")
+                for d in devs or []:
+                    if d.get("state") != "Booted" or not d.get("udid"):
+                        continue
+                    udid = str(d["udid"])
+                    name = str(d.get("name") or "iPhone Simulator")
+                    installed = False
+                    try:
+                        app_chk = subprocess.run(
+                            prefix + ["get_app_container", udid, bundle_id],
+                            capture_output=True,
+                            text=True,
+                            timeout=3,
+                        )
+                        installed = app_chk.returncode == 0 and bool(app_chk.stdout.strip())
+                    except Exception:
+                        pass
+                    ver_label = f"iOS {os_ver} Simulator" if os_ver else "iOS Simulator"
+                    devices.append({
+                        "serial": udid,
+                        "platform": "ios",
+                        "device_type": "simulator",
+                        "status": "online",
+                        "brand": "Apple",
+                        "model": name,
+                        "release": os_ver,
+                        "resolution": "",
+                        "app_installed": installed,
+                        "display_name": f"🍎 {name} ({ver_label}) [{udid[:8]}]",
+                    })
+    except Exception:
+        pass
+
+    # 2. Connected iOS Real Devices via pymobiledevice3 (optional)
+    try:
+        from phone_pilot.ios.pmd.utils import pmd_prefix
+
+        proc = subprocess.run(
+            pmd_prefix() + ["usbmux", "list", "--no-color"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        if proc.returncode == 0 and proc.stdout.strip().startswith("["):
+            items = json.loads(proc.stdout)
+            seen = {d["serial"] for d in devices}
+            for item in items or []:
+                if not isinstance(item, dict):
+                    continue
+                udid = str(item.get("UniqueDeviceID") or item.get("Identifier") or "")
+                if not udid or udid in seen:
+                    continue
+                conn = str(item.get("ConnectionType") or "")
+                if conn and conn.lower() not in ("usb", "network"):
+                    continue
+                name = str(item.get("DeviceName") or item.get("ProductType") or "iPhone")
+                os_ver = str(item.get("ProductVersion") or "")
+                ver_label = f"iOS {os_ver}" if os_ver else "iOS"
+                devices.append({
+                    "serial": udid,
+                    "platform": "ios",
+                    "device_type": "real",
+                    "status": "online",
+                    "brand": "Apple",
+                    "model": name,
+                    "release": os_ver,
+                    "resolution": "",
+                    "app_installed": True,
+                    "display_name": f"🍎 {name} ({ver_label}) [{udid[:8]}]",
+                })
+                seen.add(udid)
+    except Exception:
+        pass
+
+    return devices
+
+
+def get_online_devices_detailed(
+    target_package: str = "cc.admaster.android.demo",
+    platform_filter: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Scan all connected Android (ADB) and iOS (Simctl/PMD) devices with metadata."""
+    devices: list[dict[str, Any]] = []
+    if platform_filter in (None, "android"):
+        serials = get_online_devices()
+        for s in serials:
+            info: dict[str, Any] = {
+                "serial": s,
+                "platform": "android",
+                "device_type": "real",
+                "status": "online",
+                "brand": "",
+                "model": s,
+                "release": "",
+                "resolution": "",
+                "app_installed": False,
+                "display_name": s,
+            }
+            try:
+                cmd = (
+                    f"getprop ro.product.brand; "
+                    f"getprop ro.product.model; "
+                    f"getprop ro.build.version.release; "
+                    f"wm size; "
+                    f"pm path {target_package}"
+                )
+                out = subprocess.run(
+                    ["adb", "-s", s, "shell", cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                )
+                lines = [line.strip() for line in out.stdout.splitlines() if line.strip()]
+                if len(lines) >= 3:
+                    info["brand"] = lines[0]
+                    info["model"] = lines[1]
+                    info["release"] = lines[2]
+                for line in lines:
+                    if "Physical size:" in line:
+                        info["resolution"] = line.split("Physical size:")[-1].strip()
+                    elif line.startswith("package:"):
+                        info["app_installed"] = True
+                brand_cap = info["brand"].upper() if len(info["brand"]) <= 4 else info["brand"].capitalize()
+                model_str = info["model"]
+                if brand_cap and not model_str.lower().startswith(brand_cap.lower()):
+                    label = f"{brand_cap} {model_str}"
+                else:
+                    label = model_str
+                meta_parts = []
+                if info["release"]:
+                    meta_parts.append(f"Android {info['release']}")
+                if info["resolution"]:
+                    meta_parts.append(info["resolution"])
+                meta_suffix = f" ({' · '.join(meta_parts)})" if meta_parts else ""
+                info["display_name"] = f"📱 {label}{meta_suffix} [{s}]"
+            except Exception:
+                pass
+            devices.append(info)
+
+    if platform_filter in (None, "ios"):
+        devices.extend(_scan_ios_devices(target_bundle_id=target_package))
     return devices
 
 
@@ -241,30 +348,34 @@ def ensure_scene_manifest(
     run_dir = Path(run_dir).expanduser().resolve()
     manifest_file = run_dir / "scene_manifest.json"
 
-    if manifest_file.is_file() and not force_refresh:
-        try:
-            raw = manifest_file.read_bytes()
-            data = json.loads(raw)
-            pkg_existing = data.get("package", {}).get("name", "")
-            acts_existing = data.get("actions", [])
-            has_bcast = any(a.get("type") == "broadcast" for a in acts_existing)
-            if pkg_existing == "cc.admaster.android.demo":
-                _ensure_default_mock_rules(run_dir)
-            if (
-                data.get("schema") == SCHEMA
-                and (pkg_existing != "cc.admaster.android.demo" or (has_bcast and len(acts_existing) >= 6))
-            ):
-                ensure_scene_catalog(run_dir, default_manifest=data)
-                return data, hashlib.sha256(raw).hexdigest()
-        except Exception:
-            pass
-
-    # Read existing meta
+    # Read existing meta early so cache check can detect platform mismatch
     meta = {}
     meta_path = run_dir / "run_meta.json"
     if meta_path.is_file():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    meta_platform = str((meta.get("device") or {}).get("platform") or "").lower()
+
+    if manifest_file.is_file() and not force_refresh:
+        try:
+            raw = manifest_file.read_bytes()
+            data = json.loads(raw)
+            pkg_existing = data.get("package", {}).get("name", "")
+            plat_existing = str((data.get("device") or {}).get("platform") or "").lower()
+            acts_existing = data.get("actions", [])
+            has_bcast = any(a.get("type") == "broadcast" for a in acts_existing)
+            if pkg_existing == "cc.admaster.android.demo":
+                _ensure_default_mock_rules(run_dir)
+            platform_ok = (not meta_platform) or (plat_existing == meta_platform)
+            if (
+                platform_ok
+                and data.get("schema") == SCHEMA
+                and (pkg_existing != "cc.admaster.android.demo" or (has_bcast and len(acts_existing) >= 6))
+            ):
+                ensure_scene_catalog(run_dir, default_manifest=data)
+                return data, hashlib.sha256(raw).hexdigest()
         except Exception:
             pass
 
@@ -296,62 +407,79 @@ def ensure_scene_manifest(
         except Exception:
             pass
 
-    # 1. Device Serial
+    # 1. Platform & Device Serial
+    platform = meta_platform if meta_platform in ("android", "ios") else "android"
     serial = device_serial or meta.get("device", {}).get("serial")
-    online_devices = get_online_devices()
-    if not serial or serial not in online_devices:
-        if online_devices:
-            # Prefer Samsung device if present, else first online device
-            samsung = [d for d in online_devices if d.startswith("RFC") or "samsung" in d.lower()]
-            serial = samsung[0] if samsung else online_devices[0]
-        else:
-            serial = serial or "RFCYA0PZ6VA"
+    if platform == "ios":
+        ios_devs = _scan_ios_devices(target_bundle_id=package_name or "com.baidujp.gbusdkdemo")
+        ios_serials = [d["serial"] for d in ios_devs]
+        if not serial or (ios_serials and serial not in ios_serials):
+            serial = ios_serials[0] if ios_serials else (serial or "00000000-0000-0000-0000-000000000000")
+        matched_ios = next((d for d in ios_devs if d["serial"] == serial), None)
+        fingerprint = (
+            f"Apple/{matched_ios.get('model', 'iPhone')}/{matched_ios.get('release', 'iOS')}"
+            if matched_ios
+            else "Apple/iPhone/iOS"
+        )
+        pkg = package_name or meta.get("package") or meta.get("target_package") or meta.get("device", {}).get("package") or "com.baidujp.gbusdkdemo"
+        act = activity_name or ".Main"
+        apk_hash = "0" * 64
+        online_devices: list[str] = ios_serials
+    else:
+        online_devices = get_online_devices()
+        if not serial or serial not in online_devices:
+            if online_devices:
+                # Prefer Samsung device if present, else first online device
+                samsung = [d for d in online_devices if d.startswith("RFC") or "samsung" in d.lower()]
+                serial = samsung[0] if samsung else online_devices[0]
+            else:
+                serial = serial or "RFCYA0PZ6VA"
 
-    # 2. Build Fingerprint
-    fingerprint = None
-    if serial in online_devices:
-        fingerprint = get_device_fingerprint(serial)
-    if not fingerprint:
-        fingerprint = "samsung/pa1qsqw/pa1q:16/BP2A.250605.031.A3/S931USQU5BYI3_OYN5BYI3:user/release-keys"
+        # 2. Build Fingerprint
+        fingerprint = None
+        if serial in online_devices:
+            fingerprint = get_device_fingerprint(serial)
+        if not fingerprint:
+            fingerprint = "samsung/pa1qsqw/pa1q:16/BP2A.250605.031.A3/S931USQU5BYI3_OYN5BYI3:user/release-keys"
 
-    # 3. Package & Activity
-    pkg = package_name
-    if not pkg:
-        pkg = meta.get("package") or meta.get("target_package") or meta.get("device", {}).get("package")
-    if not pkg and ("adx-sdk-android" in str(run_dir) or "adx" in str(run_dir).lower()):
-        pkg = "cc.admaster.android.demo"
-    if not pkg and script_text:
-        # Detect package from script, prioritizing real admaster package
-        m_adm = re.search(r'["\'](cc\.admaster\.[a-zA-Z0-9_.]+)["\']', script_text)
-        if m_adm:
-            pkg = m_adm.group(1)
-        else:
-            m_pkg = re.search(r'["\'](com\.[a-zA-Z0-9_.]+)["\']', script_text)
-            if m_pkg and m_pkg.group(1) not in ("com.test", "com.example"):
-                pkg = m_pkg.group(1)
-    if not pkg:
-        pkg = "cc.admaster.android.demo"
+        # 3. Package & Activity
+        pkg = package_name
+        if not pkg:
+            pkg = meta.get("package") or meta.get("target_package") or meta.get("device", {}).get("package")
+        if not pkg and ("adx-sdk-android" in str(run_dir) or "adx" in str(run_dir).lower()):
+            pkg = "cc.admaster.android.demo"
+        if not pkg and script_text:
+            # Detect package from script, prioritizing real admaster package
+            m_adm = re.search(r'["\'](cc\.admaster\.[a-zA-Z0-9_.]+)["\']', script_text)
+            if m_adm:
+                pkg = m_adm.group(1)
+            else:
+                m_pkg = re.search(r'["\'](com\.[a-zA-Z0-9_.]+)["\']', script_text)
+                if m_pkg and m_pkg.group(1) not in ("com.test", "com.example"):
+                    pkg = m_pkg.group(1)
+        if not pkg:
+            pkg = "cc.admaster.android.demo"
 
-    act = activity_name
-    if not act and serial in online_devices:
-        act = get_main_activity(serial, pkg)
-    if not act:
-        if pkg == "cc.admaster.android.demo":
-            act = ".main.AdMasterSDKDemo"
-        else:
-            act = ".MainActivity"
-    if not act.startswith(".") and not act.startswith(pkg + "."):
-        act = f".{act}"
+        act = activity_name
+        if not act and serial in online_devices:
+            act = get_main_activity(serial, pkg)
+        if not act:
+            if pkg == "cc.admaster.android.demo":
+                act = ".main.AdMasterSDKDemo"
+            else:
+                act = ".MainActivity"
+        if not act.startswith(".") and not act.startswith(pkg + "."):
+            act = f".{act}"
 
-    # 4. APK Hash
-    apk_hash = None
-    if serial in online_devices:
-        apk_hash = get_installed_apk_hash(serial, pkg)
-    if not apk_hash:
-        if pkg == "cc.admaster.android.demo":
-            apk_hash = "8b5e2b6e3d009a11b6b7d66f42bcfe1e5930f192c4648c3274e4ae35b6d0412f"
-        else:
-            apk_hash = "a" * 64
+        # 4. APK Hash
+        apk_hash = None
+        if serial in online_devices:
+            apk_hash = get_installed_apk_hash(serial, pkg)
+        if not apk_hash:
+            if pkg == "cc.admaster.android.demo":
+                apk_hash = "8b5e2b6e3d009a11b6b7d66f42bcfe1e5930f192c4648c3274e4ae35b6d0412f"
+            else:
+                apk_hash = "a" * 64
 
     # 5. Extract Actions & Target from steps and script context
     actions: list[dict[str, Any]] = [
@@ -361,11 +489,37 @@ def ensure_scene_manifest(
     target_act = act
     target_selectors: list[dict[str, Any]] = []
 
-    full_text = script_text + " " + json.dumps(steps)
+    full_text = script_text + " " + json.dumps(steps) + " " + json.dumps(business, ensure_ascii=False)
     nav_text = None
 
-    # Domain smart adapter for ADX Demo: route through home menu and inject test environment
-    if pkg == "cc.admaster.android.demo":
+    # Domain smart adapter for ADX iOS Demo
+    if platform == "ios":
+        if "reward" in full_text.lower() or "激励视频" in full_text:
+            nav_text = "Rewarded"
+            actions.append({"type": "tap_selector", "selector": {"text": nav_text}})
+            actions.append({"type": "tap_selector", "selector": {"text": "Show"}})
+            actions.append({"type": "wait_duration", "seconds": 4.0})
+        elif "interstitial" in full_text.lower() or "插屏" in full_text:
+            nav_text = "Interstitial"
+            actions.append({"type": "tap_selector", "selector": {"text": nav_text}})
+            actions.append({"type": "tap_selector", "selector": {"text": "Show"}})
+            actions.append({"type": "wait_duration", "seconds": 4.0})
+        elif "splash" in full_text.lower() or "开屏" in full_text:
+            nav_text = "App Open"
+            actions.append({"type": "tap_selector", "selector": {"text": nav_text}})
+            actions.append({"type": "tap_selector", "selector": {"text": "Show"}})
+            actions.append({"type": "wait_duration", "seconds": 3.0})
+        elif "banner" in full_text.lower():
+            nav_text = "Banner"
+            actions.append({"type": "tap_selector", "selector": {"text": nav_text}})
+            actions.append({"type": "tap_selector", "selector": {"text": "Show"}})
+        elif "native" in full_text.lower() or "信息流" in full_text:
+            nav_text = "Native"
+            actions.append({"type": "tap_selector", "selector": {"text": nav_text}})
+            actions.append({"type": "tap_selector", "selector": {"text": "Show"}})
+
+    # Domain smart adapter for ADX Android Demo: route through home menu and inject test environment
+    if platform == "android" and pkg == "cc.admaster.android.demo":
         # 1. Reverse port for local mock server
         actions.append({"type": "reverse_port", "device_port": 8090, "host_port": 8090})
         # 2. Inject test environment broadcast
@@ -503,7 +657,7 @@ def ensure_scene_manifest(
 
     manifest = {
         "schema": SCHEMA,
-        "device": {"platform": "android", "serial": serial},
+        "device": {"platform": platform, "serial": serial},
         "build": {"fingerprint": fingerprint},
         "package": {
             "name": pkg,
@@ -690,10 +844,159 @@ def ensure_scene_catalog(
     ]
     is_multi_suite = bool(gate_summary or suite_steps or "release_gate" in str(meta.get("script_name", "")))
 
+    default_actions = list((default_manifest or {}).get("actions") or [])
+    default_target = dict((default_manifest or {}).get("target") or {})
     run_start_ts = _parse_iso_seconds(str(meta.get("started_at", "")))
     scenes: list[dict[str, Any]] = []
 
-    if is_multi_suite:
+    # Priority 1: Build from business_report.json + per-scene scenes/<scene_id>/ artifacts
+    biz_data: dict[str, Any] = {}
+    if (run_dir / "business_report.json").is_file():
+        try:
+            biz_data = json.loads((run_dir / "business_report.json").read_text(encoding="utf-8"))
+        except Exception:
+            biz_data = {}
+    biz_cases = biz_data.get("cases") if isinstance(biz_data, dict) else None
+    if isinstance(biz_cases, list) and biz_cases:
+        is_multi_suite = len(biz_cases) > 1
+        biz_steps = biz_data.get("business_steps") or []
+        biz_ev = biz_data.get("evidence") or []
+        ev_by_id = {e.get("evidence_id"): e for e in biz_ev if isinstance(e, dict) and e.get("evidence_id")}
+        vlm_by_cid: dict[str, dict[str, Any]] = {}
+        vj_path = run_dir / "visual_judgments.json"
+        if vj_path.is_file() and not vj_path.is_symlink():
+            try:
+                vj_raw = json.loads(vj_path.read_text(encoding="utf-8"))
+                vj_items = vj_raw.get("items") if isinstance(vj_raw, dict) else vj_raw
+                if isinstance(vj_items, list):
+                    for vj in vj_items:
+                        if isinstance(vj, dict) and (vj.get("case_id") or vj.get("scene_id")):
+                            vlm_by_cid[str(vj.get("case_id") or vj.get("scene_id"))] = vj
+            except Exception:
+                pass
+        for idx, case in enumerate(biz_cases, start=1):
+            if not isinstance(case, dict):
+                continue
+            cid = str(case.get("case_id") or f"scene_{idx}")
+            ctitle = str(case.get("title") or cid)
+            c_steps = [s for s in biz_steps if isinstance(s, dict) and s.get("case_id") == cid]
+            c_status = "PASS" if (c_steps and all(s.get("status") == "PASS" for s in c_steps)) else "FAIL"
+            c_dur = round(sum(float(s.get("duration_ms") or 0) for s in c_steps) / 1000.0, 1)
+            c_detail = str(c_steps[-1].get("actual") or "") if c_steps else ""
+
+            sc_actions = list(default_actions)
+            sc_dir = run_dir / "scenes" / cid
+            if sc_dir.is_dir() and not sc_dir.is_symlink() and (sc_dir / "actions.json").is_file():
+                try:
+                    loaded_act = json.loads((sc_dir / "actions.json").read_text(encoding="utf-8"))
+                    if isinstance(loaded_act, list) and loaded_act:
+                        sc_actions = loaded_act
+                except Exception:
+                    pass
+
+            sc_shots: list[str] = []
+            for s in c_steps:
+                for eid in (s.get("evidence_refs") or []):
+                    ev = ev_by_id.get(eid)
+                    if ev and ev.get("kind") in ("screenshot", "image", "ui"):
+                        rel = ev.get("relative_path") or ev.get("path")
+                        if rel:
+                            rel_str = str(rel)
+                            if rel_str not in sc_shots:
+                                sc_shots.append(rel_str)
+            if (run_dir / "screenshots").is_dir():
+                for m_path in sorted((run_dir / "screenshots").glob(f"*{cid}*.png")):
+                    rel_str = f"screenshots/{m_path.name}"
+                    if rel_str not in sc_shots:
+                        sc_shots.append(rel_str)
+            if (sc_dir / "screenshots").is_dir():
+                for m_path in sorted((sc_dir / "screenshots").glob("*.png")):
+                    rel_str = f"scenes/{cid}/screenshots/{m_path.name}"
+                    if rel_str not in sc_shots:
+                        sc_shots.append(rel_str)
+            sc_shot = sc_shots[-1] if sc_shots else None
+
+            video_rel_path = f"scenes/{cid}/video.mp4" if (sc_dir / "video.mp4").is_file() else None
+
+            sc_logs: list[str] = []
+            for cand_log in (
+                sc_dir / "sdk.log",
+                run_dir / "logcat" / f"{cid}_sdk.log",
+                sc_dir / "mock_http.log",
+                run_dir / "logcat" / f"{cid}_mock_http.log",
+            ):
+                if cand_log.is_file() and not cand_log.is_symlink():
+                    try:
+                        lines = [ln for ln in cand_log.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip()]
+                        sc_logs.extend(lines[-40:])
+                    except Exception:
+                        pass
+
+            timeline_logs: list[dict[str, Any]] = []
+            tl_path = sc_dir / "timeline_logs.json"
+            if tl_path.is_file() and not tl_path.is_symlink():
+                try:
+                    loaded_tl = json.loads(tl_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded_tl, list):
+                        for item in loaded_tl:
+                            if isinstance(item, dict) and item.get("line"):
+                                try:
+                                    t_val = float(item.get("t", 0.0))
+                                except Exception:
+                                    t_val = 0.0
+                                timeline_logs.append({"t": round(max(0.0, t_val), 2), "line": str(item["line"])})
+                except Exception:
+                    timeline_logs = []
+            if not timeline_logs and sc_logs:
+                total_span = max(float(c_dur or 0.0), 1.0)
+                step_t = total_span / max(len(sc_logs), 1)
+                for l_idx, ln in enumerate(sc_logs):
+                    timeline_logs.append({"t": round(l_idx * step_t, 2), "line": ln})
+
+            sc_assertions: list[dict[str, str]] = []
+            for s in c_steps:
+                for att in (s.get("attempts") or []):
+                    if not isinstance(att, dict):
+                        continue
+                    for asrt in (att.get("assertions") or []):
+                        if isinstance(asrt, dict):
+                            sc_assertions.append(
+                                {
+                                    "dim": str(asrt.get("dimension") or asrt.get("name") or "check"),
+                                    "status": str(asrt.get("status") or "PASS"),
+                                    "expected": str(asrt.get("expected") or ""),
+                                    "actual": str(asrt.get("actual") or ""),
+                                }
+                            )
+            vj_item = vlm_by_cid.get(cid) or {}
+            scenes.append(
+                {
+                    "scene_id": cid,
+                    "index": idx,
+                    "title": ctitle,
+                    "group": "core",
+                    "group_label": "场景验收" if is_multi_suite else "单场景验收",
+                    "status": c_status,
+                    "detail": c_detail or f"共 {len(sc_actions)} 步原子操作",
+                    "elapsed_s": c_dur,
+                    "video_offset_s": 0,
+                    "video_time_label": "00:00",
+                    "screenshot": sc_shot,
+                    "screenshots": sc_shots,
+                    "video_rel_path": video_rel_path,
+                    "actions": sc_actions,
+                    "target": default_target,
+                    "planned_steps": build_planned_steps(sc_actions),
+                    "scene_logs": sc_logs,
+                    "timeline_logs": timeline_logs,
+                    "assertions": sc_assertions,
+                    "vlm_verdict": str(vj_item.get("verdict") or ""),
+                    "vlm_reason": str(vj_item.get("summary") or vj_item.get("reason") or ""),
+                    "has_scene_mock": bool(sc_dir.is_dir() and (sc_dir / "mock_rules.json").is_file()),
+                }
+            )
+
+    if not scenes and is_multi_suite:
         # Build from suite_steps first (exact per-run timestamps & screenshots), enriched with gate_summary if present
         summary_by_name = {}
         if gate_summary and isinstance(gate_summary.get("summary"), list):
@@ -828,10 +1131,11 @@ def ensure_scene_catalog(
             sc["video_highlight_s"] = hl_s
             sc["video_highlight_label"] = f"{hl_s // 60:02d}:{hl_s % 60:02d}"
 
-            sc_logs = extract_scene_specific_logs(
-                profile, run_dir, sc, [], gate_summary=gate_summary
-            )
-            sc["scene_logs"] = sc_logs
+            if not sc.get("scene_logs"):
+                sc["scene_logs"] = extract_scene_specific_logs(
+                    profile, run_dir, sc, [], gate_summary=gate_summary
+                )
+            sc_logs = sc["scene_logs"]
             sc["lifecycle_pills"] = evaluate_lifecycle_pills(
                 profile,
                 sc_logs,

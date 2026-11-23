@@ -167,6 +167,23 @@ def _make_data_handler(store: RuleStore, log: RequestLog) -> type:
                 if isinstance(rule.body, dict):
                     body_bytes = json.dumps(rule.body).encode()
                     content_type = "application/json"
+                elif isinstance(rule.body, str) and rule.body.startswith("__file__:"):
+                    import mimetypes
+                    from pathlib import Path
+
+                    fpath = Path(rule.body[len("__file__:"):])
+                    if fpath.is_file():
+                        body_bytes = fpath.read_bytes()
+                        guessed, _ = mimetypes.guess_type(str(fpath))
+                        content_type = guessed or "application/octet-stream"
+                    else:
+                        body_bytes = b""
+                        content_type = "application/octet-stream"
+                elif isinstance(rule.body, str) and rule.body.startswith("__b64__:"):
+                    import base64
+
+                    body_bytes = base64.b64decode(rule.body[len("__b64__:"):])
+                    content_type = "application/octet-stream"
                 elif isinstance(rule.body, str):
                     body_bytes = rule.body.encode()
                     content_type = "text/plain"
@@ -174,11 +191,40 @@ def _make_data_handler(store: RuleStore, log: RequestLog) -> type:
                     body_bytes = b""
                     content_type = "text/plain"
 
+                for hk, hv in rule.headers.items():
+                    if hk.lower() == "content-type":
+                        content_type = hv
+
+                range_hdr = self.headers.get("Range")
+                if range_hdr and range_hdr.startswith("bytes=") and body_bytes and rule.status == 200:
+                    total_len = len(body_bytes)
+                    spec = range_hdr[len("bytes="):].split(",")[0].strip()
+                    s_part, _, e_part = spec.partition("-")
+                    start = int(s_part) if s_part else 0
+                    end = int(e_part) if e_part else total_len - 1
+                    end = min(end, total_len - 1)
+                    if 0 <= start <= end < total_len:
+                        chunk = body_bytes[start : end + 1]
+                        self.send_response(206)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Accept-Ranges", "bytes")
+                        self.send_header("Content-Range", f"bytes {start}-{end}/{total_len}")
+                        self.send_header("Content-Length", str(len(chunk)))
+                        for k, v in rule.headers.items():
+                            if k.lower() != "content-type":
+                                self.send_header(k, v)
+                        self.end_headers()
+                        self.wfile.write(chunk)
+                        log.record(method, path, matched=True, rule_id=rule.rule_id)
+                        return
+
                 self.send_response(rule.status)
                 self.send_header("Content-Type", content_type)
+                self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Content-Length", str(len(body_bytes)))
                 for k, v in rule.headers.items():
-                    self.send_header(k, v)
+                    if k.lower() != "content-type":
+                        self.send_header(k, v)
                 self.end_headers()
                 if body_bytes:
                     self.wfile.write(body_bytes)

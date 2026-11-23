@@ -23,10 +23,17 @@ class SceneWebController:
             max_workers=1, thread_name_prefix="scene-restore"
         )
 
-    def list_devices(self, target_package: str = "cc.admaster.android.demo") -> dict:
+    def list_devices(
+        self,
+        target_package: str = "cc.admaster.android.demo",
+        platform: str | None = None,
+    ) -> dict:
         from phone_pilot.core.manifest_generator import get_online_devices_detailed
 
-        devices = get_online_devices_detailed(target_package=target_package)
+        devices = get_online_devices_detailed(
+            target_package=target_package,
+            platform_filter=platform,
+        )
         return {
             "ok": True,
             "count": len(devices),
@@ -44,8 +51,32 @@ class SceneWebController:
         result["enabled"] = digest in self.approved_hashes
         result["token"] = self.token if result["enabled"] else None
 
-        pkg_name = (result.get("package") or {}).get("name", "cc.admaster.android.demo")
-        online_devices = get_online_devices_detailed(target_package=pkg_name)
+        platform = str(
+            result.get("platform")
+            or (result.get("device") or {}).get("platform")
+            or ((result.get("manifest") or {}).get("device") or {}).get("platform")
+            or ""
+        ).lower()
+        if not platform:
+            meta_file = Path(run_dir) / "run_meta.json"
+            if meta_file.is_file():
+                try:
+                    import json as _json
+
+                    meta_data = _json.loads(meta_file.read_text(encoding="utf-8"))
+                    platform = str((meta_data.get("device") or {}).get("platform") or "").lower()
+                except Exception:
+                    pass
+        if platform not in ("android", "ios"):
+            platform = "android"
+        default_pkg = "com.baidujp.gbusdkdemo" if platform == "ios" else "cc.admaster.android.demo"
+        pkg_name = (result.get("package") or {}).get("name") or default_pkg
+        if platform == "ios" and pkg_name == "cc.admaster.android.demo":
+            pkg_name = "com.baidujp.gbusdkdemo"
+        online_devices = get_online_devices_detailed(
+            target_package=pkg_name,
+            platform_filter=platform,
+        )
         result["online_devices"] = online_devices
 
         # Build human-friendly planned steps for immediate UI stepper preview

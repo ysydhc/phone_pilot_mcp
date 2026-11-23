@@ -215,7 +215,7 @@ def test_success_fresh_process_foreground_ui_and_new_evidence(recipe, device):
     [
         (lambda m: m.update(schema="other"), "unsupported_schema"),
         (lambda m: m.update(shell="rm -rf /"), "invalid_schema"),
-        (lambda m: m["device"].update(platform="ios"), "unsupported_platform"),
+        (lambda m: m["device"].update(platform="unknown_os"), "unsupported_platform"),
         (
             lambda m: m.update(
                 permissions=[{"name": "android.permission.CAMERA", "granted": True}]

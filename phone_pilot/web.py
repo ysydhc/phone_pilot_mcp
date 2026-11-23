@@ -35,7 +35,10 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 
 def _recordings_root() -> pathlib.Path:
-    """Resolve .recordings root (same logic as core.storage)."""
+    """Resolve .recordings root (env PHONE_PILOT_RECORDINGS_DIR > core.storage)."""
+    env_dir = (os.environ.get("PHONE_PILOT_RECORDINGS_DIR") or "").strip()
+    if env_dir:
+        return pathlib.Path(env_dir).expanduser().resolve()
     from phone_pilot.core.run_store import run_recordings_root
 
     return run_recordings_root()
@@ -584,6 +587,12 @@ def _cli():
         "--port", type=int, default=8686, help="Server port (default: 8686)"
     )
     parser.add_argument(
+        "--recordings-dir",
+        type=str,
+        default="",
+        help="Path to .recordings directory (default: <cwd>/.recordings)",
+    )
+    parser.add_argument(
         "--no-browser", action="store_true", help="Don't auto-open browser"
     )
     parser.add_argument(
@@ -600,6 +609,10 @@ def _cli():
         help="自动识别并批准所有有效 run 的 manifest（默认开启，--no-auto-approve 可关闭）",
     )
     args = parser.parse_args()
+    if args.recordings_dir:
+        os.environ["PHONE_PILOT_RECORDINGS_DIR"] = str(
+            pathlib.Path(args.recordings_dir).expanduser().resolve()
+        )
     if any(
         not re.fullmatch(r"[0-9a-f]{64}", value) for value in args.approve_scene_sha256
     ):
