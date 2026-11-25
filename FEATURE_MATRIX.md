@@ -1,71 +1,99 @@
-# Phone Pilot 跨平台功能对齐矩阵 (Feature Matrix)
+# PhonePilot 跨平台能力成熟度矩阵（Single Source of Truth）
 
-本文档记录 Phone Pilot 在 **Android**、**HarmonyOS (鸿蒙)** 与 **iOS** 三大主流移动操作系统上的能力支持现状与对齐架构。
-
----
-
-## 一、跨平台架构概览
-
-Phone Pilot 采用分层解耦的跨平台驱动体系：
-- **Android**: 基于 ADB 协议与 Android UIAutomator / Accessibility 树驱动，支持真机反向代理 (`adb reverse`)、多并发会话与高性能快照。
-- **HarmonyOS**: 基于 HDC 协议与 ArkUI `uitest dumpLayout` 布局树，提供文件互斥会话锁 (`HarmonySessionLock`)、息屏自动点亮与 `synthetic_id` 虚拟层级标识。
-- **iOS**: 基于 `idb` / `WebDriverAgent (WDA)`，具备 XCUIElement 递归局部转储、SpringBoard 系统权限弹窗精准防御、`iproxy` 端口转发与 MockServer 联动平替。
-- **通用层 (Cross-Platform)**: 统一 MCP 工具协议、PopupGuard 自动弹窗守卫、VLM 多模态视觉定位兜底 (`find_vision`)。
+> **最后核验日期**：`2026-11-25` | **对应版本**：`v0.12.0+`  
+> **治理规则**：本文件是 `phone_pilot` 三端能力状态的**唯一权威事实源**（原 `phone_pilot/FEATURE_MATRIX.md` 已收敛指向本文件）。任何跨平台驱动、MCP 工具或现场复原能力的变更必须同步更新本表。
 
 ---
 
-## 二、平台能力详细对齐矩阵
+## 一、背景与成熟度四级定义
 
-| 功能模块 | 子功能 / 契约 | Android | HarmonyOS | iOS | 架构实现与对齐方案 |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **设备与会话管理** | 设备连接与状态探测 | ✅ | ✅ | ✅ | ADB / HDC / idb companion |
-| | 多进程并发与会话锁 | ✅ | ✅ | ✅ | 鸿蒙采用基于进程与句柄的 `HarmonySessionLock`；iOS 采用 WDA Session 复用 |
-| | **多 Agent 设备租约锁** | ✅ | ✅ | ✅ | 跨进程内核级文件锁 (`fcntl.flock`) + TTL 租约防死锁 + PID 存活检测；支持排队加锁、续期与强占防护 |
-| | 环境变量设备优先绑定 | ✅ | ✅ | ✅ | 优先通过 `PHONE_PILOT_DEVICE_SERIAL` / `PHONE_PILOT_PLATFORM` 绑定专属设备，避免多项目串扰 |
-| | 息屏自动唤醒与点亮 | ✅ | ✅ | ✅ | 鸿蒙 `power_shell` + `input keyevent 26` 自愈；iOS `idb press-button POWER` |
-| | 屏幕截图与尺寸探测 | ✅ | ✅ | ✅ | 统一返回 PNG 二进制与 `(width, height)` |
-| | MockServer 反向代理 | ✅ | ⚠️ 方案支持 | ✅ | Android 原生 `adb reverse`；iOS 采用 `iproxy` + 动态端口映射平替 |
-| **UI 检查与解析** | UI 层次结构转储 (Dump) | ✅ | ✅ | ✅ | Android `uiautomator dump`；鸿蒙 `uitest dumpLayout`；iOS WDA PageSource 递归剪枝 |
-| | 局部转储 / 大树剪枝 (ROI) | ✅ | ✅ | ✅ | iOS 支持针对非活动/弹窗容器的局部快照；鸿蒙支持深度截断 |
-| | 虚拟合成标识 (synthetic_id) | ✅ (原生ID) | ✅ (合成增强) | ✅ (XCUI identifier) | 鸿蒙为无 ID 容器节点基于控件类型、深度与兄弟索引生成稳定 `synthetic_id` |
-| | 元素可见性与可点击过滤 | ✅ | ✅ | ✅ | iOS 结合 `visible` 与 `XCUIElementType` 规则精准富化 `clickable` 属性 |
-| | 页面状态获取 (page_state) | ✅ | ✅ | ✅ | 统一返回 `activity/page`、编号控件树、可交互中心点 |
-| **MCP 工具交互路由** | 基础点击 (`phone_tap`) | ✅ | ✅ | ✅ | 统一像素坐标映射与各 Driver 交互层下发 |
-| | 文本输入 (`phone_input_text`)| ✅ | ✅ | ✅ | 支持剪贴板广播、原生输入法与软键盘模拟 |
-| | 滑动与手势 (`phone_swipe`) | ✅ | ✅ | ✅ | 支持指定起始坐标与耗时 |
-| | 编号快速点击 (`tap_element`) | ✅ | ✅ | ✅ | 结合 `phone_get_page_state` 的编号直接命中并点击 |
-| | 应用启动与强停 (`launch/stop`) | ✅ | ✅ | ✅ | Android Intent / 鸿蒙 AA 命令行 / iOS Bundle ID Launch |
-| | 导航按键 (`go_home` / `go_back` / `go_recents`) | ✅ | ✅ | ✅ | Android Keycode 187 / 鸿蒙底端上滑手势降级 / iOS SpringBoard 上滑悬停唤出 App Switcher |
-| **页面认知图谱与漫游** | 拓扑寻路与三级自愈 (`navigate_to`) | ✅ | ✅ | ✅ | 基于 UIKnowledgeGraph Dijkstra 最短路径规划与弹窗/滚动/重排自愈 |
-| | 一键应用探索脑图 (`explore_app`) | ✅ | ✅ | ✅ | 启发式自动漫游、敏感破坏性动作过滤、BFS 页面入图与回溯，生成 Mermaid/Mindmap |
-| | 图谱持久化与状态转移 (`record/save/load`) | ✅ | ✅ | ✅ | 记录动作触发标准与成功率边权重，无缝序列化为标准化 JSON |
-| **打分系统与可视化看板** | 端侧执行质量打分 (`score_engine`) | ✅ | ✅ | ✅ | 四维度（正确性 40%、有效性 30%、时延 20%、自愈代价 10%）100 分制质量量化打分 |
-| | 交互式数据看板 (`dashboard`) | ✅ | ✅ | ✅ | 自包含 HTML 看板，呈现 KPI 卡片、三端对比、健康度矩阵、慢调用与应用脑图联动 |
-| **智能查找与视觉定位** | 文本智能查找 (`smart_find`) | ✅ | ✅ | ✅ | UIA 树查找 -> OCR 降级 -> 多模态视觉兜底三层漏斗 |
-| | 多模态视觉定位 (`vision_find`)| ✅ | ✅ | ✅ | VLM 零样本视觉定位；未配置 API 时静默安全跳过 |
-| | 滚动查找 (`scroll_to_find`) | ✅ | ✅ | ✅ | 基于方向滑动与步进重试 |
-| **弹窗与自愈守卫** | 自动弹窗守卫 (PopupGuard) | ✅ | ✅ | ✅ | 支持权限申请、系统通知、更新弹窗自动识别与关闭 |
-| | 否定词防护 (Negative Filter) | ✅ | ✅ | ✅ | 严格区分“允许”与“不允许”、“Don't Allow”与“Allow”，防止误点拒绝 |
-| | iOS SpringBoard 专有防御 | N/A | N/A | ✅ | 针对 iOS 弹窗按钮缺少文本与属性反转专项优化 |
+### 问题定义
+早期仓库并存两份 `FEATURE_MATRIX.md`，对 iOS 与 HarmonyOS 的支持程度采用含糊的“✅ / 未实现(有方案)”标记且结论互相冲突，导致研发排期与 AI Agent 跨端调用误判。本矩阵将平台能力拆分为 **Android**、**HarmonyOS**、**iOS Simulator**、**iOS Real Device（真机）** 四个真实交付环境，严格区分“模拟器可用”与“真机生产就绪”。
 
-*图例说明：✅ 全面支持且已自动化测试覆盖；⚠️ 方案已制定或受限于系统底层机制；N/A 不适用。*
+### 适用范围与非目标（Non-Goals）
+- **适用范围**：`DeviceDriver` 协议层、MCP 95 项工具、`script_api` 65 项公开接口、本地双端口 `MockServer`、v4.0 业务报告与 `scene.v1` 现场复原。
+- **非目标**：不覆盖越狱（Jailbreak）或 Root 专属能力；所有端侧能力均建立在官方调试通道（ADB / HDC / WDA + simctl + pymobiledevice3）之上。
+
+### 四级成熟度标签规范
+
+| 等级标签 | 判定标准（必须同时满足） | 调用预期 |
+| :---: | :--- | :--- |
+| **`GA`** | 真实设备 E2E 验证通过 + 自动化单测覆盖 + 异常路径 Fail-Closed | 生产回归门禁可直接依赖 |
+| **`Beta`** | 真机或模拟器主链路已跑通 + 单测覆盖，但存在明确的系统前置约束或边角限制 | 满足前置条件后可稳定使用 |
+| **`Exp`** | **Experimental（实验态）**：协议与 Mock 单测已覆盖，**待真机完整签名/隧道 E2E 闭环验证** | 仅供实验联调，不可作为无人值守发版门禁 |
+| **`N/S`** | **Unsupported（系统机制限制）**：受限于非越狱 OS 沙盒机制，显式返回 `{"ok": False, "error": "not_supported"}` | 上层脚本须按契约降级或跳过 |
 
 ---
 
-## 三、关键测试集与验证
+## 二、跨端能力详细对齐矩阵
 
-上述能力的对齐状态均由自动化回归测试集严格把关：
-1. **HarmonyOS**:
-   - `tests/test_harmony_session_lock.py` (会话锁与息屏自愈)
-   - `tests/harmony/test_harmony_ui.py` (ArkUI 层次结构与 `synthetic_id` 稳定性)
-   - `tests/test_harmony_popup_guard.py` (鸿蒙弹窗规则与自动关闭)
-2. **iOS**:
-   - `tests/ios/test_ios_ui.py` (iOS PageSource 转储、元素剪枝与可见性过滤)
-   - `tests/test_mock_reverse.py` (iOS 反向代理平替与联动验证)
-   - `tests/test_mcp_helpers_ios.py` (iOS MCP 工具全量路由与设备绑定)
-   - `tests/ios/test_ios_popup_guard.py` (iOS SpringBoard 弹窗规则与否定词防御)
-3. **Cross-Platform / Vision / Concurrency**:
-   - `tests/test_device_lease.py` (跨进程设备租约、TTL自动过期、重入更新与上下文管理器)
-   - `tests/test_device_mcp_lock.py` (MCP 设备锁工具链路、环境变量绑定优先、并发写操作软拦截)
-   - `tests/test_mcp_vision_tools.py` (跨平台多模态视觉 MCP 工具路由)
-   - `tests/test_vision_find.py` (跨平台视觉查找与 Tier 3 兜底链条)
+### 1. 设备发现、会话与多 Agent 并发治理
+
+| 能力项 | Android | HarmonyOS | iOS Sim | iOS 真机 | 实现机制与前置边界 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| 设备连接探测与 10s 缓存 | `GA` | `Beta` | `Beta` | `Exp` | `adb devices` / `hdc list targets` / `simctl list` / `pmd3 usbmux list` |
+| `platform="auto"` 自动路由 | `GA` | `Beta` | `Beta` | `Exp` | `_resolve_device_serial` + `PHONE_PILOT_DEVICE_SERIAL` 环境变量优先绑定 |
+| 多 Agent 租约互斥锁 (`DeviceLease`) | `GA` | `GA` | `GA` | `GA` | 宿主机内核级 `fcntl.flock` + PID 存活探测 + TTL 过期自动回收，平台无关 |
+| 单机 UI 服务并发保护 | `GA` | `Beta` | `Beta` | `Exp` | 鸿蒙通过 `HarmonySessionLock` 保护单实例 `uitest`；iOS 通过 `wda_bridge` Session 复用与 2.5s 防重连风暴冷却 |
+| 息屏唤醒与解锁 (`unlock`) | `GA` | `Beta` | `Beta` | `Exp` | 鸿蒙锁屏下系统拦截 AAMS，**Dump UI 前必须先解锁亮屏** |
+
+### 2. UI 感知、快照缓存与多模态定位
+
+| 能力项 | Android | HarmonyOS | iOS Sim | iOS 真机 | 实现机制与前置边界 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| 原生 UI 树导出 (`dump_ui_nodes`) | `GA` | `Beta` | `Beta` | `Exp` | Android `uiautomator`（支持 `compressed`）；鸿蒙 `uitest dumpLayout`；iOS WDA PageSource 递归剪枝 |
+| 无 ID 节点虚拟标识 (`synthetic_id`) | `GA` (原生) | `Beta` (合成) | `Beta` (XCUI) | `Exp` (XCUI) | 鸿蒙基于控件类型、深度与兄弟序号合成稳定 `synthetic_id` |
+| 可见比例富化 (`visible_ratio`) | `GA` | `Beta` | `Beta` | `Exp` | `core/geometry.compute_visibility` + iOS DPR (`_get_scale`) 物理像素/逻辑点双向对齐 |
+| 0.5s L1 + 30s L2 双层快照缓存 | `GA` | `GA` | `Beta` | `Exp` | `UISnapshotCache`，任意写操作（`tap`/`swipe`/`launch`）即时触发精准失效 |
+| `phone_get_page_state` + 编号标注图 | `GA` | `Beta` | `Beta` | `Exp` | 叠加编号边框截图 + `phone_tap_element(index)` 零二次 Dump 直点 |
+| `SemanticProjector` 焦点语义降噪 | `GA` | `GA` | `GA` | `GA` | 保序剪枝冗余容器（`index` 不变），上下文体积缩减 `>= 70%` |
+| Tier 2 本地 OCR 定位 (`Tesseract`) | `GA` | `GA` | `GA` | `GA` | 需宿主机安装 `tesseract` 与对应语言包（缺失时优雅返回错误字典不崩溃） |
+| Tier 3 VLM 视觉定位 (`VisionGrounding`) | `GA` | `GA` | `GA` | `GA` | OpenAI 兼容多模态接口输出 `[0,1000]` 归一化框；未配置 API Key 时静默安全旁路 |
+| LLM 语义导航自愈 (`SemanticNavigator`) | `GA` | `Beta` | `Beta` | `Exp` | 精确/别名 ➔ LLM UI 树跨语种对齐（如“激励视频”↔`Rewarded`）➔ VLM 视觉兜底，已接入 `scene_restore` |
+
+### 3. 交互控制、应用管理与系统能力
+
+| 能力项 | Android | HarmonyOS | iOS Sim | iOS 真机 | 实现机制与前置边界 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| 点击 / 滑动 / 长按 / 文本输入 | `GA` | `Beta` | `Beta` | `Exp` | iOS 输入层通过 `_to_pt(px, scale)` 自动将像素换算为 WDA 逻辑点 |
+| 导航键 (`go_home` / `go_back` / `go_recents`) | `GA` | `Beta` | `Beta` | `Exp` | 鸿蒙与 iOS 通过底端上滑悬停手势唤出多任务视图 |
+| 健壮交互 (`tap_when_ready` / `safe_tap` / `safe_close`) | `GA` | `Beta` | `Beta` | `Exp` | 轮询可点击态防漂移；跳出目标包名自动 `go_back` 恢复 |
+| 应用安装 / 卸载 / 启停 (`launch` / `force_stop`) | `GA` | `Beta` | `Beta` (`.app`) | `Exp` (`.ipa`) | iOS 启停后自动调用 `_refresh_wda_after_app_change()` 同步 WDA 上下文，支持 `args` 启动参数 |
+| DeepLink 路由拉起 (`open_deeplink`) | `GA` | `Beta` | `Beta` | `Exp` | 已对 URI/包名做 `shlex.quote` 防注入加固 |
+| 清空应用沙盒数据 (`clear_data`) | `GA` | `Beta` | `N/S` | `N/S` | iOS 非越狱无系统级清空沙盒 API（返回 `not_supported`，需卸载重装或通过启动参数重置） |
+| 清空后台进程 (`clear_background`) | `GA` | `Beta` | `N/S` | `N/S` | iOS 返回 `not_supported` |
+| 文件推拉 (`push_file` / `pull_file`) | `GA` | `Beta` | `Beta` | `Exp` | Android `adb` / 鸿蒙 `hdc file` / iOS 真机 `pmd3 afc` |
+| 剪贴板读写与受限白名单 Shell | `GA` | `Beta` | `Beta` | `N/S` | iOS 真机无设备端 Shell 与通用剪贴板读取，返回 `not_supported` |
+| 广播命令总线 (`send_broadcast`) | `GA` | `Beta` (`ces`) | `N/S` | `N/S` | Android `am broadcast`（带 ACK 区间等待）；鸿蒙 `ces pub`；iOS 需改用 `open_deeplink` 或启动参数 |
+
+### 4. 录屏、日志捕获、网络打桩与性能诊断
+
+| 能力项 | Android | HarmonyOS | iOS Sim | iOS 真机 | 实现机制与前置边界 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| 截图与无 WDA 降级截图 | `GA` | `Beta` | `Beta` | `Exp` | iOS 在 WDA 未就绪时自动降级 `simctl io screenshot` / `pmd3` 并校验非空字节 |
+| 屏幕录制 (`start/stop_recording`) | `GA` | `Beta` | `Beta` | `N/S` | Android 支持 **170s 自动循环分段 + `ffmpeg` 无损拼接**突破 180s 限制；iOS 真机返回 `not_supported` |
+| 日志捕获与序列断言 (`logcat_*`) | `GA` | `Beta` (`hilog`) | `Beta` (`simctl`) | `Exp` (`pmd3`) | iOS 不支持 `clear_log`（请用 `logcat_mark` + `logcat_since` 时间点切片） |
+| 双端口本地 `MockServer`（含序列响应） | `GA` | `Beta` | `Beta` | `Exp` | 控制面与数据面隔离；支持 `responses` 顺序响应、`seq_group` 共享计数、POST Body 捕获与 `/media/*` HTTP Range |
+| Mock 反向代理隧道 (`ReverseManager`) | `GA` (`adb reverse`) | `Beta` (`hdc rport`) | `GA` (共享 localhost) | `Exp` (`IProxyManager`) | 鸿蒙采用 `hdc rport` 建连 + `hdc fport rm` 释放；iOS 模拟器直连 `127.0.0.1` 免转发 |
+| 内存分析 (`meminfo` / `hprof` 泄漏检测) | `GA` | `Beta` (`hidumper`) | `N/S` | `N/S` | Android 完整支持 `meminfo` + `.hprof` Activity 泄漏检测；鸿蒙支持 `hidumper --mem` PSS/ArkTS 堆快照 |
+| 构建物与进程新鲜度门禁 (`FreshnessChecker`) | `GA` | `Beta` | `Beta` | `Exp` | 核验源码 `mtime` < 包体 `mtime` <= 进程 `pid_mtime` 及 `.dex`/Mach-O 关键符号字节流 |
+
+### 5. 认知图谱、极速审片工作台与受控现场复原
+
+| 能力项 | Android | HarmonyOS | iOS Sim | iOS 真机 | 实现机制与前置边界 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| 一键安全漫游建图 (`AppExplorer`) | `GA` | `Beta` | `Beta` | `Exp` | 内置破坏性动作黑名单（退出/注销/支付/删除）、灰盒路由内省、骨架同构归并，导出 Mermaid/脑图 |
+| 最短路径自愈导航 (`UINavigator` + `PopupGuard`) | `GA` | `Beta` | `Beta` | `Exp` | Dijkstra 寻路 + 历史经验库/多端弹窗守卫（含否定词防误触）/LLM 三级自愈 |
+| v4.0 极速审片台与单调时间轴联动 | `GA` | `GA` | `GA` | `GA` | `AcceptanceProfile` 可插拔胶囊灯带、`timeline_sync` 因果时间轴对齐、靶心标注图、`←/→` 键盘流 |
+| 受控设备语义现场复原 (`scene.v1`) | `GA` | `N/S` (`BLOCKED`) | `Beta` | `Exp` | 支持离线严苛模式与 `PHONE_PILOT_SCENE_ALLOW_ONLINE=1` Mock 重放模式；内置像素黑/白屏、Crash/ANR 与 `verify_contract` 终态裁判；鸿蒙当前显式 `BLOCKED` |
+| 端侧执行四维质量打分 (`TelemetryScoreEngine`) | `GA` | `GA` | `GA` | `GA` | 正确性(40) + 有效性(30) + 时延(20) + 自愈代价(10)，输出 `pp_dashboard.html` |
+| 多模态视觉裁判 (`VisualOracle`) | `Beta` (独立模块) | `Beta` (独立模块) | `Beta` (独立模块) | `Beta` (独立模块) | `extensions/vision/visual_oracle.py` 已实现像素预检 + VLM 语义缺陷判定，**待原生内嵌至 `BusinessReport` / MCP 工具层** |
+
+---
+
+## 三、验证覆盖与验收判据
+
+1. **Android**：全量单元测试 + 真机（POCO / Redmi / Samsung 等）17+ 复杂场景发版门禁常态化运行。
+2. **HarmonyOS**：253 项驱动与系统单元测试通过 + 华为 Pura 70 Pro+（HarmonyOS 4.x/Next）真机 7 大核心领域实测通过。
+3. **iOS**：驱动层 43 入口协议单测（`tests/ios/`）与 iOS Simulator 端到端链路已验证；iOS 真机 E2E 需宿主机具备 Xcode 已签名 `WebDriverAgentRunner` 与 `pymobiledevice3 remote tunneld`（iOS 17+）。
+4. **L1 零业务耦合门禁**：由 `tests/test_zero_business_coupling.py` 静态扫描全仓 `*.py` 与 `*.j2`，确保底座零业务包名/域名残留。

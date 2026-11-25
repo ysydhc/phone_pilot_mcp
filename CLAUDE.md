@@ -26,8 +26,11 @@ Test paths are `tests/` and `phone_pilot/tests/` (configured in `pyproject.toml`
 ### Entry points (defined in `pyproject.toml [project.scripts]`)
 
 - `phone-pilot-mcp` → `phone_pilot.cli:main` — starts the MCP stdio server.
-- `phone-pilot-call` → `phone_pilot.mcp_call:main` — minimal stdio MCP client for invoking tools from the CLI (`--list-tools`, `<tool_name> --args '<json>'`).
-- `phone-pilot-web` → `phone_pilot.web:_cli` — local dashboard (stdlib `http.server`) on `:8686` for browsing run records and `@res:` images.
+- `phone-pilot-call` → `phone_pilot.mcp_call:main` — minimal stdio MCP client for invoking tools from the CLI (`--list-tools`, `--list-script-api`, `<tool_name> --args '<json>'`).
+- `phone-pilot-web` → `phone_pilot.web:_cli` — local v4.0 acceptance & scene restoration dashboard (`stdlib http.server`) on `:8686`.
+- `phone-pilot-restore` → `phone_pilot.scene_cli:main` — CLI read-only inspection and SHA256-approved declarative scene restoration (`phone_pilot.scene.v1`).
+
+> Full product & technical documentation center (SSoT): `<DOC_ROOT>/phone_pilot/00-index/INDEX.md` (where `<DOC_ROOT>` resolves via `$AGENT_DOC_ROOT`).
 
 ## Architecture
 
@@ -51,7 +54,7 @@ script_api (phone_pilot/script_api/) ─┤→ core/skills.py (DeviceSkills) →
 The server is split by domain. `server.py` creates the single `FastMCP` instance and imports each `_*_tools.py` submodule — **each submodule registers its tools via `@mcp.tool()` decorators on import** (star-imported back into `server.py` for backward-compat so tests can import tool fns from `phone_pilot.mcp.server`).
 
 - `_import_fastmcp()` in `server.py` guards against the local `phone_pilot.mcp` package shadowing the external `mcp` (FastMCP) package on `sys.path` — be careful when editing imports here.
-- **Layered tool loading** (`_tool_registry.py`): ~15 `CORE_TOOLS` are always visible; the rest are hidden after startup to cut agent context overhead (~10K→~2.3K tokens) and exposed on demand via the `phone_discover_tools` meta-tool / `activate_category`. Set `PHONE_PILOT_LOAD_ALL_TOOLS=1` to register everything (used by tests). When adding a new tool, also add its name to `CORE_TOOLS` or the appropriate `EXTENDED_CATEGORIES` entry, otherwise it stays hidden in layered mode.
+- **Layered tool loading** (`_tool_registry.py`): 20 `CORE_TOOLS` are always visible; the remaining 75 unique tools across 10 categories (`device`, `input`, `ui_find`, `app`, `recording`, `logcat`, `advanced`, `script_record`, `graph`, `mock`; total 95 MCP tools) are hidden after startup to cut agent context overhead (~10K→~2.3K tokens) and exposed on demand via the `phone_discover_tools` meta-tool / `activate_category`. Set `PHONE_PILOT_LOAD_ALL_TOOLS=1` to register everything (used by tests). When adding a new tool, also add its name to `CORE_TOOLS` or the appropriate `EXTENDED_CATEGORIES` entry, otherwise it stays hidden in layered mode.
 - `tool_contracts.py` holds shared schema/response contract definitions. `_state.py` holds shared mutable state (recording/logcat) guarded by `_state_lock`.
 - **Response contract**: every `phone_*` tool returns a `dict`. Success → `{"ok": True, ...}`; failure → `{"ok": False, "error": str, ...}`. Never raise out of a tool. `_with_device` in `_helpers.py` wraps tool bodies to resolve the serial and convert exceptions into this envelope.
 - **Multi-Agent device concurrency & lease lock (`core/device_lease.py`)**:
@@ -136,7 +139,7 @@ Every script run writes a timestamped dir under `.recordings/runs/{script}_{git}
 
 ## Conventions
 
-- Three-platform feature parity is tracked in `phone_pilot/FEATURE_MATRIX.md` — **update it when you implement a platform feature** (the file itself states this rule).
+- Three-platform feature parity is tracked in root `FEATURE_MATRIX.md` (`phone_pilot/FEATURE_MATRIX.md` is only a redirect pointer) — **update root `FEATURE_MATRIX.md` when you implement a platform feature**.
 - New platform support = implement the `core/protocols.py` Protocols in a new package; wire it into `driver_factory.py` and `mcp/_helpers.py`.
 - Comments and docstrings in this repo are frequently bilingual (Chinese/English); match the surrounding style of the file you edit.
 - `docs/`, demo scripts under `scripts/`, and resource PNGs are intentionally excluded from git (see `.gitignore`); don't assume they exist when reasoning about CI.
