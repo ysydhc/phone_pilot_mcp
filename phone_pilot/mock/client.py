@@ -61,13 +61,15 @@ class MockControlClient:
         self,
         method: str,
         path: str,
-        body: dict[str, Any] | str | None,
+        body: dict[str, Any] | str | None = None,
         *,
         status: int = 200,
         headers: dict[str, str] | None = None,
         delay_ms: int = 0,
+        responses: list[dict[str, Any]] | None = None,
+        seq_group: str = "",
     ) -> dict[str, Any]:
-        """POST /rules — 添加或覆盖一条匹配规则。"""
+        """POST /rules — 添加或覆盖一条匹配规则（可选传入按序 responses 队列）。"""
         payload: dict[str, Any] = {
             "method": method,
             "path": path,
@@ -76,6 +78,10 @@ class MockControlClient:
             "headers": headers or {},
             "delay_ms": delay_ms,
         }
+        if responses:
+            payload["responses"] = responses
+        if seq_group:
+            payload["seq_group"] = seq_group
         return self._request("POST", "/rules", payload)
 
     def load_seed(self, seed: dict[str, Any]) -> dict[str, Any]:

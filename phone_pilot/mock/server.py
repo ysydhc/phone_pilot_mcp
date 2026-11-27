@@ -80,6 +80,8 @@ def _make_ctrl_handler(
                                 "matched": e.matched,
                                 "rule_id": e.rule_id,
                                 "ts": e.ts,
+                                "mono_ts": e.mono_ts,
+                                "body": e.body,
                             }
                             for e in entries
                         ],
@@ -118,6 +120,8 @@ def _make_ctrl_handler(
                     body=data.get("body"),
                     headers=data.get("headers") or {},
                     delay_ms=int(data.get("delay_ms", 0)),
+                    responses=data.get("responses") if isinstance(data.get("responses"), list) else None,
+                    seq_group=str(data.get("seq_group") or ""),
                 )
                 self._send_json(200, {"ok": True, "rule_id": rule_id})
             elif path == "/rules/bulk":
@@ -126,6 +130,9 @@ def _make_ctrl_handler(
                     self._send_json(200, {"ok": True, "count": count})
                 except ValueError as exc:
                     self._send_json(400, {"ok": False, "error": str(exc)})
+            elif path == "/requests/clear":
+                log.clear()
+                self._send_json(200, {"ok": True})
             else:
                 self._send_json(404, {"ok": False, "error": "not found"})
 
@@ -157,9 +164,29 @@ def _make_data_handler(store: RuleStore, log: RequestLog) -> type:
 
         def _handle(self) -> None:
             method = self.command
+            is_head = method == "HEAD"
             path = self.path
+            req_body_str = ""
+            try:
+                clen = int(self.headers.get("Content-Length") or 0)
+                if clen > 0:
+                    raw_req = self.rfile.read(min(clen, 65536))
+                    if clen > 65536:
+                        rem = min(clen - 65536, 1048576)
+                        if rem > 0:
+                            self.rfile.read(rem)
+                    try:
+                        req_body_str = raw_req.decode("utf-8")
+                    except UnicodeDecodeError:
+                        import base64
+
+                        req_body_str = "__b64__:" + base64.b64encode(raw_req[:8192]).decode("ascii")
+            except Exception:
+                req_body_str = ""
 
             rule = store.match(method, path)
+            if rule is None and is_head:
+                rule = store.match("GET", path)
             if rule is not None:
                 if rule.delay_ms > 0:
                     time.sleep(rule.delay_ms / 1000.0)
@@ -214,8 +241,9 @@ def _make_data_handler(store: RuleStore, log: RequestLog) -> type:
                             if k.lower() != "content-type":
                                 self.send_header(k, v)
                         self.end_headers()
-                        self.wfile.write(chunk)
-                        log.record(method, path, matched=True, rule_id=rule.rule_id)
+                        if not is_head:
+                            self.wfile.write(chunk)
+                        log.record(method, path, matched=True, rule_id=rule.rule_id, body=req_body_str)
                         return
 
                 self.send_response(rule.status)
@@ -226,15 +254,15 @@ def _make_data_handler(store: RuleStore, log: RequestLog) -> type:
                     if k.lower() != "content-type":
                         self.send_header(k, v)
                 self.end_headers()
-                if body_bytes:
+                if body_bytes and not is_head:
                     self.wfile.write(body_bytes)
 
-                log.record(method, path, matched=True, rule_id=rule.rule_id)
+                log.record(method, path, matched=True, rule_id=rule.rule_id, body=req_body_str)
             else:
                 self.send_response(404)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
-                log.record(method, path, matched=False, rule_id=None)
+                log.record(method, path, matched=False, rule_id=None, body=req_body_str)
 
         def do_GET(self) -> None:  # noqa: N802
             self._handle()
