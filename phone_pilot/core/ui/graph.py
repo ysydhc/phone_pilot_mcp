@@ -315,6 +315,8 @@ class UINode:
     structure_hash: str = ""
     id_skeleton: list[str] = field(default_factory=list)
     scroll_pages_stitched: int = 1
+    app_version: str = ""
+    visit_count: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -326,6 +328,8 @@ class UINode:
             "structure_hash": self.structure_hash,
             "id_skeleton": list(self.id_skeleton),
             "scroll_pages_stitched": self.scroll_pages_stitched,
+            "app_version": self.app_version,
+            "visit_count": self.visit_count,
             "page_signature": {
                 "name": self.page_signature.name,
                 "activity_or_controller": self.page_signature.activity_or_controller,
@@ -362,6 +366,8 @@ class UINode:
             structure_hash=str(data.get("structure_hash", "")),
             id_skeleton=list(data.get("id_skeleton", [])),
             scroll_pages_stitched=int(data.get("scroll_pages_stitched", 1)),
+            app_version=str(data.get("app_version", "")),
+            visit_count=int(data.get("visit_count", 1)),
         )
 
 
@@ -379,12 +385,37 @@ class UIEdge:
     success_rate: float = 1.0
     attempts: int = 1
     successes: int = 1
+    last_explored_at: float = field(default_factory=time.time)
+    avg_latency_s: float = 0.0
+    back_failures: int = 0
+    is_self_loop: bool = False
+    app_version: str = ""
 
-    def record_outcome(self, success: bool) -> float:
-        self.attempts = max(1, self.attempts + 1)
+    def record_outcome(
+        self,
+        success: bool,
+        *,
+        latency_s: Optional[float] = None,
+        back_failed: bool = False,
+        app_version: str = "",
+    ) -> float:
+        prev_attempts = max(0, int(self.attempts))
+        self.attempts = max(1, prev_attempts + 1)
         if success:
             self.successes += 1
         self.success_rate = round(self.successes / self.attempts, 4)
+        self.last_explored_at = time.time()
+        if latency_s is not None and latency_s >= 0:
+            if prev_attempts == 0 or self.avg_latency_s <= 0:
+                self.avg_latency_s = round(float(latency_s), 3)
+            else:
+                self.avg_latency_s = round(
+                    (self.avg_latency_s * prev_attempts + float(latency_s)) / self.attempts, 3
+                )
+        if back_failed:
+            self.back_failures += 1
+        if app_version:
+            self.app_version = app_version
         return self.success_rate
 
     def to_dict(self) -> dict[str, Any]:
@@ -396,18 +427,30 @@ class UIEdge:
             "success_rate": self.success_rate,
             "attempts": self.attempts,
             "successes": self.successes,
+            "last_explored_at": self.last_explored_at,
+            "avg_latency_s": self.avg_latency_s,
+            "back_failures": self.back_failures,
+            "is_self_loop": self.is_self_loop,
+            "app_version": self.app_version,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UIEdge":
+        src = str(data["source_id"])
+        dst = str(data["target_id"])
         return cls(
-            source_id=str(data["source_id"]),
-            target_id=str(data["target_id"]),
+            source_id=src,
+            target_id=dst,
             action_type=str(data.get("action_type", "tap")),
             trigger_criteria=dict(data.get("trigger_criteria", {})),
             success_rate=float(data.get("success_rate", 1.0)),
             attempts=int(data.get("attempts", 1)),
             successes=int(data.get("successes", 1)),
+            last_explored_at=float(data.get("last_explored_at", time.time())),
+            avg_latency_s=float(data.get("avg_latency_s", 0.0)),
+            back_failures=int(data.get("back_failures", 0)),
+            is_self_loop=bool(data.get("is_self_loop", src == dst)),
+            app_version=str(data.get("app_version", "")),
         )
 
 
@@ -1238,21 +1281,127 @@ class UIKnowledgeGraph:
             success_rate=init_rate,
             attempts=1,
             successes=1 if success else 0,
+            last_explored_at=time.time(),
+            is_self_loop=(src_node.node_id == dst_node.node_id),
         )
         self.edges.append(new_edge)
         return src_node, new_edge, dst_node
 
+    @classmethod
+    def normalize_action_signature(cls, action: dict[str, Any]) -> str:
+        """生成跨会话稳定的动作归一化签名（严禁使用原始像素 bounds，防止轻微偏移破坏去重）。
+
+        优先级：1) 稳定 resource_id（剥离包名前缀与纯数字后缀）> 2) 清洗后文案（剥离红点数字）> 3) 粗粒度网格坐标 (cx//48, cy//48)。
+        """
+        import re
+
+        if not isinstance(action, dict):
+            return ""
+        crit = action.get("trigger_criteria") if isinstance(action.get("trigger_criteria"), dict) else {}
+        raw_rid = str(action.get("resource_id") or crit.get("resource_id") or "").strip()
+        short_rid = raw_rid.split("/")[-1].strip().lower()
+        # 剔除动态数字后缀或无语义通用容器名
+        generic_rids = {"", "view", "text", "label", "icon", "image", "title", "content", "container", "root"}
+        if short_rid and short_rid not in generic_rids and not re.fullmatch(r"[\d\+\-\.,:%kKwW]+", short_rid):
+            norm_rid = re.sub(r"[_-]?\d+$", "", short_rid) or short_rid
+            if norm_rid not in generic_rids:
+                return f"rid:{norm_rid}"
+
+        raw_txt = str(
+            action.get("text")
+            or crit.get("text")
+            or action.get("label")
+            or crit.get("label")
+            or ""
+        ).strip()
+        clean_txt = cls._clean_ui_label(raw_txt)
+        # 剥离红点计数（如 +20, 99+, 末尾数字）
+        clean_txt = re.sub(r"\s*(\+\d+|\d+\+)$", "", clean_txt).strip()
+        if clean_txt and not re.fullmatch(r"[\d\+\-\.,:%kKwW]+", clean_txt):
+            return f"txt:{clean_txt.lower()}"
+
+        bounds = action.get("bounds") or crit.get("bounds")
+        if isinstance(bounds, (list, tuple)) and len(bounds) == 4:
+            try:
+                cx = (int(bounds[0]) + int(bounds[2])) // 2
+                cy = (int(bounds[1]) + int(bounds[3])) // 2
+                return f"grid:{cx // 48},{cy // 48}"
+            except Exception:
+                pass
+        return f"raw:{raw_txt.lower()}|{short_rid}"
+
+    def get_action_stats(
+        self,
+        source_id: str,
+        action_sig: str,
+        *,
+        edge_ttl_s: Optional[float] = None,
+        app_version: str = "",
+        now_ts: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """聚合某节点下指定归一化动作的历史统计与新鲜度状态（支撑 Cost-Aware UCB1 与动作级差集）。"""
+        now = time.time() if now_ts is None else float(now_ts)
+        matched: list[UIEdge] = []
+        for edge in self.edges:
+            if edge.source_id != source_id or edge.action_type == "back":
+                continue
+            if self.normalize_action_signature(edge.trigger_criteria) == action_sig:
+                matched.append(edge)
+
+        if not matched:
+            return {
+                "is_explored": False,
+                "is_stale": False,
+                "attempts": 0,
+                "novelty_rate": 1.0,
+                "avg_latency_s": 0.0,
+                "back_failures": 0,
+                "last_explored_at": 0.0,
+            }
+
+        total_attempts = sum(max(1, int(e.attempts)) for e in matched)
+        non_loop_attempts = sum(
+            max(1, int(e.attempts)) for e in matched if e.target_id != source_id and not e.is_self_loop
+        )
+        avg_lat = (
+            sum(float(e.avg_latency_s) * max(1, int(e.attempts)) for e in matched) / total_attempts
+            if total_attempts > 0
+            else 0.0
+        )
+        back_fails = sum(int(e.back_failures) for e in matched)
+        latest_ts = max(float(e.last_explored_at) for e in matched)
+
+        version_stale = bool(
+            app_version and any(e.app_version and e.app_version != app_version for e in matched)
+        )
+        ttl_stale = bool(edge_ttl_s is not None and edge_ttl_s >= 0 and (now - latest_ts) > edge_ttl_s)
+        is_stale = version_stale or ttl_stale
+
+        return {
+            "is_explored": True,
+            "is_stale": is_stale,
+            "attempts": 0 if is_stale else total_attempts,
+            "novelty_rate": 1.0 if is_stale else round(non_loop_attempts / max(1, total_attempts), 4),
+            "avg_latency_s": round(avg_lat, 3),
+            "back_failures": back_fails,
+            "last_explored_at": latest_ts,
+        }
+
     @staticmethod
     def _edge_cost(edge: UIEdge) -> float:
         rate = max(0.05, min(1.0, float(edge.success_rate)))
-        return 1.0 - 0.5 * rate + (1.0 / rate - 1.0)
+        lat_pen = min(2.0, float(edge.avg_latency_s) / 10.0) if edge.avg_latency_s > 0 else 0.0
+        return 1.0 - 0.5 * rate + (1.0 / rate - 1.0) + lat_pen
 
     def find_path_to(
         self,
         target: Union[PageSignature, str],
         current_state: Union[dict[str, Any], str],
+        *,
+        max_hops: Optional[int] = None,
+        min_success_rate: float = 0.0,
     ) -> list[UIEdge]:
-        """使用 Dijkstra 最短路径算法规划从当前状态到目标页面的最优动作序列。"""
+        """使用 Dijkstra 最短路径算法规划从当前状态到目标页面的最优动作序列（支持跳数与边可靠性约束）。"""
         start_node = self.match_node(current_state)
         target_node = self.match_node(target)
         if start_node is None or target_node is None:
@@ -1262,6 +1411,8 @@ class UIKnowledgeGraph:
 
         adj: dict[str, list[UIEdge]] = {}
         for edge in self.edges:
+            if float(edge.success_rate) < min_success_rate:
+                continue
             adj.setdefault(edge.source_id, []).append(edge)
 
         counter = 0
@@ -1274,6 +1425,8 @@ class UIKnowledgeGraph:
             cost, _, curr_id, path = heapq.heappop(heap)
             if curr_id == target_node.node_id:
                 return path
+            if max_hops is not None and len(path) >= max_hops:
+                continue
             if cost > best_cost.get(curr_id, float("inf")):
                 continue
 

@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import math
+import random
+import re
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence
 
@@ -21,6 +23,7 @@ from phone_pilot.core.ui.navigator import UINavigator
 
 
 DEFAULT_DESTRUCTIVE_BLACKLIST: tuple[str, ...] = (
+    # 中文破坏性/敏感操作
     "退出",
     "注销",
     "登出",
@@ -36,6 +39,10 @@ DEFAULT_DESTRUCTIVE_BLACKLIST: tuple[str, ...] = (
     "立即付款",
     "格式化",
     "重置",
+    "切换夜间模式",
+    "切换日间模式",
+    "深色模式",
+    # 英文破坏性/敏感操作
     "Logout",
     "Log out",
     "Sign out",
@@ -46,9 +53,56 @@ DEFAULT_DESTRUCTIVE_BLACKLIST: tuple[str, ...] = (
     "Purchase",
     "Reset",
     "Format",
-    "切换夜间模式",
-    "切换日间模式",
-    "深色模式",
+    "Dark mode",
+    "Night mode",
+    # 日文破坏性/敏感操作
+    "ログアウト",
+    "サインアウト",
+    "退会",
+    "アカウント削除",
+    "削除",
+    "消去",
+    "アンインストール",
+    "支払",
+    "購入",
+    "課金",
+    "リセット",
+    "初期化",
+    "ダークモード",
+    "ナイトモード",
+)
+
+# 通用高价值业务意图词典（按 Tier S / Tier A 分档，配合 explore_profile 与 goal_intents 动态加权）
+# 说明：纯 ASCII 词按词边界匹配（兼容 snake_case/kebab-case 如 center_task、btn-ad），避免 ad 误命中 header/download；
+# CJK 词按子串匹配。
+MONETIZATION_TIER_S_PATTERNS: tuple[str, ...] = (
+    # Tier S: 强激励、任务中心、看广告领奖、签到福利闭环
+    "任务", "タスク", "task", "tasks",
+    "福利", "リワード", "reward", "rewards", "bonus",
+    "签到", "チェックイン", "checkin", "check-in",
+    "广告", "広告", "ad", "ads", "advertisement", "激励",
+    "去完成", "看视频", "動画を見る", "最後まで見る", "領取", "领取", "claim", "get",
+)
+
+MONETIZATION_TIER_A_PATTERNS: tuple[str, ...] = (
+    # Tier A: 资产、商城、抽奖、会员与核心互动玩法
+    "金币", "コイン", "coin", "coins",
+    "积分", "ポイント", "point", "points",
+    "星粒",
+    "活动", "キャンペーン", "campaign", "event", "events",
+    "免费", "無料", "free",
+    "抽奖", "ガチャ", "lottery", "gacha", "lucky",
+    "商城", "ショップ", "shop", "store",
+    "钱包", "ウォレット", "wallet",
+    "卡券", "优惠券", "クーポン", "coupon", "coupons",
+    "会员", "vip", "pass", "特権",
+    "提问", "質問", "question",
+    "游戏", "ゲーム", "game", "games",
+    "测试", "診断", "quiz",
+)
+
+DEFAULT_HIGH_VALUE_INTENT_PATTERNS: tuple[str, ...] = (
+    MONETIZATION_TIER_S_PATTERNS + MONETIZATION_TIER_A_PATTERNS
 )
 
 
@@ -73,6 +127,9 @@ class AppExplorer:
         action_executor: Callable[[dict[str, Any]], bool] | None = None,
         back_executor: Callable[[], bool] | None = None,
         destructive_blacklist: Sequence[str] | None = None,
+        high_value_intents: Sequence[str] | None = None,
+        explore_profile: str = "balanced",
+        goal_intents: Sequence[str] | None = None,
         target_package: Optional[str] = None,
         lock_package: bool = True,
     ) -> None:
@@ -82,6 +139,13 @@ class AppExplorer:
         self.action_executor = action_executor
         self.back_executor = back_executor
         self.blacklist = tuple(destructive_blacklist) if destructive_blacklist is not None else DEFAULT_DESTRUCTIVE_BLACKLIST
+        self.high_value_intents = tuple(high_value_intents) if high_value_intents is not None else DEFAULT_HIGH_VALUE_INTENT_PATTERNS
+        self.explore_profile = str(explore_profile or "balanced").strip().lower()
+        self.goal_intents: tuple[str, ...] = tuple(goal_intents) if goal_intents else ()
+        self._hv_ascii_regexes, self._hv_cjk_terms = self._compile_intent_matchers(self.high_value_intents)
+        self._tier_s_ascii_regexes, self._tier_s_cjk_terms = self._compile_intent_matchers(MONETIZATION_TIER_S_PATTERNS)
+        self._tier_a_ascii_regexes, self._tier_a_cjk_terms = self._compile_intent_matchers(MONETIZATION_TIER_A_PATTERNS)
+        self._goal_ascii_regexes, self._goal_cjk_terms = self._compile_intent_matchers(self.goal_intents)
         self.target_package: Optional[str] = target_package.strip() if target_package else None
         self.lock_package: bool = lock_package
         self.history: list[ExploreStep] = []
@@ -771,8 +835,22 @@ class AppExplorer:
         sw = int(screen_info.get("width") or 0) if isinstance(screen_info, dict) else 0
         sh = int(screen_info.get("height") or 0) if isinstance(screen_info, dict) else 0
 
-        close_texts = ("关闭", "[关闭]", "[关闭，按钮]", "返回", "[返回]", "[返回，按钮]", "转到上一层级", "取消", "以后再说", "暂不")
-        close_ids = ("close", "iv_close", "btn_close", "back", "iv_back", "btn_back", "cancel", "dismiss", "toolbar_close")
+        close_texts = (
+            "关闭", "[关闭]", "[关闭，按钮]", "返回", "[返回]", "[返回，按钮]", "转到上一层级", "取消", "以后再说", "暂不",
+            # 日文多语言常见关闭/返回/取消
+            "閉じる", "[閉じる]", "戻る", "[戻る]", "キャンセル", "あとで", "スキップ",
+            # 英文多语言常见关闭/返回/取消
+            "Close", "[Close]", "Back", "[Back]", "Cancel", "Dismiss", "Later", "Skip",
+            # 通用关闭/返回符号
+            "×", "✕", "✖", "←", "‹", "<",
+        )
+        close_ids = (
+            "close", "iv_close", "btn_close", "back", "iv_back", "btn_back", "cancel", "dismiss", "toolbar_close",
+            # iOS 常见导航返回/关闭图标命名
+            "star back black", "black back", "white close", "web close", "close_button", "nav_back",
+        )
+        # 词边界匹配通用关闭/返回 ID（兼容 icon_back_dark / close_btn / nav-back，避免误伤 background / feedback / callback）
+        close_rid_rx = re.compile(r"(?<![a-z0-9])(back|close|dismiss|cancel|chevron\.left)(?![a-z0-9])")
         for el in els:
             if not isinstance(el, dict):
                 continue
@@ -785,12 +863,14 @@ class AppExplorer:
                 continue
             if (
                 t in close_texts
-                or any(t.startswith(ct) for ct in ("关闭", "[关闭", "返回", "[返回", "转到上一层级"))
+                or any(t.startswith(ct) for ct in ("关闭", "[关闭", "返回", "[返回", "转到上一层级", "閉じる", "[閉じる", "戻る", "[戻る", "Close", "[Close", "Back", "[Back"))
                 or rid in close_ids
+                or bool(rid and close_rid_rx.search(rid))
             ):
                 return self.execute_action({"action_type": "tap", "text": t or rid, "bounds": b})
 
-        # 通用几何兜底：仅在非主导航页上，寻找屏幕左上角导航栏区域的无文本小型可点击返回/关闭图标（如无标签的 '×' 或 '<' 视图，严禁误点 '[侧边栏]' 等具名入口）
+        # 通用几何兜底：仅在非主导航页上，寻找屏幕左上角导航栏区域的无文本或纯图标资源名小型可点击返回/关闭图标
+        # （严禁误点 '[侧边栏]'、'设置' 等具名业务入口）
         ntype, _ = self.graph._infer_semantic_metadata(state)
         if sw > 0 and sh > 0 and ntype != "sub_tab":
             for el in els:
@@ -798,7 +878,13 @@ class AppExplorer:
                     continue
                 t = str(el.get("text") or el.get("label") or el.get("content_desc") or "").strip()
                 rid = str(el.get("resource_id") or el.get("identifier") or "")
-                if t or self._is_destructive(rid) or el.get("enabled") is False:
+                t_low = t.lower()
+                is_icon_asset_name = bool(
+                    t
+                    and t.isascii()
+                    and ("_" in t or any(k in t_low for k in ("arrow", "chevron", "icon", "nav", "left", "clo")))
+                )
+                if (t and not is_icon_asset_name) or self._is_destructive(t) or self._is_destructive(rid) or el.get("enabled") is False:
                     continue
                 b = el.get("bounds")
                 if not isinstance(b, (list, tuple)) or len(b) != 4:
@@ -808,10 +894,196 @@ class AppExplorer:
                     bw, bh = x2 - x1, y2 - y1
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                     if 0 < cx <= sw * 0.16 and sh * 0.03 <= cy <= sh * 0.14 and 0 < bw <= sw * 0.18 and 0 < bh <= sh * 0.08:
-                        return self.execute_action({"action_type": "tap", "text": "top_left_close", "bounds": b})
+                        return self.execute_action({"action_type": "tap", "text": t or "top_left_close", "bounds": b})
                 except Exception:
                     pass
         return False
+
+    @staticmethod
+    def _compile_intent_matchers(patterns: Sequence[str]) -> tuple[tuple[re.Pattern[str], ...], tuple[str, ...]]:
+        ascii_rx = tuple(
+            re.compile(rf"(?<![a-z0-9]){re.escape(p.lower())}(?![a-z0-9])")
+            for p in patterns
+            if p and p.isascii()
+        )
+        cjk_terms = tuple(p.lower() for p in patterns if p and not p.isascii())
+        return ascii_rx, cjk_terms
+
+    @staticmethod
+    def _matches_compiled_intents(
+        text: str,
+        res_id_lower: str,
+        ascii_rx: tuple[re.Pattern[str], ...],
+        cjk_terms: tuple[str, ...],
+    ) -> bool:
+        t_low = (text or "").lower()
+        r_low = (res_id_lower or "").lower()
+        for term in cjk_terms:
+            if term in t_low or term in r_low:
+                return True
+        for rx in ascii_rx:
+            if (t_low and rx.search(t_low)) or (r_low and rx.search(r_low)):
+                return True
+        return False
+
+    def _is_high_value_intent(self, text: str, res_id_lower: str) -> bool:
+        """判断控件文案或资源 ID 是否命中高价值业务意图（ASCII 按词边界，CJK 按子串）。"""
+        return self._matches_compiled_intents(text, res_id_lower, self._hv_ascii_regexes, self._hv_cjk_terms)
+
+    def _compute_intent_value(
+        self,
+        text: str,
+        res_id_lower: str,
+        *,
+        is_bottom_tab: bool = False,
+        explore_profile: Optional[str] = None,
+        goal_matchers: Optional[tuple[tuple[re.Pattern[str], ...], tuple[str, ...]]] = None,
+    ) -> float:
+        """按可插拔 explore_profile 与动态 goal_intents 计算控件业务意图价值 V_intent。"""
+        g_rx, g_cjk = goal_matchers if goal_matchers is not None else (self._goal_ascii_regexes, self._goal_cjk_terms)
+        if (g_rx or g_cjk) and self._matches_compiled_intents(text, res_id_lower, g_rx, g_cjk):
+            return 1.2
+        if is_bottom_tab:
+            return 0.8
+        prof = str(explore_profile or self.explore_profile or "balanced").strip().lower()
+        is_tier_s = self._matches_compiled_intents(text, res_id_lower, self._tier_s_ascii_regexes, self._tier_s_cjk_terms)
+        is_tier_a = (not is_tier_s) and self._matches_compiled_intents(text, res_id_lower, self._tier_a_ascii_regexes, self._tier_a_cjk_terms)
+        is_custom_hv = (not is_tier_s and not is_tier_a) and self._is_high_value_intent(text, res_id_lower)
+
+        if prof == "monetization":
+            if is_tier_s:
+                return 1.0
+            if is_tier_a or is_custom_hv:
+                return 0.6
+            return 0.2
+        # balanced 默认通用画像：适度提权核心枢纽，不偏科
+        if is_tier_s:
+            return 0.55
+        if is_tier_a or is_custom_hv:
+            return 0.45
+        return 0.2
+
+    @staticmethod
+    def _interleaved_ranks(n: int) -> list[int]:
+        """生成 [0, n-1, 1, n-2, ...] 的两端向中部交替序位，用于打破 UCB1 冷启动同分平局。"""
+        order: list[int] = []
+        lo, hi = 0, n - 1
+        while lo <= hi:
+            order.append(lo)
+            if lo != hi:
+                order.append(hi)
+            lo += 1
+            hi -= 1
+        ranks = [0] * n
+        for pos, orig_idx in enumerate(order):
+            ranks[orig_idx] = pos
+        return ranks
+
+    def score_and_order_candidates(
+        self,
+        source_node_id: str,
+        candidates: list[dict[str, Any]],
+        *,
+        order_strategy: str = "ucb",
+        skip_explored_actions: bool = True,
+        edge_ttl_s: Optional[float] = 86400.0,
+        app_version: str = "",
+        explore_profile: Optional[str] = None,
+        goal_intents: Sequence[str] | None = None,
+        random_seed: Optional[int] = None,
+        now_ts: Optional[float] = None,
+    ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+        """基于 Cost-Aware UCB1 / 多序策略对候选动作打分、过滤已探索动作并返回 (待执行列表, 跳过数, 全量打分摘要)。"""
+        if not candidates:
+            return [], 0, []
+
+        strategy = str(order_strategy or "ucb").strip().lower()
+        goal_matchers = self._compile_intent_matchers(goal_intents) if goal_intents else None
+        node_obj = self.graph.get_node(source_node_id)
+        node_visits = max(1, int(getattr(node_obj, "visit_count", 1) if node_obj is not None else 1))
+        total_out_attempts = sum(
+            max(1, int(e.attempts))
+            for e in self.graph.edges
+            if e.source_id == source_node_id and e.action_type != "back"
+        )
+        n_total = max(node_visits, total_out_attempts, 1)
+
+        interleaved_pos = self._interleaved_ranks(len(candidates))
+        rng = random.Random(random_seed) if random_seed is not None else random.Random()
+
+        enriched: list[tuple[int, dict[str, Any], float, bool, int]] = []
+        all_scored: list[dict[str, Any]] = []
+        skipped_count = 0
+
+        for idx, cand in enumerate(candidates):
+            sig = self.graph.normalize_action_signature(cand)
+            stats = self.graph.get_action_stats(
+                source_node_id,
+                sig,
+                edge_ttl_s=edge_ttl_s,
+                app_version=app_version,
+                now_ts=now_ts,
+            )
+            txt = str(cand.get("text") or "")
+            rid_low = str(cand.get("resource_id") or "").lower()
+            v_intent = self._compute_intent_value(
+                txt,
+                rid_low,
+                is_bottom_tab=bool(cand.get("is_bottom_tab")),
+                explore_profile=explore_profile,
+                goal_matchers=goal_matchers,
+            )
+            c_cost = float(stats["avg_latency_s"]) / 5.0 + 1.5 * float(stats["back_failures"])
+            r_novelty = float(stats["novelty_rate"])
+            n_sa = int(stats["attempts"])
+            ucb_score = (r_novelty + 1.2 * v_intent) / (1.0 + 0.8 * c_cost) + 0.7 * math.sqrt(
+                math.log(n_total + 2.0) / (n_sa + 1.0)
+            )
+            ucb_score = round(ucb_score, 6)
+
+            is_skip = bool(skip_explored_actions and stats["is_explored"] and not stats["is_stale"])
+            all_scored.append(
+                {
+                    "node_id": source_node_id,
+                    "action_sig": sig,
+                    "text": txt,
+                    "resource_id": str(cand.get("resource_id") or ""),
+                    "ucb_score": ucb_score,
+                    "intent_value": v_intent,
+                    "cost": round(c_cost, 3),
+                    "attempts": n_sa,
+                    "is_explored": stats["is_explored"],
+                    "is_stale": stats["is_stale"],
+                }
+            )
+            if is_skip:
+                skipped_count += 1
+                continue
+            cand_copy = dict(cand)
+            cand_copy["_action_sig"] = sig
+            cand_copy["_ucb_score"] = ucb_score
+            enriched.append((idx, cand_copy, ucb_score, bool(cand.get("is_bottom_tab")), interleaved_pos[idx]))
+
+        if strategy == "forward":
+            ordered = [item[1] for item in enriched]
+        elif strategy == "reverse":
+            ordered = [item[1] for item in reversed(enriched)]
+        elif strategy == "interleaved":
+            enriched.sort(key=lambda x: (0 if x[3] else 1, x[4]))
+            ordered = [item[1] for item in enriched]
+        elif strategy == "random":
+            # 底栏 Tab 保持优先，同层内随机打散
+            bottoms = [item[1] for item in enriched if item[3]]
+            others = [item[1] for item in enriched if not item[3]]
+            rng.shuffle(bottoms)
+            rng.shuffle(others)
+            ordered = bottoms + others
+        else:
+            # 默认 "ucb"：按 Cost-Aware UCB1 降序，同分平局用 interleaved 序位打破前缀饿死
+            enriched.sort(key=lambda x: (-x[2], x[4]))
+            ordered = [item[1] for item in enriched]
+
+        return ordered, skipped_count, all_scored
 
     def _is_destructive(self, text: str) -> bool:
         """检查文本是否命中破坏性动作黑名单。"""
@@ -1161,9 +1433,12 @@ class AppExplorer:
             if merged_with_existing:
                 continue
 
+            # 识别高价值业务意图（任务、商业化、激励、资产、核心玩法）
+            is_high_value = self._is_high_value_intent(text, res_id_lower)
+
             # 计算通用几何探索优先级 Tier（数值越小越优先）：
             # Tier 0: 底部主导航栏 Tab
-            # Tier 1: 顶部功能入口与频道 Tab
+            # Tier 1: 顶部功能入口与频道 Tab / 高价值业务意图入口
             # Tier 2: 单列全宽菜单项 (bw >= 0.55*W)、核心按钮与前 10 个多列宫格项
             # Tier 3: 中部局部卡片
             # Tier 4: 多列宫格 (>10) 长尾溢出项（排在单列全宽菜单项之后）
@@ -1181,6 +1456,8 @@ class AppExplorer:
             if screen_h > 0 and cy >= 0:
                 if is_bottom_tab:
                     tier = 0
+                elif is_high_value:
+                    tier = 1
                 elif cy <= screen_h * 0.18 or is_tab:
                     tier = 1
                 elif is_small_grid_cell and small_grid_count > 10:
@@ -1197,6 +1474,7 @@ class AppExplorer:
                 "bounds": bounds,
                 "is_tab": is_tab,
                 "is_bottom_tab": is_bottom_tab,
+                "_is_high_value": is_high_value,
                 "scroll_page": scroll_page,
                 "_selected": is_selected,
                 "_cx": cx,
@@ -1208,6 +1486,7 @@ class AppExplorer:
                     "resource_id": res_id,
                     "bounds": bounds,
                     "scroll_page": scroll_page,
+                    "is_high_value": is_high_value,
                 },
             }
             if matched_cluster:
@@ -1250,6 +1529,8 @@ class AppExplorer:
         if screen_h > 0:
             raw_candidates.sort(
                 key=lambda item: (
+                    0 if item.get("is_bottom_tab") else 1,
+                    0 if item.get("_is_high_value") else 1,
                     1 if item.get("_tier", 2) >= 4 else 0,
                     int(item.get("scroll_page", 0) or 0),
                     item.get("_tier", 2),
@@ -1279,8 +1560,16 @@ class AppExplorer:
         max_scroll_pages: int = 2,
         inspect_package_routes: bool = True,
         allow_bottom_tabs: Optional[bool] = None,
+        order_strategy: str = "ucb",
+        skip_explored_actions: bool = True,
+        edge_ttl_s: Optional[float] = 86400.0,
+        app_version: str = "",
+        explore_profile: Optional[str] = None,
+        goal_intents: Sequence[str] | None = None,
+        use_frontier_routing: bool = True,
+        random_seed: Optional[int] = None,
     ) -> dict[str, Any]:
-        """对当前应用开展启发式 BFS 自动漫游并构建知识图谱与脑图。"""
+        """对当前应用开展启发式 Cost-Aware UCB1 + Frontier 自动漫游并构建知识图谱与脑图。"""
         start_time = time.time()
         self.history.clear()
         self._deadline = None
@@ -1432,7 +1721,11 @@ class AppExplorer:
                     "标签" in t
                     or "tab" in rid
                     or re.search(r",\d+之\d+", t)
-                    or clean_t in ("首页", "朋友", "关注", "动态", "消息", "我的", "我", "发现", "商城", "会员购", "Home", "Me", "Profile")
+                    or clean_t in (
+                        "首页", "朋友", "关注", "动态", "消息", "我的", "我", "发现", "商城", "会员购",
+                        "Home", "Me", "Profile", "Discover", "Inbox", "Messages",
+                        "ホーム", "発見", "メッセージ", "マイページ", "プロフィール", "ルーム", "トーク",
+                    )
                 ):
                     if clean_t:
                         bottom_tabs.append((cx, clean_t, is_sel))
@@ -1577,12 +1870,41 @@ class AppExplorer:
             return False
 
         # 队列元素: (node_id, depth, path_from_root)
-        queue: deque[tuple[str, int, list[UIEdge]]] = deque([(root_node.node_id, 0, [])])
-        explored_transitions: set[tuple[str, str, str]] = set()
+        queue: list[tuple[str, int, list[UIEdge]]] = [(root_node.node_id, 0, [])]
+        explored_transitions: set[tuple[str, str]] = set()
         stitched_node_states: dict[str, dict[str, Any]] = {root_node.node_id: init_state}
+        discovered_action_registry: dict[tuple[str, str], dict[str, Any]] = {}
+        total_skipped_explored = 0
+
+        def _pop_next_frontier() -> tuple[str, int, list[UIEdge]]:
+            if not use_frontier_routing or len(queue) <= 1:
+                return queue.pop(0)
+            curr_live_id = ""
+            if last_known_state[0] is not None:
+                m_live = self.graph.match_node(last_known_state[0])
+                if m_live is not None:
+                    curr_live_id = m_live.node_id
+            best_idx = 0
+            best_key = (float("inf"), 0)
+            for qi, (q_nid, q_depth, _q_path) in enumerate(queue):
+                if curr_live_id and q_nid == curr_live_id:
+                    jump_cost = 0.0
+                elif curr_live_id:
+                    sp = self.graph.find_path_to(q_nid, curr_live_id, max_hops=2, min_success_rate=0.6)
+                    if sp:
+                        jump_cost = sum(self.graph._edge_cost(e) for e in sp)
+                    else:
+                        jump_cost = 6.0 + float(q_depth)
+                else:
+                    jump_cost = float(q_depth)
+                key = (jump_cost, qi)
+                if key < best_key:
+                    best_key = key
+                    best_idx = qi
+            return queue.pop(best_idx)
 
         while queue and not self._budget_exhausted() and len(self.graph.nodes) < max_pages:
-            current_node_id, depth, path_edges = queue.popleft()
+            current_node_id, depth, path_edges = _pop_next_frontier()
 
             if depth >= max_depth:
                 continue
@@ -1607,7 +1929,13 @@ class AppExplorer:
 
             if self._is_login_wall_state(curr_state):
                 continue
-            candidates = self.filter_interactive_candidates(
+            node_obj = self.graph.get_node(current_node_id)
+            if node_obj is not None:
+                node_obj.visit_count = int(getattr(node_obj, "visit_count", 0)) + 1
+                if app_version:
+                    node_obj.app_version = app_version
+
+            raw_candidates = self.filter_interactive_candidates(
                 curr_state,
                 max_per_page=max_branches_per_page,
                 depth=depth,
@@ -1617,16 +1945,32 @@ class AppExplorer:
                     else (current_node_id == root_node.node_id)
                 ),
             )
+            candidates, skipped_here, scored_summary = self.score_and_order_candidates(
+                current_node_id,
+                raw_candidates,
+                order_strategy=order_strategy,
+                skip_explored_actions=skip_explored_actions,
+                edge_ttl_s=edge_ttl_s,
+                app_version=app_version,
+                explore_profile=explore_profile,
+                goal_intents=goal_intents,
+                random_seed=random_seed,
+            )
+            total_skipped_explored += skipped_here
+            for entry in scored_summary:
+                discovered_action_registry[(current_node_id, entry["action_sig"])] = entry
 
             for cand in candidates:
                 if len(self.graph.nodes) >= max_pages or self._budget_exhausted():
                     break
 
-                cand_key = (current_node_id, str(cand.get("text")), str(cand.get("resource_id")))
+                cand_sig = str(cand.get("_action_sig") or self.graph.normalize_action_signature(cand))
+                cand_key = (current_node_id, cand_sig)
                 if cand_key in explored_transitions:
                     continue
                 explored_transitions.add(cand_key)
 
+                t_act_start = time.monotonic()
                 # 执行动作
                 act_ok = self.execute_action(cand)
                 if not act_ok:
@@ -1650,6 +1994,8 @@ class AppExplorer:
                     continue
 
                 next_node = self.graph._resolve_or_infer_node(next_state)
+                if app_version:
+                    next_node.app_version = app_version
                 if next_node.node_id != current_node_id and next_node.node_type in ("modal", "sub_tab") and not next_node.host_node_id:
                     next_node.host_node_id = current_node_id
 
@@ -1658,6 +2004,15 @@ class AppExplorer:
                 src, edge, dst = self.graph.record_transition(
                     curr_state, cand, next_state, from_node_id=current_node_id, to_node_id=next_node.node_id, success=True
                 )
+                step_lat = max(0.0, time.monotonic() - t_act_start)
+                edge.avg_latency_s = round(step_lat, 3) if edge.avg_latency_s <= 0 else round((edge.avg_latency_s + step_lat) / 2.0, 3)
+                edge.last_explored_at = time.time()
+                edge.is_self_loop = (current_node_id == next_node.node_id)
+                if app_version:
+                    edge.app_version = app_version
+                if cand_key in discovered_action_registry:
+                    discovered_action_registry[cand_key]["is_explored"] = True
+                    discovered_action_registry[cand_key]["is_stale"] = False
 
                 self.history.append(
                     ExploreStep(
@@ -1722,6 +2077,7 @@ class AppExplorer:
                                 success=True,
                             )
                         if back_node is None or back_node.node_id != current_node_id:
+                            edge.back_failures += 1
                             if not _recover_to_node(current_node_id, path_edges):
                                 break
                     else:
@@ -1753,14 +2109,34 @@ class AppExplorer:
         mindmap_data = self.graph.to_mindmap_dict(root_node_id=canonical_root_id)
         self._deadline = None
 
+        # 计算覆盖率收敛仪表盘
+        total_discovered_actions = len(discovered_action_registry)
+        unexplored_entries = [
+            item for item in discovered_action_registry.values()
+            if (not item.get("is_explored")) or item.get("is_stale")
+        ]
+        unexplored_entries.sort(key=lambda x: -float(x.get("ucb_score", 0.0)))
+        explored_actions_count = total_discovered_actions - len(unexplored_entries)
+        action_coverage_rate = (
+            round(explored_actions_count / total_discovered_actions, 4)
+            if total_discovered_actions > 0
+            else 1.0
+        )
+
         return {
             "ok": True,
             "root_node_id": canonical_root_id,
             "target_package": locked_pkg or "",
             "lock_package": self.lock_package,
+            "order_strategy": order_strategy,
+            "explore_profile": explore_profile or self.explore_profile,
             "nodes_count": len(self.graph.nodes),
             "edges_count": len(self.graph.edges),
             "explored_steps": len(self.history),
+            "skipped_explored_actions": total_skipped_explored,
+            "action_coverage_rate": action_coverage_rate,
+            "frontier_remaining_count": len(unexplored_entries),
+            "top_unexplored_entries": unexplored_entries[:10],
             "elapsed_seconds": elapsed,
             "package_routes": self.graph.metadata.get("package_routes", {}),
             "mermaid": mermaid_code,

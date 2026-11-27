@@ -714,3 +714,240 @@ def test_app_explorer_partial_scroll_failure_tracks_offset_and_restores_before_t
     assert events == [("swipe", True), ("swipe", False), ("swipe", True), ("tap", True)]
     assert swipe_spy.call_args.kwargs["duration_ms"] == 380
     tap_spy.assert_called_once()
+
+
+def test_app_explorer_high_value_intents_prioritized_over_regular_items():
+    """高价值业务意图（中/英/日任务、奖励、商城等）应排在普通卡片与顶栏非底栏项之前，且不误伤 header/target 等词。"""
+    explorer = AppExplorer()
+    state = {
+        "ok": True,
+        "screen": {"width": 400, "height": 800},
+        "elements": [
+            {"text": "编辑资料", "resource_id": "btn_edit_profile", "bounds": [20, 60, 120, 100]},
+            {"text": "Header Title", "resource_id": "header_widget", "bounds": [140, 60, 260, 100]},
+            {"text": "Target Banner", "resource_id": "target_download", "bounds": [20, 220, 380, 280]},
+            {"text": "普通动态", "resource_id": "feed_item_1", "bounds": [20, 300, 380, 360]},
+            {"text": "タスク", "resource_id": "center_task", "bounds": [160, 420, 220, 480]},
+            {"text": "金币福利", "resource_id": "btn_coin_reward", "bounds": [240, 420, 300, 480]},
+        ],
+    }
+
+    candidates = explorer.filter_interactive_candidates(state, max_per_page=10)
+    texts = [c["text"] for c in candidates]
+    # 高价值项必须排在最前面
+    assert set(texts[:2]) == {"タスク", "金币福利"}
+    # 验证 ASCII 词边界不会把 Header/Target/download/widget 误判为 high_value
+    hv_flags = {c["text"]: c["trigger_criteria"]["is_high_value"] for c in candidates}
+    assert hv_flags["タスク"] is True
+    assert hv_flags["金币福利"] is True
+    assert hv_flags["Header Title"] is False
+    assert hv_flags["Target Banner"] is False
+    assert hv_flags["编辑资料"] is False
+
+
+def test_app_explorer_multilingual_destructive_blacklist():
+    """日文/英文/中文破坏性操作必须被过滤，避免跨语言 App 探索误触发登出/扣费/删号。"""
+    explorer = AppExplorer()
+    state = {
+        "ok": True,
+        "screen": {"width": 400, "height": 800},
+        "elements": [
+            {"text": "タスク", "resource_id": "center_task", "bounds": [20, 200, 100, 260]},
+            {"text": "ログアウト", "resource_id": "btn_signout", "bounds": [20, 300, 380, 350]},
+            {"text": "アカウント削除", "resource_id": "btn_rm", "bounds": [20, 360, 380, 410]},
+            {"text": "コイン購入", "resource_id": "btn_buy", "bounds": [20, 420, 380, 470]},
+            {"text": "退会する", "resource_id": "btn_leave", "bounds": [20, 480, 380, 530]},
+            {"text": "Sign out", "resource_id": "en_signout", "bounds": [20, 540, 380, 590]},
+        ],
+    }
+
+    candidates = explorer.filter_interactive_candidates(state, max_per_page=10)
+    texts = [c["text"] for c in candidates]
+    assert texts == ["タスク"]
+
+
+@pytest.mark.parametrize(
+    "close_el",
+    [
+        {"text": "閉じる", "resource_id": "", "bounds": [10, 40, 80, 90]},
+        {"text": "戻る", "resource_id": "", "bounds": [10, 40, 80, 90]},
+        {"text": "Close", "resource_id": "", "bounds": [320, 40, 390, 90]},
+        {"text": "", "resource_id": "star back black", "bounds": [10, 40, 60, 90]},
+        {"text": "", "resource_id": "white close", "bounds": [330, 40, 380, 90]},
+        {"text": "✕", "resource_id": "", "bounds": [340, 50, 380, 90]},
+        {"text": "", "resource_id": "icon_back_dark", "bounds": [12, 50, 52, 90]},
+        {"text": "ic_nav_arrow_left", "resource_id": "ic_nav_arrow_left", "bounds": [12, 50, 52, 90]},
+    ],
+)
+def test_app_explorer_multilingual_and_ios_close_back_recovery(close_el):
+    """_try_ui_close_or_back 应能识别日文/英文关闭返回文本、符号及 iOS 常见导航图标 ID。"""
+    tapped = []
+    explorer = AppExplorer(
+        action_executor=lambda act: (tapped.append(act), True)[1],
+        lock_package=False,
+    )
+    state = {
+        "ok": True,
+        "screen": {"width": 400, "height": 800},
+        "elements": [close_el],
+    }
+    assert explorer._try_ui_close_or_back(state) is True
+    assert len(tapped) == 1
+    assert tapped[0]["action_type"] == "tap"
+    assert tapped[0]["bounds"] == close_el["bounds"]
+
+
+def test_app_explorer_close_back_does_not_false_match_background_or_feedback():
+    """词边界匹配不得把 background / feedback / callback 误判为 back 按钮。"""
+    tapped = []
+    explorer = AppExplorer(
+        action_executor=lambda act: (tapped.append(act), True)[1],
+        lock_package=False,
+    )
+    state = {
+        "ok": True,
+        "screen": {"width": 400, "height": 800},
+        "elements": [
+            {"text": "意见反馈", "resource_id": "btn_feedback", "bounds": [100, 300, 300, 360]},
+            {"text": "背景设置", "resource_id": "bg_background", "bounds": [100, 400, 300, 460]},
+        ],
+    }
+    assert explorer._try_ui_close_or_back(state) is False
+    assert tapped == []
+
+
+def test_app_explorer_v2_ucb1_profiles_and_goal_intents():
+    """TC-01: monetization 画像下 Tier S (任务/广告) 优先于 Tier A (商城/抽奖)；goal_intents 可动态提权任意目标。"""
+    explorer = AppExplorer(explore_profile="monetization")
+    cands = [
+        {"text": "store_coin", "resource_id": "store_coin_icon", "bounds": [10, 100, 80, 150]},
+        {"text": "ガチャ", "resource_id": "free_lottery_icon", "bounds": [90, 100, 160, 150]},
+        {"text": "タスク", "resource_id": "center_task", "bounds": [170, 100, 240, 150]},
+        {"text": "普通设置", "resource_id": "btn_settings", "bounds": [250, 100, 320, 150]},
+    ]
+    ordered, skipped, _ = explorer.score_and_order_candidates("page_profile", cands, order_strategy="ucb")
+    assert skipped == 0
+    # monetization 画像下 Tier S ('タスク') 排第一位，Tier A 居中，普通项垫底
+    assert ordered[0]["text"] == "タスク"
+    assert ordered[-1]["text"] == "普通设置"
+
+    # 动态 goal_intents 注入：指定目标为“普通设置”时，直接拉满为第一名
+    ordered_goal, _, _ = explorer.score_and_order_candidates(
+        "page_profile", cands, order_strategy="ucb", goal_intents=["普通设置"]
+    )
+    assert ordered_goal[0]["text"] == "普通设置"
+
+
+def test_app_explorer_v2_ucb1_cost_penalty_and_cold_start_tie_breaker():
+    """TC-02: 高耗时/回退失败动作被显著降权；冷启动完全同分平局按 interleaved 打散，不退化为纯 forward。"""
+    graph = UIKnowledgeGraph()
+    # 同分冷启动测试（4 个同等普通项）
+    explorer = AppExplorer(graph=graph)
+    same_tier = [
+        {"text": "A", "resource_id": "item_a", "bounds": [10, 100, 80, 140]},
+        {"text": "B", "resource_id": "item_b", "bounds": [10, 160, 80, 200]},
+        {"text": "C", "resource_id": "item_c", "bounds": [10, 220, 80, 260]},
+        {"text": "D", "resource_id": "item_d", "bounds": [10, 280, 80, 320]},
+    ]
+    ordered_cold, _, _ = explorer.score_and_order_candidates("p0", same_tier, order_strategy="ucb")
+    # interleaved 序应为 A, D, B, C（而非纯 forward A, B, C, D）
+    assert [c["text"] for c in ordered_cold] == ["A", "D", "B", "C"]
+
+    # 成本惩罚测试：当 A 已有 2 次 back_failures 且高耗时，即使 skip_explored_actions=False，A 也必须垫底
+    graph.edges.append(
+        UIEdge(
+            source_id="p0",
+            target_id="p_sticky",
+            action_type="tap",
+            trigger_criteria={"text": "A", "resource_id": "item_a"},
+            attempts=2,
+            successes=2,
+            avg_latency_s=18.0,
+            back_failures=2,
+        )
+    )
+    ordered_penalized, _, _ = explorer.score_and_order_candidates(
+        "p0", same_tier, order_strategy="ucb", skip_explored_actions=False
+    )
+    assert ordered_penalized[-1]["text"] == "A"
+
+
+def test_app_explorer_v2_action_diff_skip_and_version_ttl_staleness():
+    """TC-03 & TC-04: 动作级差集跳过已扫动作、不漏新增按钮；bounds 微偏不影响签名；app_version/TTL 过期自动重扫。"""
+    graph = UIKnowledgeGraph()
+    # 验证稳定签名忽略原始像素偏移和红点数字
+    sig1 = graph.normalize_action_signature({"text": "消息 +20", "resource_id": "", "bounds": [10, 10, 50, 50]})
+    sig2 = graph.normalize_action_signature({"text": "消息 99+", "resource_id": "", "bounds": [10, 22, 50, 62]})
+    assert sig1 == sig2 == "txt:消息"
+
+    old_ts = 1_000_000.0
+    graph.edges.append(
+        UIEdge(
+            source_id="p_hub",
+            target_id="p_store",
+            action_type="tap",
+            trigger_criteria={"text": "商城", "resource_id": "store_coin_icon"},
+            last_explored_at=old_ts,
+            app_version="1.0.0",
+        )
+    )
+    cands = [
+        {"text": "商城", "resource_id": "store_coin_icon", "bounds": [10, 100, 80, 150]},
+        {"text": "新增任务入口", "resource_id": "center_task", "bounds": [10, 200, 80, 250]},
+    ]
+    explorer = AppExplorer(graph=graph)
+
+    # 同版本、未超 TTL：跳过已扫的商城，仅返回新增入口
+    ordered, skipped, _ = explorer.score_and_order_candidates(
+        "p_hub", cands, skip_explored_actions=True, edge_ttl_s=86400.0, app_version="1.0.0", now_ts=old_ts + 100.0
+    )
+    assert skipped == 1
+    assert [c["text"] for c in ordered] == ["新增任务入口"]
+
+    # 版本升级 (1.0.0 -> 1.1.0)：老边自动失效，全部重新进入探索
+    ordered_ver, skipped_ver, _ = explorer.score_and_order_candidates(
+        "p_hub", cands, skip_explored_actions=True, edge_ttl_s=86400.0, app_version="1.1.0", now_ts=old_ts + 100.0
+    )
+    assert skipped_ver == 0
+    assert len(ordered_ver) == 2
+
+    # TTL 过期：老边自动失效重新进入探索
+    ordered_ttl, skipped_ttl, _ = explorer.score_and_order_candidates(
+        "p_hub", cands, skip_explored_actions=True, edge_ttl_s=3600.0, app_version="1.0.0", now_ts=old_ts + 7200.0
+    )
+    assert skipped_ttl == 0
+    assert len(ordered_ttl) == 2
+
+
+def test_app_explorer_v2_multi_order_strategies_and_frontier_2hop_constraints():
+    """TC-05 & TC-06: forward/reverse/interleaved/random 策略正确性 + find_path_to 2 跳与可靠性约束。"""
+    explorer = AppExplorer()
+    cands = [
+        {"text": "E1", "resource_id": "id_e1", "bounds": [10, 100, 80, 140]},
+        {"text": "E2", "resource_id": "id_e2", "bounds": [10, 160, 80, 200]},
+        {"text": "E3", "resource_id": "id_e3", "bounds": [10, 220, 80, 260]},
+        {"text": "E4", "resource_id": "id_e4", "bounds": [10, 280, 80, 320]},
+    ]
+    fwd, _, _ = explorer.score_and_order_candidates("p", cands, order_strategy="forward")
+    rev, _, _ = explorer.score_and_order_candidates("p", cands, order_strategy="reverse")
+    inter, _, _ = explorer.score_and_order_candidates("p", cands, order_strategy="interleaved")
+    rnd1, _, _ = explorer.score_and_order_candidates("p", cands, order_strategy="random", random_seed=42)
+    rnd2, _, _ = explorer.score_and_order_candidates("p", cands, order_strategy="random", random_seed=42)
+    assert [c["text"] for c in fwd] == ["E1", "E2", "E3", "E4"]
+    assert [c["text"] for c in rev] == ["E4", "E3", "E2", "E1"]
+    assert [c["text"] for c in inter] == ["E1", "E4", "E2", "E3"]
+    assert [c["text"] for c in rnd1] == [c["text"] for c in rnd2]
+
+    # 验证 Frontier 路由的 max_hops=2 与 min_success_rate=0.6 约束
+    g = UIKnowledgeGraph()
+    for nid in ("n0", "n1", "n2", "n3"):
+        g.add_or_update_node(UINode(node_id=nid, page_signature=PageSignature(name=nid)))
+    g.edges.extend([
+        UIEdge(source_id="n0", target_id="n1", success_rate=0.9),
+        UIEdge(source_id="n1", target_id="n2", success_rate=0.8),
+        UIEdge(source_id="n2", target_id="n3", success_rate=0.9),
+        UIEdge(source_id="n0", target_id="n3", success_rate=0.3),  # 低可靠性直连应被过滤
+    ])
+    assert len(g.find_path_to("n2", "n0", max_hops=2, min_success_rate=0.6)) == 2
+    assert g.find_path_to("n3", "n0", max_hops=2, min_success_rate=0.6) == []
+    assert len(g.find_path_to("n3", "n0", max_hops=3, min_success_rate=0.6)) == 3
