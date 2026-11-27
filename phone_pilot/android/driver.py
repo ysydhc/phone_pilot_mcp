@@ -7,8 +7,10 @@ Implements the DeviceDriver protocol for Android devices using ADB.
 from __future__ import annotations
 
 import pathlib
-from typing import Optional
+import subprocess
+from typing import Any, Optional
 
+from phone_pilot.android.adb.utils import adb_prefix
 from phone_pilot.core.protocols import (
     InputDriver,
     ScreenDriver,
@@ -34,8 +36,6 @@ from phone_pilot.android.ui.automator import (
     dump_ui_xml,
     parse_uiautomator_nodes,
 )
-
-from typing import Any
 
 # `auto_uncompressed_fallback` 支持：容器类名启发式清单 + 按 serial 存储的冷却状态，
 # 避免压缩 dump 命中为空时对每一次调用都重复触发一次非压缩兜底 dump（代价更高）。
@@ -199,11 +199,19 @@ class AndroidScreenDriver:
 
         proc = self._recording_process
         if proc is not None:
-            proc.terminate()
             try:
-                proc.wait(timeout=5)
+                subprocess.run(
+                    adb_prefix(self._device_serial) + ["shell", "pkill", "-INT", "screenrecord"],
+                    capture_output=True,
+                    timeout=3,
+                )
+                proc.wait(timeout=3)
             except Exception:
-                proc.kill()
+                proc.terminate()
+                try:
+                    proc.wait(timeout=4)
+                except Exception:
+                    proc.kill()
 
         chain_thread = getattr(self, "_recording_thread", None)
         if chain_thread is not None and chain_thread.is_alive():

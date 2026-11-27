@@ -10,26 +10,61 @@ from __future__ import annotations
 
 import base64
 import pathlib
+import struct
 import subprocess
 import tempfile
 import time
+import zlib
 from typing import Optional
 
 from phone_pilot.android.adb.utils import adb_prefix
 
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+_PNG_PTY_CRLF_SIG = b"\x89PNG\r\r\n\x1a\r\n"
+
+
+def _is_valid_png(data: bytes) -> bool:
+    """Verify PNG signature, chunk framing, CRC32 of every chunk, and IEND trailer."""
+    if not data or len(data) < 33 or not data.startswith(_PNG_SIG):
+        return False
+    pos = 8
+    total = len(data)
+    saw_iend = False
+    while pos + 12 <= total:
+        length = struct.unpack_from(">I", data, pos)[0]
+        chunk_type = data[pos + 4 : pos + 8]
+        end_data = pos + 8 + length
+        if end_data + 4 > total:
+            return False
+        expected_crc = struct.unpack_from(">I", data, end_data)[0]
+        actual_crc = zlib.crc32(data[pos + 4 : end_data]) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            return False
+        pos = end_data + 4
+        if chunk_type == b"IEND":
+            saw_iend = True
+            break
+    return saw_iend
+
 
 def _normalize_png_stream(data: bytes) -> bytes:
-    """Normalize CRLF anomalies in PNG byte streams from adb."""
+    """Normalize PTY CRLF mangling ONLY when the PNG header itself was CRLF-mangled.
+
+    Never mutate streams that already begin with a clean PNG signature (`\\x89PNG\\r\\n\\x1a\\n`),
+    because `\\r\\r\\n` (`0x0d 0x0d 0x0a`) legitimately occurs ~2.2% of the time inside binary IDAT
+    payloads of `adb exec-out screencap -p` and stripping `0x0d` corrupts the PNG IDAT CRC!
+    """
     if not data:
         return data
-    if b"\r\r\n" in data:
-        data = data.replace(b"\r\r\n", b"\r\n")
+    if data.startswith(_PNG_SIG):
+        return data
+    if data.startswith(_PNG_PTY_CRLF_SIG):
+        return data.replace(b"\r\r\n", b"\r\n").replace(b"\x1a\r\n", b"\x1a\n", 1)
     return data
 
 
 def _try_screencap_cmd(cmd: list[str], *, timeout_s: float = 6.0) -> bytes:
-    """Run a screencap command and validate the PNG signature."""
-    png_sig = b"\x89PNG\r\n\x1a\n"
+    """Run a screencap command and validate PNG signature + full chunk CRC32 integrity."""
     proc = subprocess.run(
         cmd,
         check=False,
@@ -41,14 +76,13 @@ def _try_screencap_cmd(cmd: list[str], *, timeout_s: float = 6.0) -> bytes:
         err = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"screencap failed (rc={proc.returncode}): {err}")
     data = _normalize_png_stream(proc.stdout or b"")
-    if data and data.startswith(png_sig):
+    if _is_valid_png(data):
         return data
-    raise RuntimeError(f"screencap failed: invalid_png_stream(bytes={len(data)})")
+    raise RuntimeError(f"screencap failed: invalid_or_corrupt_png_stream(bytes={len(data)})")
 
 
 def _fallback_screencap_file(device_serial: Optional[str]) -> bytes:
     """Fallback path: save screencap to file, pull, then read bytes."""
-    png_sig = b"\x89PNG\r\n\x1a\n"
     remote_path = "/sdcard/phone_pilot_screen.png"
     local_tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     local_tmp.close()
@@ -76,9 +110,9 @@ def _fallback_screencap_file(device_serial: Optional[str]) -> bytes:
         )
         data = pathlib.Path(local_tmp.name).read_bytes()
         data = _normalize_png_stream(data)
-        if data and data.startswith(png_sig):
+        if _is_valid_png(data):
             return data
-        raise RuntimeError(f"screencap failed: invalid_png_stream(bytes={len(data)})")
+        raise RuntimeError(f"screencap failed: invalid_or_corrupt_png_stream(bytes={len(data)})")
     finally:
         try:
             subprocess.run(

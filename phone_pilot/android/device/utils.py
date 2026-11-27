@@ -3505,22 +3505,44 @@ _ABS_X_RE = re.compile(r"ABS_MT_POSITION_X\s*:.*\bmax\s+(\d+)\b")
 _ABS_Y_RE = re.compile(r"ABS_MT_POSITION_Y\s*:.*\bmax\s+(\d+)\b")
 
 
+_SURFACE_ORIENTATION_RE = re.compile(
+    r"(?:SurfaceOrientation:\s*|Viewport INTERNAL:[^\n]*?\borientation=)(?:ROTATION_)?(\d+)"
+)
+_LOGICAL_FRAME_RE = re.compile(r"Viewport INTERNAL:[^\n]*?logicalFrame=\[0,\s*0,\s*(\d+),\s*(\d+)\]")
+_CURRENT_ROTATION_RE = re.compile(r"mCurrentRotation=(?:ROTATION_)?(\d+)")
+
+
 def get_screen_size(device_serial: Optional[str]) -> Optional[tuple[int, int]]:
-    """Return screen size (width, height) from `wm size`."""
+    """Return orientation-aware screen size (width, height) from InputReader Viewport or `wm size`."""
     if not device_serial:
         return None
     proc = CommandRunner.run(
-        adb_prefix(device_serial) + ["shell", "wm", "size"],
+        adb_prefix(device_serial)
+        + ["shell", "wm size; dumpsys input 2>/dev/null | grep -m 1 -E 'SurfaceOrientation|Viewport INTERNAL'"],
         check=False,
         delay_s=0.0,
         timeout_s=6.0,
         log_output=False,
         silent=True,
     )
-    m = _WM_SIZE_RE.search(proc.stdout or "")
+    out = proc.stdout or ""
+    m_lf = _LOGICAL_FRAME_RE.search(out)
+    if m_lf:
+        lw, lh = int(m_lf.group(1)), int(m_lf.group(2))
+        if lw > 0 and lh > 0:
+            return lw, lh
+    m = _WM_SIZE_RE.search(out)
     if not m:
         return None
-    return int(m.group(1)), int(m.group(2))
+    w, h = int(m.group(1)), int(m.group(2))
+    m_rot = _SURFACE_ORIENTATION_RE.search(out) or _CURRENT_ROTATION_RE.search(out)
+    if m_rot:
+        rot = m_rot.group(1)
+        if rot in ("1", "3", "90", "270") and w < h:
+            return h, w
+        if rot in ("0", "2", "180") and w > h:
+            return h, w
+    return w, h
 
 
 def get_screen_density(device_serial: Optional[str]) -> Optional[int]:

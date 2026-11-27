@@ -18,9 +18,15 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from phone_pilot.core.protocols import DeviceDriver
-from phone_pilot.core.driver_factory import create_driver, detect_device
+from phone_pilot.core.driver_factory import (
+    create_driver,
+    detect_device,
+    detect_device_for_platform,
+)
 from phone_pilot.core.run_store import RunSession
 from phone_pilot.core.log import _log as _runner_log
+
+_ORIG_DETECT_DEVICE = detect_device
 
 
 # ---------------------------------------------------------------------------
@@ -28,43 +34,52 @@ from phone_pilot.core.log import _log as _runner_log
 # ---------------------------------------------------------------------------
 
 
-def _optimize_mp4_for_web(mp4_path: pathlib.Path) -> None:
-    """Remux/transcode Android screenrecord MP4 so HTML5 <video> supports instant seeking (+faststart & dense keyframes)."""
+def _optimize_mp4_for_web(mp4_path: pathlib.Path) -> bool:
+    """Remux/transcode Android screenrecord MP4 so HTML5 <video> supports instant seeking (+faststart & clean PTS)."""
     import shutil
     import subprocess
 
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin or not mp4_path.exists() or mp4_path.stat().st_size == 0:
-        return
+        return False
     out_tmp = mp4_path.with_suffix(".faststart.mp4")
     try:
         proc = subprocess.run(
             [
                 ffmpeg_bin,
                 "-y",
+                "-fflags",
+                "+genpts",
                 "-i",
                 str(mp4_path),
                 "-map",
                 "0:v:0",
+                "-vf",
+                "scale='min(720,iw)':-2,fps=24",
                 "-c:v",
                 "libx264",
                 "-preset",
                 "ultrafast",
+                "-crf",
+                "28",
                 "-g",
-                "15",
+                "24",
                 "-keyint_min",
-                "15",
+                "12",
                 "-pix_fmt",
                 "yuv420p",
+                "-video_track_timescale",
+                "90000",
                 "-movflags",
                 "+faststart",
                 str(out_tmp),
             ],
             capture_output=True,
-            timeout=45,
+            timeout=120,
         )
         if proc.returncode == 0 and out_tmp.exists() and out_tmp.stat().st_size > 0:
             out_tmp.replace(mp4_path)
+            return True
     except Exception:
         pass
     finally:
@@ -73,6 +88,7 @@ def _optimize_mp4_for_web(mp4_path: pathlib.Path) -> None:
                 out_tmp.unlink()
             except OSError:
                 pass
+    return False
 
 
 def _annotate_screenshot(png_bytes: bytes, element: Any) -> bytes:
@@ -387,9 +403,13 @@ class ScriptContext:
                 _h.setLevel(_logging.CRITICAL)
 
         if not self.device_serial:
-            serial, plat = detect_device()
+            req_plat = (self.platform or "auto").strip().lower()
+            if req_plat != "auto" and detect_device is _ORIG_DETECT_DEVICE:
+                serial, plat = detect_device_for_platform(req_plat)
+            else:
+                serial, plat = detect_device()
             self.device_serial = serial
-            if (self.platform or "auto").lower() == "auto":
+            if req_plat == "auto":
                 self.platform = plat
         elif (self.platform or "auto").lower() == "auto":
             pass
@@ -701,13 +721,15 @@ class ScriptContext:
                     import subprocess
 
                     valid_seg_paths: list[pathlib.Path] = []
+                    all_optimized = True
                     for idx, seg_remote in enumerate(remote_segments):
                         seg_local = temp_dir / f"seg_{idx:03d}.mp4"
                         pulled = self.driver.pull_file(seg_remote, str(seg_local))
                         if isinstance(pulled, dict) and not pulled.get("ok"):
                             continue
                         if seg_local.is_file() and seg_local.stat().st_size > 0:
-                            _optimize_mp4_for_web(seg_local)
+                            if not _optimize_mp4_for_web(seg_local):
+                                all_optimized = False
                             valid_seg_paths.append(seg_local)
                     if not valid_seg_paths:
                         raise ValueError("recording segments empty")
@@ -721,25 +743,45 @@ class ScriptContext:
                         )
                         ffmpeg_bin = shutil.which("ffmpeg")
                         if ffmpeg_bin:
+                            concat_cmd = [
+                                ffmpeg_bin,
+                                "-y",
+                                "-fflags",
+                                "+genpts",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                str(concat_list),
+                            ]
+                            if all_optimized:
+                                concat_cmd.extend(["-c", "copy"])
+                            else:
+                                concat_cmd.extend(
+                                    [
+                                        "-vf",
+                                        "scale='min(720,iw)':-2,fps=24",
+                                        "-c:v",
+                                        "libx264",
+                                        "-preset",
+                                        "ultrafast",
+                                        "-crf",
+                                        "28",
+                                        "-g",
+                                        "24",
+                                        "-pix_fmt",
+                                        "yuv420p",
+                                        "-video_track_timescale",
+                                        "90000",
+                                    ]
+                                )
+                            concat_cmd.extend(["-movflags", "+faststart", str(capture)])
                             proc = subprocess.run(
-                                [
-                                    ffmpeg_bin,
-                                    "-y",
-                                    "-f",
-                                    "concat",
-                                    "-safe",
-                                    "0",
-                                    "-i",
-                                    str(concat_list),
-                                    "-c",
-                                    "copy",
-                                    "-movflags",
-                                    "+faststart",
-                                    str(capture),
-                                ],
+                                concat_cmd,
                                 cwd=str(temp_dir),
                                 capture_output=True,
-                                timeout=60,
+                                timeout=180,
                             )
                             if proc.returncode != 0 or not capture.is_file() or capture.stat().st_size == 0:
                                 valid_seg_paths[0].replace(capture)

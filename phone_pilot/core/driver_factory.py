@@ -58,6 +58,27 @@ def create_driver(
     raise ValueError(f"Unknown platform: {platform!r}")
 
 
+def detect_device_for_platform(platform: str = "auto") -> tuple[str, str]:
+    """Detect the first available device matching ``platform`` (or any if ``auto``)."""
+    plat = (platform or "auto").strip().lower()
+    if plat == "android":
+        serial = _first_adb_device()
+        if serial:
+            return serial, "android"
+        raise RuntimeError("No Android device found via ADB.")
+    if plat == "harmony":
+        serial = _first_hdc_device()
+        if serial:
+            return serial, "harmony"
+        raise RuntimeError("No HarmonyOS device found via HDC.")
+    if plat == "ios":
+        serial = _first_ios_device()
+        if serial:
+            return serial, "ios"
+        raise RuntimeError("No booted iOS Simulator or USB iOS device found.")
+    return detect_device()
+
+
 def detect_device() -> tuple[str, str]:
     """
     Detect the first available device across all platforms.
@@ -146,8 +167,18 @@ def _first_ios_device() -> Optional[str]:
     try:
         from phone_pilot.ios.pmd.utils import list_ios_serials
 
+        target_udid = (
+            os.environ.get("IOS_SERIAL")
+            or os.environ.get("IOS_DEVICE_SERIAL")
+            or os.environ.get("IOS_UDID")
+            or ""
+        ).strip()
         serials = list_ios_serials()
-        return serials[0] if serials else None
+        if target_udid and target_udid in serials:
+            return target_udid
+        if serials:
+            return serials[0]
+        return target_udid or None
     except Exception:
         return None
 
