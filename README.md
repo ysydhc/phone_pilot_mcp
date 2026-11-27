@@ -1,6 +1,6 @@
 # PhonePilot (`pp`) — AI-Native Mobile Automation & Human-Speed Acceptance Engine
 
-**版本**：`0.12.0` | **Python**：`>= 3.13` | **协议**：MCP (`stdio`) + Python `script_api` | **许可**：MIT
+**版本**：`0.13.0` | **Python**：`>= 3.13` | **协议**：MCP (`stdio`) + Python `script_api` | **许可**：MIT
 
 `phone_pilot`（简称 `pp`）是一套面向研发与发版验收闭环的**跨平台（Android / HarmonyOS / iOS）AI 原生移动自动化与极速审片基础设施**。它让 AI Agent 与测试脚本在同一套零业务硬编码底座上完成：**编译新鲜度阻断 ➔ 多模态感知与操作 ➔ 本地双端口网络打桩 ➔ 三证合一人眼极速审片 ➔ 受控真机现场复原**。
 
