@@ -28,9 +28,11 @@ def _write_launcher_script(run_dir: Path) -> Path:
     import sys
 
     py_bin = shlex.quote(sys.executable)
+    pkg_root = shlex.quote(str(Path(__file__).resolve().parents[2]))
     run_name = run_dir.name
     script = f"""#!/usr/bin/env bash
 set -euo pipefail
+export PYTHONPATH={pkg_root}${{PYTHONPATH:+:$PYTHONPATH}}
 RUN_DIR="$(cd "$(dirname "$0")" && pwd)"
 REC_DIR="$(cd "$RUN_DIR/../.." && pwd)"
 RUN_NAME={shlex.quote(run_name)}
@@ -58,7 +60,17 @@ if [ -z "$PORT" ]; then
 fi
 
 REPORT_URL="http://127.0.0.1:${{PORT}}/run/${{RUN_NAME}}/report.html"
+DASHBOARD_URL="http://127.0.0.1:${{PORT}}/"
+EXTRA_ARGS=()
+WORKSPACE_PARENT="$(cd "$REC_DIR/../.." && pwd)"
+for sib in "$WORKSPACE_PARENT"/*/.recordings; do
+  if [ -d "$sib" ] && [ "$sib" != "$REC_DIR" ]; then
+    EXTRA_ARGS+=(--extra-recordings-dir "$sib")
+  fi
+done
 echo "[pp] 正在启动 phone_pilot Web 服务 (recordings=$REC_DIR, port=$PORT)..."
+echo "[pp] 报告链接: $REPORT_URL"
+echo "[pp] 看板首页: $DASHBOARD_URL"
 (
   for _ in $(seq 1 30); do
     if lsof -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -69,7 +81,7 @@ echo "[pp] 正在启动 phone_pilot Web 服务 (recordings=$REC_DIR, port=$PORT)
   done
 ) &
 
-exec {py_bin} -m phone_pilot.web --recordings-dir "$REC_DIR" --port "$PORT" --no-browser --auto-approve
+exec {py_bin} -m phone_pilot.web --recordings-dir "$REC_DIR" ${{EXTRA_ARGS[@]+"${{EXTRA_ARGS[@]}}"}} --port "$PORT" --no-browser --auto-approve
 """
     with safe_directory(run_dir, writable=True) as folder:
         folder.write_bytes("open_pp_server.command", script.encode("utf-8"), replace=True)
@@ -112,7 +124,7 @@ def render_html_report(run_dir: str | Path) -> str:
     """Render a trusted template in memory; viewing archives never writes back."""
     directory = Path(run_dir).expanduser().resolve()
     with safe_directory(directory):
-        return _render_html(_load_run_data(directory))
+        return _render_html(_load_run_data(directory, persist=False))
 
 
 def _safe_files(directory):
@@ -138,7 +150,7 @@ def _read_bytes(path):
         return folder.read_bytes(path.name)
 
 
-def _load_run_data(run_dir: Path) -> dict[str, Any]:
+def _load_run_data(run_dir: Path, *, persist: bool = True) -> dict[str, Any]:
     """加载 RunSession 的全部数据 / Load all RunSession data.
 
     读取 run_meta.json、steps.json、截图列表、logcat 文件、
@@ -193,10 +205,10 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     from phone_pilot.core.manifest_generator import ensure_scene_manifest, get_online_devices_detailed
     from phone_pilot.core.scene_restore import _action_label
     try:
-        ensure_scene_manifest(run_dir)
+        ensure_scene_manifest(run_dir, persist=persist)
     except Exception:
         pass
-    scene_info = inspect_scene(run_dir)
+    scene_info = inspect_scene(run_dir, persist=persist)
     raw_actions = scene_info.get("actions", [])
     planned_steps = [
         {"index": 1, "title": "启动 Mock 服务与设备预检", "detail": "锁定目标真机并加载本地 Mock 规则 (:8090)", "status": "PENDING"}
@@ -216,15 +228,26 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
                 scene_info["planned_steps"] = sc["planned_steps"]
                 break
     try:
-        pkg_name = (scene_info.get("package") or {}).get("name", "cc.admaster.android.demo")
+        from phone_pilot.core.pp_profile import load_pp_profile, resolve_platform_package
+
+        pp_prof = load_pp_profile(run_dir)
+        plat_meta = str((meta.get("device") or {}).get("platform") or "android").lower()
+        pkg_name = resolve_platform_package(
+            pp_prof,
+            platform=plat_meta,
+            explicit_package=str((scene_info.get("package") or {}).get("name") or ""),
+        )
         scene_info["online_devices"] = get_online_devices_detailed(target_package=pkg_name)
     except Exception:
         scene_info["online_devices"] = []
     data["scene"] = scene_info
+    cat_gate_pass = (scene_info.get("catalog") or {}).get("gate_pass")
+    if (scene_info.get("gate_pass") is False or cat_gate_pass is False) and meta.get("status") == "passed":
+        meta["status"] = "failed"
     data["run_name"] = run_dir.name
 
     # ---- Duration display ----
-    duration_s = meta.get("duration_s", 0)
+    duration_s = float(meta.get("duration_s") or 0.0)
     mins = int(duration_s) // 60
     secs = int(duration_s) % 60
     data["duration_display"] = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
@@ -401,13 +424,25 @@ def _load_run_data(run_dir: Path) -> dict[str, Any]:
     data["key_acceptance_logs"] = "\n".join(key_log_lines)
     data["key_acceptance_log_count"] = len(key_log_lines)
 
-    # Enrich scenes with lifecycle_pills & scene_logs if missing from older cached scene_catalog.json
+    # Enrich scenes with lifecycle_pills, scene_logs, timeline_logs & global video fallback
     gate_summary = _read_json(run_dir / "release_gate_summary.json")
+    default_global_vid = recordings[0]["rel_path"] if recordings else None
     for sc in scene_info.get("scenes") or []:
+        if not sc.get("video_rel_path") and default_global_vid and not sc.get("global_video_rel_path"):
+            sc["global_video_rel_path"] = default_global_vid
+        if "video_end_s" not in sc:
+            sc["video_end_s"] = round(float(sc.get("video_offset_s", 0)) + max(float(sc.get("elapsed_s", 0.0)), 1.0), 1)
         if not sc.get("scene_logs"):
             sc["scene_logs"] = extract_scene_specific_logs(
                 profile, run_dir, sc, key_log_lines, gate_summary=gate_summary
             )
+        if not sc.get("timeline_logs") and sc.get("scene_logs"):
+            span_s = max(float(sc.get("elapsed_s") or 1.0), 1.0)
+            step_t = span_s / max(len(sc["scene_logs"]), 1)
+            sc["timeline_logs"] = [
+                {"t": round(idx_l * step_t, 2), "line": ln}
+                for idx_l, ln in enumerate(sc["scene_logs"])
+            ]
         if not sc.get("lifecycle_pills"):
             sc["lifecycle_pills"] = evaluate_lifecycle_pills(
                 profile,
@@ -848,24 +883,24 @@ def _extract_key_acceptance_logs(
                 "uiautomator dump",
                 "screencap -p",
             )
-            _milestone_tokens = custom_includes or (
-                ">> logcat 发现",
-                ">> am broadcast",
-                ">>> 套件：",
-                "结果：",
-                "[PASS]",
-                "[FAIL]",
-                "RELEASE GATE:",
-                "=== [",
-                "MockServer",
-                "onAdLoaded",
-                "LOAD_SUCCESS",
-                "SHOW_OK",
-                "IMPRESSION",
-                "CLICK_OK",
-                "AD_CLOSE",
-                "app_ad_rev",
-                "s_vld=",
+            hl_cfg = ((profile or {}).get("log_filter") or {}).get("highlights") or {}
+            _milestone_tokens = tuple(
+                dict.fromkeys(
+                    list(custom_includes)
+                    + [
+                        ">> logcat 发现",
+                        ">> am broadcast",
+                        ">>> 套件：",
+                        "结果：",
+                        "[PASS]",
+                        "[FAIL]",
+                        "RELEASE GATE:",
+                        "=== [",
+                        "MockServer",
+                    ]
+                    + list(hl_cfg.get("success") or [])
+                    + list(hl_cfg.get("metric") or [])
+                )
             )
             console_hits: list[str] = []
             for line in raw_console.splitlines():
@@ -886,18 +921,9 @@ def _extract_key_acceptance_logs(
     _sdk_tokens = custom_includes or (
         "ActivityTaskManager",
         "Displayed",
-        "AdTest",
-        "[AdMaster/",
-        "AdDebugPanel",
-        "Adm-AdRevReporter",
-        "AdMasterApplication",
-        "SVldManualTest",
-        "onAdLoaded",
-        "onAdShow",
-        "onAdClick",
-        "onAdClose",
-        "bidding success",
-        "ready to show",
+        "MockServer",
+        "ASSERT_OK",
+        "VERIFY_OK",
         "FATAL EXCEPTION",
         "ANR in",
     )

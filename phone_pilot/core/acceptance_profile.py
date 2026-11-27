@@ -70,12 +70,10 @@ DEFAULT_GENERIC_PROFILE: dict[str, Any] = {
             "patterns": [
                 "PASS",
                 "SUCCESS",
-                "onAdLoaded",
-                "LOAD_SUCCESS",
-                "SHOW_OK",
-                "IMPRESSION",
+                "ASSERT_OK",
+                "VERIFY_OK",
                 "loaded successfully",
-                "ready to show",
+                "ready",
             ],
             "default_on_pass": True,
         },
@@ -104,17 +102,8 @@ DEFAULT_GENERIC_PROFILE: dict[str, Any] = {
             "FATAL EXCEPTION",
             "ANR in",
             "AndroidRuntime",
-            "AdTest",
-            "[AdMaster/",
-            "AdDebugPanel",
-            "Adm-AdRevReporter",
-            "SVldManualTest",
-            "onAdLoaded",
-            "onAdShow",
-            "onAdClick",
-            "onAdClose",
-            "bidding success",
-            "ready to show",
+            "ASSERT_OK",
+            "VERIFY_OK",
         ],
         "exclude_tokens": [
             "[cmd] adb",
@@ -124,32 +113,23 @@ DEFAULT_GENERIC_PROFILE: dict[str, Any] = {
         ],
         "highlights": {
             "success": [
-                "LOAD_SUCCESS",
-                "SHOW_OK",
-                "IMPRESSION",
-                "CLICK_OK",
-                "AD_CLOSE",
-                "onAdLoaded",
-                "onAdShow",
-                "ready to show",
                 "[PASS]",
                 "✔ PASS",
                 "SUCCESS",
+                "ASSERT_OK",
+                "VERIFY_OK",
             ],
             "metric": [
-                "app_ad_rev",
-                "s_vld=0",
-                "s_vld=",
-                "price=",
-                "bidding success",
-                "win notified",
+                "duration=",
+                "elapsed=",
+                "latency=",
                 "cost:",
+                "status=200",
             ],
             "network": [
                 "MockServer",
-                ":8090",
+                "HTTP",
                 "am broadcast",
-                "env=test",
                 "reverse tcp:",
             ],
             "danger": [
@@ -158,7 +138,6 @@ DEFAULT_GENERIC_PROFILE: dict[str, Any] = {
                 "ERROR",
                 "FATAL EXCEPTION",
                 "ANR in",
-                "No-Fill",
                 "Exception",
             ],
         },
@@ -232,7 +211,13 @@ def evaluate_lifecycle_pills(
 
         if anti_patterns:
             for ln in combined_lines:
-                if any(ap.lower() in ln.lower() for ap in anti_patterns):
+                if "no reason_anr" in ln.lower():
+                    continue
+                if any(
+                    re.search(rf"(?<![A-Za-z0-9_]){re.escape(ap)}", ln, re.IGNORECASE)
+                    for ap in anti_patterns
+                    if ap
+                ):
                     anti_matched = ln
                     break
             if anti_matched:
@@ -253,6 +238,26 @@ def evaluate_lifecycle_pills(
                         "evidence": "全链路无 Crash / ANR 异常",
                     }
                 )
+            continue
+
+        if st_id == "assertion" and not is_pass:
+            fail_line = next(
+                (
+                    ln.strip()
+                    for ln in reversed(combined_lines)
+                    if any(tok in ln for tok in ("✖ FAIL", "[FAIL]", "超时", "失败", "ERROR", "Error", "TIMEOUT"))
+                    and not ln.strip().startswith("{")
+                ),
+                detail_text.strip() or "核心业务断言未通过",
+            )
+            pills.append(
+                {
+                    "id": st_id,
+                    "label": label,
+                    "status": "FAIL",
+                    "evidence": fail_line[:180],
+                }
+            )
             continue
 
         for ln in combined_lines:
@@ -432,27 +437,23 @@ def extract_scene_specific_logs(
         except Exception:
             pass
 
-    # 3. If single-scene or still empty, filter all_key_logs or synthesize from planned actions
+    # 3. If single-scene or still empty, filter all_key_logs using profile highlights or status tokens
     if not scene_logs:
         if detail:
             scene_logs.append(f"[场景执行结论] {title} -> {detail}")
+        hl = ((profile or {}).get("log_filter") or {}).get("highlights") or {}
+        dyn_tokens = tuple(
+            dict.fromkeys(
+                list(hl.get("success") or [])
+                + list(hl.get("metric") or [])
+                + ["PASS", "FAIL"]
+            )
+        )
         matched = [
             ln
             for ln in all_key_logs
             if (title and title in ln)
-            or any(
-                tok in ln
-                for tok in (
-                    "LOAD_SUCCESS",
-                    "SHOW_OK",
-                    "IMPRESSION",
-                    "app_ad_rev",
-                    "s_vld=",
-                    "onAdLoaded",
-                    "PASS",
-                    "FAIL",
-                )
-            )
+            or any(tok in ln for tok in dyn_tokens)
         ]
         scene_logs.extend(matched[:25])
 
@@ -510,22 +511,18 @@ def build_markdown_report_summary(
                 f"  - `{st_icon}` **#{sc.get('index')} [{sc.get('group_label', '场景')}] {sc.get('title')}**：{sc.get('detail') or sc.get('status')} (`{sc.get('elapsed_s', 0)}s`)"
             )
 
+    hl_summary = ((profile or {}).get("log_filter") or {}).get("highlights") or {}
+    summary_tokens = tuple(
+        dict.fromkeys(
+            list(hl_summary.get("success") or [])
+            + list(hl_summary.get("metric") or [])
+            + ["[PASS]", "[FAIL]"]
+        )
+    )
     sample_logs = [
         ln
         for ln in key_logs
-        if any(
-            k in ln
-            for k in (
-                "LOAD_SUCCESS",
-                "SHOW_OK",
-                "IMPRESSION",
-                "app_ad_rev",
-                "s_vld=",
-                "onAdLoaded",
-                "[PASS]",
-                "[FAIL]",
-            )
-        )
+        if any(k in ln for k in summary_tokens)
     ][:8]
     if sample_logs:
         lines.append("- **关键业务判定日志抽样**：")

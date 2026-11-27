@@ -124,15 +124,20 @@
 .qi-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px}
 .qi-nav-group{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .qi-kbd{background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:1px 6px;font-family:var(--mono);font-size:.72rem;color:var(--text2)}
-.qi-body{display:grid;grid-template-columns:minmax(220px,310px) 1fr;gap:18px;align-items:start}
-.qi-log-box{background:#0f172a;color:#e2e8f0;font-family:var(--mono);font-size:.76rem;line-height:1.65;padding:12px 14px;border-radius:10px;max-height:300px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #1e293b}
+.qi-body{display:grid;grid-template-columns:minmax(250px,330px) 1fr;gap:18px;align-items:start}
+.qi-log-box{background:#0f172a;color:#e2e8f0;font-family:var(--mono);font-size:.76rem;line-height:1.65;padding:12px 14px;border-radius:10px;max-height:330px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #1e293b}
 .qi-log-line{padding:3px 6px;border-radius:5px;cursor:pointer;border-left:3px solid transparent;transition:background .12s,opacity .15s}
 .qi-log-line:hover{background:rgba(59,130,246,.16)}
 .qi-log-line.active-time{background:rgba(59,130,246,.22);border-left-color:#60a5fa}
 .qi-log-line.future-time{opacity:.38}
 .qi-log-ts{color:#94a3b8;font-size:.7rem;margin-right:6px;user-select:none}
-.qi-thumb-strip{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-.qi-thumb-btn{width:46px;height:64px;padding:0;border:2px solid var(--border);border-radius:6px;overflow:hidden;background:#0f172a;cursor:pointer;opacity:.75;transition:opacity .12s,border-color .12s}
+.qi-media-tabs{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px}
+.qi-media-tab{border:none;background:transparent;color:var(--text2);font-size:.74rem;font-weight:700;padding:4px 9px;border-radius:6px;cursor:pointer;transition:all .12s;white-space:nowrap}
+.qi-media-tab.active{background:var(--blue);color:#fff}
+.qi-speed-pill{border:1px solid var(--border);background:var(--surface);color:var(--text2);font-size:.68rem;font-weight:700;padding:2px 6px;border-radius:5px;cursor:pointer}
+.qi-speed-pill.active{border-color:var(--blue);color:var(--blue);background:rgba(59,130,246,.12)}
+.qi-thumb-strip{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-top:8px;padding-bottom:4px;scrollbar-width:thin}
+.qi-thumb-btn{flex:0 0 46px;width:46px;height:64px;padding:0;border:2px solid var(--border);border-radius:6px;overflow:hidden;background:#0f172a;cursor:pointer;opacity:.75;transition:opacity .12s,border-color .12s}
 .qi-thumb-btn:hover,.qi-thumb-btn.active{opacity:1;border-color:var(--blue)}
 .qi-thumb-btn img{width:100%;height:100%;object-fit:cover;display:block}
 .card-filmstrip{display:flex;gap:8px;align-items:stretch;justify-content:center;background:linear-gradient(180deg,rgba(15,23,42,.55),rgba(15,23,42,.92));border:1px solid var(--border);border-radius:10px;padding:8px;cursor:pointer;position:relative;overflow:hidden;min-height:136px}
@@ -181,7 +186,7 @@
   </div>
   <div class="lifecycle-chain" style="margin-top:10px;margin-bottom:2px;">
     {% for pill in global_lifecycle_pills %}
-      <span class="lc-pill {{ pill.status|lower }}" title="{{ pill.evidence|e }}" onclick="if(window.jumpToLogKeyword)window.jumpToLogKeyword('{{ pill.label|e }}', '{{ pill.evidence|e }}')">
+      <span class="lc-pill {{ pill.status|lower }}" title="{{ pill.evidence }}" data-label="{{ pill.label }}" data-evidence="{{ pill.evidence }}" onclick="if(window.jumpToLogKeyword)window.jumpToLogKeyword(this.dataset.label, this.dataset.evidence)">
         <span>{{ '🟢' if pill.status == 'PASS' else ('🔴' if pill.status == 'FAIL' else '⚪') }}</span>
         <span>{{ pill.label }}</span>
       </span>
@@ -241,6 +246,7 @@
       </div>
       <div class="qi-nav-group">
         <span id="qi-progress" style="font-size:.78rem;color:var(--text2);margin-right:4px;">1 / {{ scene.scenes|length }}</span>
+        <button type="button" class="btn-sm" id="qi-share-link-btn" title="复制直达当前场景的深链 URL (#scene=...)" style="border-color:var(--blue);color:var(--blue);">🔗 场景直达链接</button>
         <button type="button" class="btn-sm" id="qi-prev-btn" title="快捷键：键盘左方向键 ← 或 K">&larr; 上一场景 (<span class="qi-kbd">&larr;</span>)</button>
         <button type="button" class="btn-sm" id="qi-next-btn" title="快捷键：键盘右方向键 → 或 J">下一场景 (<span class="qi-kbd">&rarr;</span>) &rarr;</button>
         <button type="button" class="btn-sm" id="qi-close-btn" title="快捷键：Esc">✖ 收起</button>
@@ -251,32 +257,41 @@
     <div id="qi-pills-row" class="lifecycle-chain" style="margin-bottom:12px;"></div>
 
     <div class="qi-body">
-      <!-- 左栏：视觉证据（带点击靶心标注的截图 + 视频高光跳播） -->
-      <div>
-        <div style="font-size:.8rem;font-weight:700;color:var(--text2);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
-          <span>🎬 场景实机录屏 &amp; 关键帧截图</span>
-          <span style="font-size:.72rem;color:var(--blue);cursor:pointer;" onclick="if(document.getElementById('qi-shot-img').src)openLightbox(document.getElementById('qi-shot-img').getAttribute('src'))">🔍 放大当前截图</span>
+      <!-- 左栏：单屏切换式视觉工作台（实机录屏 Tab / 关键帧靶心截图 Tab + 横向胶片条 + 倍速控制） -->
+      <div style="min-width:0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+          <div class="qi-media-tabs">
+            <button type="button" class="qi-media-tab active" id="qi-tab-video">🎬 实机录屏</button>
+            <button type="button" class="qi-media-tab" id="qi-tab-shot">🖼️ 关键帧</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <span id="qi-speed-group" style="display:inline-flex;gap:3px;">
+              <button type="button" class="qi-speed-pill active" data-rate="1">1x</button>
+              <button type="button" class="qi-speed-pill" data-rate="1.5">1.5x</button>
+              <button type="button" class="qi-speed-pill" data-rate="2">2x</button>
+            </span>
+            <button type="button" class="qi-speed-pill" id="qi-zoom-btn" title="全屏放大查看关键帧">🔍 放大</button>
+          </div>
         </div>
-        <video id="qi-video" controls playsinline preload="metadata" style="width:100%;max-height:360px;border-radius:8px;background:#000;display:none;margin-bottom:8px;border:1px solid var(--border);"></video>
-        <div class="shot-annot-wrap" id="qi-shot-wrap">
-          <img id="qi-shot-img" src="" alt="场景截图" onclick="openLightbox(this.getAttribute('src'))">
+        <video id="qi-video" controls playsinline preload="metadata" style="width:100%;height:340px;object-fit:contain;border-radius:8px;background:#000;display:none;border:1px solid var(--border);"></video>
+        <div class="shot-annot-wrap" id="qi-shot-wrap" style="display:none;">
+          <img id="qi-shot-img" alt="场景截图" style="height:340px;max-height:340px;cursor:zoom-in;">
           <div id="qi-tap-bullseye" class="tap-bullseye" style="display:none;"></div>
           <div id="qi-tap-tag" class="tap-bullseye-tag" style="display:none;"></div>
         </div>
         <div id="qi-thumb-strip" class="qi-thumb-strip" style="display:none;"></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-          {% if recordings %}
-          <button type="button" class="scene-act-btn" id="qi-video-start-btn">🎬 播场景起点</button>
-          <button type="button" class="scene-act-btn" id="qi-video-hl-btn" style="border-color:rgba(245,158,11,.5);color:var(--amber);">⚡ 直跳画面高光</button>
-          {% endif %}
-          <button type="button" class="scene-act-btn primary" id="qi-restore-btn">📱 真机复现此场景 (R)</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+          <button type="button" class="scene-act-btn" id="qi-video-start-btn" style="display:none;">🎬 播起点</button>
+          <button type="button" class="scene-act-btn" id="qi-video-hl-btn" style="display:none;border-color:rgba(245,158,11,.5);color:var(--amber);">⚡ 跳高光</button>
+          <button type="button" class="scene-act-btn primary" id="qi-restore-btn">📱 复现此场景 (R)</button>
         </div>
       </div>
 
-      <!-- 右栏：VLM 结论 + 业务断言 + 随视频时间联动日志 -->
+      <!-- 右栏：VLM 结论 + 业务断言 + 子用例明细矩阵 + 随视频时间联动日志 -->
       <div style="min-width:0;">
         <div id="qi-vlm-box" style="display:none;margin-bottom:8px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:.8rem;"></div>
-        <div id="qi-assertions-box" style="display:none;margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;"></div>
+        <div id="qi-assertions-box" style="display:none;margin-bottom:8px;flex-wrap:wrap;gap:6px;"></div>
+        <div id="qi-subcases-box" style="display:none;margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span style="font-size:.82rem;font-weight:700;color:var(--text);">🎯 本场景专属日志 &amp; 业务断言</span>
@@ -321,10 +336,11 @@
       </div>
 
       {% set card_shots = sc.screenshots if (sc.screenshots and sc.screenshots|length) else ([sc.screenshot] if sc.screenshot else []) %}
+      {% set card_has_video = sc.video_rel_path or sc.global_video_rel_path or (recordings and recordings|length > 0) %}
       {% if card_shots %}
-      <div class="card-filmstrip" onclick="if(window.openQuickInspector)window.openQuickInspector({{ loop.index0 }}, {{ 'true' if sc.video_rel_path else 'false' }})" title="点击展开审片台并{{ '播放录屏' if sc.video_rel_path else '查看关键帧' }}">
+      <div class="card-filmstrip" onclick="if(window.openQuickInspector)window.openQuickInspector({{ loop.index0 }}, {{ 'true' if card_has_video else 'false' }})" title="点击展开审片台并{{ '播放录屏' if card_has_video else '查看关键帧' }}">
         {% for s_item in card_shots[:3] %}
-        {% set frame_src = s_item if (s_item.startswith('screenshots/') or s_item.startswith('scenes/') or s_item.startswith('evidence/') or s_item.startswith('http') or s_item.startswith('/')) else 'screenshots/' ~ s_item %}
+        {% set frame_src = s_item if (s_item.startswith('screenshots/') or s_item.startswith('scenes/') or s_item.startswith('evidence/') or s_item.startswith('recordings/') or s_item.startswith('http') or s_item.startswith('/')) else 'screenshots/' ~ s_item %}
         <div class="card-frame">
           <img src="{{ frame_src }}" alt="{{ sc.title }} #{{ loop.index }}">
           <span class="card-frame-cap">{{ '终态' if loop.last else '帧#' ~ loop.index }}</span>
@@ -333,7 +349,7 @@
           {% endif %}
         </div>
         {% endfor %}
-        {% if sc.video_rel_path %}
+        {% if card_has_video %}
         <span class="card-play-pill">▶ 播录屏</span>
         {% endif %}
       </div>
@@ -343,16 +359,12 @@
         <button type="button" class="scene-act-btn" onclick="if(window.openQuickInspector)window.openQuickInspector({{ loop.index0 }}, false)" title="原地展开本场景录屏、截图、断言与联动日志">
           🔍 极速审片
         </button>
-        {% if sc.video_rel_path %}
+        {% if card_has_video %}
         <button type="button" class="scene-act-btn" onclick="if(window.openQuickInspector)window.openQuickInspector({{ loop.index0 }}, true)" title="直接播放本场景实机录屏并同步日志">
-          🎬 播录屏
-        </button>
-        {% elif recordings %}
-        <button type="button" class="scene-act-btn" onclick="if(window.seekVideoToScene)window.seekVideoToScene({{ sc.video_offset_s }}, '{{ sc.title|e }}')">
-          🎬 {{ sc.video_time_label }}
+          🎬 {{ '播录屏' if sc.video_rel_path else ('播片段 ' ~ sc.video_time_label) }}
         </button>
         {% endif %}
-        <button type="button" class="scene-act-btn primary" onclick="if(window.openRestoreForScene)window.openRestoreForScene('{{ sc.scene_id }}')">
+        <button type="button" class="scene-act-btn primary" data-scene-id="{{ sc.scene_id }}" onclick="if(window.openRestoreForScene)window.openRestoreForScene(this.dataset.sceneId)">
           📱 复现
         </button>
       </div>
@@ -375,39 +387,52 @@
   } catch (e) {}
 
   const hlConfig = (profileData.log_filter && profileData.log_filter.highlights) || {
-    success: ['LOAD_SUCCESS', 'SHOW_OK', 'IMPRESSION', 'CLICK_OK', 'AD_CLOSE', 'onAdLoaded', 'onAdShow', '[PASS]', '✔ PASS', 'SUCCESS'],
-    metric: ['app_ad_rev', 's_vld=0', 's_vld=', 'price=', 'bidding success', 'win notified'],
-    network: ['MockServer', ':8090', 'am broadcast', 'env=test', 'reverse tcp:'],
-    danger: ['FAIL', 'FAILED', 'ERROR', 'FATAL EXCEPTION', 'ANR in', 'No-Fill']
+    success: ['[PASS]', '✔ PASS', 'SUCCESS', 'ASSERT_OK', 'VERIFY_OK'],
+    metric: ['duration=', 'elapsed=', 'latency=', 'cost:', 'status=200'],
+    network: ['MockServer', 'HTTP', 'am broadcast', 'reverse tcp:'],
+    danger: ['FAIL', 'FAILED', 'ERROR', 'FATAL EXCEPTION', 'ANR in']
   };
 
   function escapeHtml(str) {
     return String(str || '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
+  window.escapeHtml = escapeHtml;
 
   function escapeRegex(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  window.highlightLogHtml = function(rawText) {
-    let html = escapeHtml(rawText);
-    const rules = [
-      { cls: 'hl-tok-danger', tokens: hlConfig.danger || [] },
-      { cls: 'hl-tok-metric', tokens: hlConfig.metric || [] },
-      { cls: 'hl-tok-network', tokens: hlConfig.network || [] },
-      { cls: 'hl-tok-success', tokens: hlConfig.success || [] }
-    ];
-    rules.forEach(group => {
-      (group.tokens || []).forEach(tok => {
-        if (!tok || tok.length < 2) return;
-        const re = new RegExp('(' + escapeRegex(escapeHtml(tok)) + ')', 'g');
-        html = html.replace(re, `<span class="${group.cls}">$1</span>`);
-      });
+  const _hlTokenMap = new Map();
+  [
+    { cls: 'hl-tok-danger', tokens: hlConfig.danger || [] },
+    { cls: 'hl-tok-metric', tokens: hlConfig.metric || [] },
+    { cls: 'hl-tok-network', tokens: hlConfig.network || [] },
+    { cls: 'hl-tok-success', tokens: hlConfig.success || [] }
+  ].forEach(group => {
+    (group.tokens || []).forEach(tok => {
+      if (!tok || tok.length < 2) return;
+      const esc = escapeHtml(tok);
+      if (!_hlTokenMap.has(esc)) _hlTokenMap.set(esc, group.cls);
     });
-    return html;
+  });
+  const _hlSortedTokens = Array.from(_hlTokenMap.keys()).sort((a, b) => b.length - a.length);
+  const _hlMasterRegex = _hlSortedTokens.length
+    ? new RegExp('(' + _hlSortedTokens.map(escapeRegex).join('|') + ')', 'g')
+    : null;
+
+  function compactLongQuery(str) {
+    return String(str || '').replace(/([?&](?:code|data|payload)=)[A-Za-z0-9+/=%_-]{48,}/g, '$1<encrypted…>');
+  }
+
+  window.highlightLogHtml = function(rawText) {
+    const html = escapeHtml(compactLongQuery(rawText));
+    if (!_hlMasterRegex) return html;
+    return html.replace(_hlMasterRegex, (m) => `<span class="${_hlTokenMap.get(m) || 'hl-tok-success'}">${m}</span>`);
   };
 
   // Apply syntax highlighting to #key-acceptance-log-preview on page load
@@ -442,10 +467,11 @@
       logsSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     if (filterInput && window.filterKeyAcceptanceLogs) {
-      // Extract a clean token if evidence contains known pattern
       let q = '';
-      const m = String(evidence || '').match(/(LOAD_SUCCESS|SHOW_OK|IMPRESSION|app_ad_rev|s_vld=\d|AD_CLOSE|CLICK_OK|MockServer|onAdLoaded)/);
-      if (m) q = m[1];
+      const evStr = String(evidence || '');
+      for (const tok of _hlSortedTokens) {
+        if (tok && evStr.includes(tok)) { q = tok; break; }
+      }
       filterInput.value = q;
       window.filterKeyAcceptanceLogs(q);
     }
@@ -468,18 +494,48 @@
   }
 
   let currentIdx = 0;
+  let activeFilter = 'all';
+
+  function getVisibleSceneIndices() {
+    const list = getScenesList();
+    if (!list.length) return [];
+    if (activeFilter === 'all') return list.map((_, i) => i);
+    if (activeFilter === 'fail') {
+      return list.map((s, i) => (String(s.status).toUpperCase() !== 'PASS' ? i : -1)).filter(i => i >= 0);
+    }
+    if (activeFilter.startsWith('group-')) {
+      const g = activeFilter.slice(6);
+      return list.map((s, i) => (s.group === g ? i : -1)).filter(i => i >= 0);
+    }
+    return list.map((_, i) => i);
+  }
+
+  function stepQuickInspector(delta) {
+    const vis = getVisibleSceneIndices();
+    if (!vis.length) return;
+    const pos = vis.indexOf(currentIdx);
+    const nextPos = pos >= 0 ? (pos + delta + vis.length) % vis.length : 0;
+    window.openQuickInspector(vis[nextPos], false);
+  }
 
   if (bar) {
     bar.querySelectorAll('.suite-filter-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         bar.querySelectorAll('.suite-filter-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        const f = btn.dataset.filter;
+        const f = btn.dataset.filter || 'all';
+        activeFilter = f;
         grid.querySelectorAll('.suite-card').forEach(card => {
           if (f === 'all') card.style.display = '';
           else if (f === 'fail') card.style.display = (card.dataset.status !== 'pass') ? '' : 'none';
           else card.style.display = (card.dataset.group === f) ? '' : 'none';
         });
+        if (inspector && inspector.classList.contains('open')) {
+          const vis = getVisibleSceneIndices();
+          if (!vis.length) window.closeQuickInspector();
+          else if (vis.indexOf(currentIdx) === -1) window.openQuickInspector(vis[0], false);
+          else window.openQuickInspector(currentIdx, false);
+        }
       });
     });
   }
@@ -547,7 +603,7 @@
 
     function resolveMediaPath(p) {
       if (!p) return '';
-      if (p.startsWith('screenshots/') || p.startsWith('scenes/') || p.startsWith('evidence/') || p.startsWith('http') || p.startsWith('/')) {
+      if (p.startsWith('screenshots/') || p.startsWith('scenes/') || p.startsWith('evidence/') || p.startsWith('recordings/') || p.startsWith('http') || p.startsWith('/')) {
         return p;
       }
       return 'screenshots/' + p;
@@ -565,8 +621,14 @@
       badge.textContent = isPass ? '✔ PASS' : '✖ FAIL';
     }
     if (titleEl) titleEl.textContent = `#${sc.index} [${sc.group_label || '场景'}] ${sc.title}`;
-    if (metaEl) metaEl.textContent = `${sc.detail || ''} · 耗时 ${sc.elapsed_s || 0}s`;
-    if (progEl) progEl.textContent = `场景 ${currentIdx + 1} / ${list.length}`;
+    if (metaEl) metaEl.textContent = `${sc.detail ? sc.detail + ' · ' : ''}耗时 ${sc.elapsed_s || 0}s`;
+    if (progEl) {
+      const vis = getVisibleSceneIndices();
+      const visPos = vis.indexOf(currentIdx);
+      progEl.textContent = (activeFilter !== 'all' && visPos >= 0)
+        ? `筛选 ${visPos + 1} / ${vis.length} (总 #${sc.index})`
+        : `场景 ${currentIdx + 1} / ${list.length}`;
+    }
 
     // Render per-scenario VLM verdict & human-readable assertions
     const vlmBox = document.getElementById('qi-vlm-box');
@@ -590,7 +652,24 @@
           return `<span style="font-size:.74rem;padding:3px 8px;border-radius:6px;border:1px solid ${ok ? 'rgba(34,197,94,.4)' : 'rgba(239,68,68,.55)'};background:${ok ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.15)'};color:${ok ? 'var(--green)' : 'var(--red)'};" title="预期: ${escapeHtml(a.expected || '')}"><b>${escapeHtml(a.dim)}</b>: ${escapeHtml(a.actual || a.status)}</span>`;
         }).join('');
       } else {
+        asrtBox.innerHTML = '';
         asrtBox.style.display = 'none';
+      }
+    }
+    const subBox = document.getElementById('qi-subcases-box');
+    if (subBox) {
+      const subs = sc.sub_cases || [];
+      if (subs.length) {
+        const passCnt = subs.filter(item => (item.status || '').toUpperCase() === 'PASS').length;
+        subBox.style.display = 'block';
+        const badgesHtml = subs.map(item => {
+          const ok = (item.status || '').toUpperCase() === 'PASS';
+          return `<span class="qi-subcase-pill" style="display:inline-flex;align-items:center;gap:4px;font-size:.71rem;padding:2px 7px;border-radius:5px;border:1px solid ${ok ? 'rgba(34,197,94,.35)' : 'rgba(239,68,68,.55)'};background:${ok ? 'rgba(34,197,94,.09)' : 'rgba(239,68,68,.15)'};color:${ok ? 'var(--green)' : 'var(--red)'};" title="${escapeHtml(item.detail || item.status)}">${ok ? '✔' : '✖'} <span>${escapeHtml(item.name)}</span></span>`;
+        }).join('');
+        subBox.innerHTML = `<div style="font-size:.74rem;font-weight:700;color:var(--text2);margin-bottom:6px;">🧩 子用例明细矩阵 (${passCnt}/${subs.length} 通过)</div><div style="display:flex;flex-wrap:wrap;gap:5px;max-height:92px;overflow-y:auto;">${badgesHtml}</div>`;
+      } else {
+        subBox.innerHTML = '';
+        subBox.style.display = 'none';
       }
     }
 
@@ -605,61 +684,155 @@
       }).join('');
     }
 
-    // Render per-scenario video
-    const hasVideo = Boolean(sc.video_rel_path);
+    // Render per-scenario video (supports dedicated scenes/<id>/video.mp4 OR global recording virtual chapter clip)
+    const fallbackGlobalVid = (function() {
+      const mainVid = document.getElementById('main-recording-video');
+      return mainVid ? mainVid.getAttribute('src') : '';
+    })();
+    const effectiveVidSrc = sc.video_rel_path
+      ? resolveMediaPath(sc.video_rel_path)
+      : (sc.global_video_rel_path ? resolveMediaPath(sc.global_video_rel_path) : fallbackGlobalVid);
+    const isClipMode = !sc.video_rel_path && Boolean(effectiveVidSrc);
+    const baseOffset = isClipMode ? Math.max(0, Number(sc.video_offset_s || 0)) : 0;
+    const clipEndSec = isClipMode
+      ? Math.max(baseOffset + 1, Number(sc.video_end_s || (baseOffset + Number(sc.elapsed_s || 15))))
+      : 0;
+    const hasVideo = Boolean(effectiveVidSrc);
+
+    const tabVidBtn = document.getElementById('qi-tab-video');
+    const tabShotBtn = document.getElementById('qi-tab-shot');
+    const speedGroup = document.getElementById('qi-speed-group');
+    const zoomBtn = document.getElementById('qi-zoom-btn');
+
+    const allShots = (sc.screenshots && sc.screenshots.length)
+      ? sc.screenshots
+      : (sc.screenshot ? [sc.screenshot] : []);
+    const resolvedShots = allShots.map(resolveMediaPath).filter(Boolean);
+    let activeShotIdx = Math.max(0, resolvedShots.length - 1);
+
+    function setMediaTab(mode) {
+      const showVid = (mode === 'video' && hasVideo) || (!resolvedShots.length && hasVideo);
+      if (qiVideo) qiVideo.style.display = showVid ? 'block' : 'none';
+      if (shotWrap) shotWrap.style.display = (!showVid && resolvedShots.length) ? 'block' : 'none';
+      if (tabVidBtn) {
+        tabVidBtn.style.display = hasVideo ? '' : 'none';
+        tabVidBtn.classList.toggle('active', showVid);
+      }
+      if (tabShotBtn) {
+        tabShotBtn.style.display = resolvedShots.length ? '' : 'none';
+        tabShotBtn.textContent = `🖼️ 关键帧 (${resolvedShots.length})`;
+        tabShotBtn.classList.toggle('active', !showVid && resolvedShots.length > 0);
+      }
+      if (speedGroup) speedGroup.style.display = showVid ? 'inline-flex' : 'none';
+      if (zoomBtn) zoomBtn.style.display = resolvedShots.length ? '' : 'none';
+      if (!showVid && qiVideo && !qiVideo.paused) qiVideo.pause();
+    }
+
+    function seekQiVideo(absSec, playNow) {
+      if (!qiVideo || !hasVideo) return;
+      setMediaTab('video');
+      const target = Math.max(0, Number(absSec || 0));
+      const applySeek = () => {
+        try {
+          qiVideo.currentTime = target;
+          if (playNow) qiVideo.play().catch(() => {});
+        } catch (_) {}
+      };
+      if (qiVideo.readyState >= 1) {
+        applySeek();
+      } else {
+        qiVideo.addEventListener('loadedmetadata', applySeek, { once: true });
+      }
+    }
+
     if (qiVideo) {
+      qiVideo.ontimeupdate = null;
+      qiVideo.onseeked = null;
       if (hasVideo) {
-        qiVideo.style.display = 'block';
-        qiVideo.src = resolveMediaPath(sc.video_rel_path);
-        qiVideo.currentTime = 0;
-        if (autoPlayVideo) {
-          qiVideo.play().catch(() => {});
+        const prevSrc = qiVideo.getAttribute('data-active-src') || '';
+        if (prevSrc !== effectiveVidSrc) {
+          qiVideo.src = effectiveVidSrc;
+          qiVideo.setAttribute('data-active-src', effectiveVidSrc);
+          qiVideo.load();
         }
+        const activeSpeedBtn = speedGroup ? speedGroup.querySelector('.qi-speed-pill.active') : null;
+        if (activeSpeedBtn) qiVideo.playbackRate = Number(activeSpeedBtn.dataset.rate || 1) || 1;
+        seekQiVideo(baseOffset, Boolean(autoPlayVideo));
       } else {
         qiVideo.pause();
         qiVideo.removeAttribute('src');
+        qiVideo.removeAttribute('data-active-src');
         qiVideo.style.display = 'none';
       }
     }
 
-    // Render screenshot(s) + thumb strip + tap bullseye
-    const allShots = (sc.screenshots && sc.screenshots.length)
-      ? sc.screenshots
-      : (sc.screenshot ? [sc.screenshot] : []);
-    if (shotImg && shotWrap) {
-      if (allShots.length) {
-        shotWrap.style.display = 'block';
-        shotImg.src = resolveMediaPath(allShots[allShots.length - 1]);
-        const annot = sc.tap_annotation;
-        if (bullseye && tapTag && annot && annot.has_coords) {
-          bullseye.style.display = 'flex';
-          bullseye.style.left = annot.tap_x_pct + '%';
-          bullseye.style.top = annot.tap_y_pct + '%';
-          tapTag.style.display = 'block';
-          tapTag.style.left = annot.tap_x_pct + '%';
-          tapTag.style.top = annot.tap_y_pct + '%';
-          tapTag.textContent = annot.label || `🎯 (${annot.tap_x}, ${annot.tap_y})`;
-        } else {
-          if (bullseye) bullseye.style.display = 'none';
-          if (tapTag) tapTag.style.display = 'none';
-        }
+    if (speedGroup) {
+      speedGroup.querySelectorAll('.qi-speed-pill').forEach(btn => {
+        btn.onclick = () => {
+          const r = Number(btn.dataset.rate || 1) || 1;
+          if (qiVideo) qiVideo.playbackRate = r;
+          speedGroup.querySelectorAll('.qi-speed-pill').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+        };
+      });
+    }
+
+    // Render screenshot(s) + single-row horizontal thumb strip + tap bullseye (shown only on matching final frame)
+    function syncShotBullseye() {
+      const annot = sc.tap_annotation;
+      const isAnnotatedFrame = (activeShotIdx === resolvedShots.length - 1);
+      if (bullseye && tapTag && isAnnotatedFrame && annot && annot.has_coords) {
+        bullseye.style.display = 'flex';
+        bullseye.style.left = annot.tap_x_pct + '%';
+        bullseye.style.top = annot.tap_y_pct + '%';
+        tapTag.style.display = 'block';
+        tapTag.style.left = annot.tap_x_pct + '%';
+        tapTag.style.top = annot.tap_y_pct + '%';
+        tapTag.textContent = annot.label || `🎯 (${annot.tap_x}, ${annot.tap_y})`;
       } else {
-        shotWrap.style.display = 'none';
+        if (bullseye) bullseye.style.display = 'none';
+        if (tapTag) tapTag.style.display = 'none';
       }
     }
+    if (shotImg && shotWrap) {
+      if (resolvedShots.length) {
+        shotImg.src = resolvedShots[activeShotIdx];
+        shotImg.onclick = () => {
+          if (window.openLightbox) window.openLightbox(activeShotIdx, resolvedShots);
+        };
+        syncShotBullseye();
+      } else {
+        shotImg.removeAttribute('src');
+        shotWrap.style.display = 'none';
+        if (bullseye) bullseye.style.display = 'none';
+        if (tapTag) tapTag.style.display = 'none';
+      }
+    }
+    if (zoomBtn) {
+      zoomBtn.onclick = () => {
+        if (resolvedShots.length && window.openLightbox) {
+          window.openLightbox(activeShotIdx, resolvedShots);
+        }
+      };
+    }
+    if (tabVidBtn) tabVidBtn.onclick = () => setMediaTab('video');
+    if (tabShotBtn) tabShotBtn.onclick = () => setMediaTab('shot');
+
     if (thumbStrip) {
-      if (allShots.length > 1) {
+      if (resolvedShots.length > 1) {
         thumbStrip.style.display = 'flex';
-        thumbStrip.innerHTML = allShots.map((sPath, sIdx) => {
-          const url = resolveMediaPath(sPath);
-          const isLast = sIdx === allShots.length - 1;
-          return `<button type="button" class="qi-thumb-btn ${isLast ? 'active' : ''}" data-shot-url="${escapeHtml(url)}" title="截图 #${sIdx + 1}"><img src="${escapeHtml(url)}" alt="shot ${sIdx + 1}"></button>`;
+        thumbStrip.innerHTML = resolvedShots.map((url, sIdx) => {
+          const isLast = sIdx === activeShotIdx;
+          return `<button type="button" class="qi-thumb-btn ${isLast ? 'active' : ''}" data-shot-idx="${sIdx}" data-shot-url="${escapeHtml(url)}" title="点击查看关键帧 #${sIdx + 1}"><img src="${escapeHtml(url)}" alt="shot ${sIdx + 1}"></button>`;
         }).join('');
         thumbStrip.querySelectorAll('.qi-thumb-btn').forEach(btn => {
           btn.addEventListener('click', () => {
+            activeShotIdx = Number(btn.dataset.shotIdx || 0);
             if (shotImg) shotImg.src = btn.dataset.shotUrl || '';
             thumbStrip.querySelectorAll('.qi-thumb-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+            syncShotBullseye();
+            setMediaTab('shot');
           });
         });
       } else {
@@ -667,6 +840,8 @@
         thumbStrip.innerHTML = '';
       }
     }
+
+    setMediaTab(hasVideo ? 'video' : 'shot');
 
     // Render scene-specific timeline logs + Video <-> Log time sync
     const tlLogs = (sc.timeline_logs && sc.timeline_logs.length)
@@ -677,59 +852,67 @@
     const rawLogs = tlLogs.map(item => `[${fmtTime(item.t)}] ${item.line}`).join('\n');
     let syncWithVideo = hasVideo;
 
-    function renderSyncedLogs(curT) {
+    function getRelativeVideoTime() {
+      if (!qiVideo || !hasVideo) return 0;
+      return Math.max(0, Number(qiVideo.currentTime || 0) - baseOffset);
+    }
+
+    function renderSyncedLogs(relT) {
       if (!logBox) return;
-      let activeIdx = -1;
+      let activeIdx = 0;
       if (hasVideo) {
         for (let i = 0; i < tlLogs.length; i++) {
-          if (Number(tlLogs[i].t || 0) <= curT + 0.15) activeIdx = i;
+          if (Number(tlLogs[i].t || 0) <= relT + 0.25) activeIdx = i;
         }
       }
+      const isPlaying = Boolean(qiVideo && !qiVideo.paused && !qiVideo.ended);
       const rows = tlLogs.map((item, i) => {
         const t = Number(item.t || 0);
-        const isFuture = hasVideo && t > curT + 0.15;
-        if (syncWithVideo && isFuture && i > 0) return '';
+        const isFuture = hasVideo && t > relT + 0.25;
         const cls = ['qi-log-line'];
-        if (i === activeIdx) cls.push('active-time');
-        else if (!syncWithVideo && isFuture) cls.push('future-time');
-        return `<div class="${cls.join(' ')}" data-t="${t}" title="点击跳转到视频 ${fmtTime(t)}"><span class="qi-log-ts">[${fmtTime(t)}]</span>${window.highlightLogHtml(item.line)}</div>`;
-      }).filter(Boolean);
-      logBox.innerHTML = rows.length ? rows.join('') : `<div style="color:#94a3b8;font-size:.74rem;">⏳ 播放视频以随时间同步打印日志…</div>`;
+        if (hasVideo && i === activeIdx) cls.push('active-time');
+        else if (syncWithVideo && isPlaying && isFuture) cls.push('future-time');
+        return `<div class="${cls.join(' ')}" data-t="${t}" title="点击跳转本场景视频 ${fmtTime(t)}"><span class="qi-log-ts">[${fmtTime(t)}]</span>${window.highlightLogHtml(item.line)}</div>`;
+      });
+      logBox.innerHTML = rows.join('');
       logBox.querySelectorAll('.qi-log-line').forEach(el => {
         el.addEventListener('click', () => {
-          const seekT = Number(el.dataset.t || 0);
+          const seekRel = Number(el.dataset.t || 0);
           if (qiVideo && hasVideo) {
-            qiVideo.currentTime = seekT;
-            qiVideo.play().catch(() => {});
+            seekQiVideo(baseOffset + seekRel, true);
           }
         });
       });
-      if (syncWithVideo) {
-        logBox.scrollTop = logBox.scrollHeight;
-      } else if (activeIdx >= 0) {
+      if (syncWithVideo && activeIdx >= 0) {
         const actEl = logBox.querySelector('.qi-log-line.active-time');
         if (actEl) actEl.scrollIntoView({ block: 'nearest' });
       }
     }
 
     function updateSyncUi() {
-      const curT = (qiVideo && hasVideo) ? Number(qiVideo.currentTime || 0) : 0;
+      if (isClipMode && qiVideo && !qiVideo.paused && clipEndSec > baseOffset && qiVideo.currentTime >= clipEndSec) {
+        qiVideo.pause();
+      }
+      const relT = getRelativeVideoTime();
       if (vidTimeBadge) {
         vidTimeBadge.style.display = hasVideo ? 'inline' : 'none';
-        vidTimeBadge.textContent = fmtTime(curT);
+        const spanLabel = fmtTime(sc.elapsed_s || (clipEndSec - baseOffset) || 0);
+        vidTimeBadge.textContent = `${fmtTime(relT)} / ${spanLabel}`;
       }
       if (logSyncBtn) {
         logSyncBtn.style.display = hasVideo ? 'inline-flex' : 'none';
-        logSyncBtn.textContent = syncWithVideo ? '⏱️ 随视频时间同步' : '📜 显示完整日志';
+        logSyncBtn.textContent = syncWithVideo ? '⏱️ 视频↔日志联动中' : '📜 联动已暂停';
         logSyncBtn.style.borderColor = syncWithVideo ? 'var(--blue)' : 'var(--border)';
         logSyncBtn.style.color = syncWithVideo ? 'var(--blue)' : 'var(--text2)';
       }
-      renderSyncedLogs(curT);
+      renderSyncedLogs(relT);
     }
 
     if (qiVideo) {
       qiVideo.ontimeupdate = updateSyncUi;
       qiVideo.onseeked = updateSyncUi;
+      qiVideo.onplay = updateSyncUi;
+      qiVideo.onpause = updateSyncUi;
     }
     if (logSyncBtn) {
       logSyncBtn.onclick = () => {
@@ -751,18 +934,30 @@
       recipeChain.innerHTML = steps.map(s => `<span style="color:var(--text);font-weight:600;">${s.index}.${escapeHtml(s.title)}</span>`).join(' <span style="color:var(--blue);">&rarr;</span> ');
     }
 
-    // Video & restore buttons
+    // Video & restore buttons (operate directly on in-place #qi-video when available)
     if (vidStartBtn) {
-      vidStartBtn.textContent = `🎬 播场景起点 (${sc.video_time_label || '00:00'})`;
+      vidStartBtn.style.display = hasVideo ? '' : 'none';
+      vidStartBtn.textContent = isClipMode ? `🎬 播场景起点 (${sc.video_time_label || '00:00'})` : '🎬 从头播放本场景';
       vidStartBtn.onclick = () => {
-        if (window.seekVideoToScene) window.seekVideoToScene(sc.video_offset_s || 0, sc.title);
+        if (hasVideo) {
+          seekQiVideo(baseOffset, true);
+        } else if (window.seekVideoToScene) {
+          window.seekVideoToScene(sc.video_offset_s || 0, sc.title);
+        }
       };
     }
     if (vidHlBtn) {
-      const hlSec = sc.video_highlight_s !== undefined ? sc.video_highlight_s : (sc.video_offset_s || 0);
-      vidHlBtn.textContent = `⚡ 直跳高光瞬间 (${sc.video_highlight_label || sc.video_time_label || '00:00'})`;
+      vidHlBtn.style.display = hasVideo ? '' : 'none';
+      const rawHl = sc.video_highlight_s !== undefined ? Number(sc.video_highlight_s) : baseOffset;
+      const effHlAbs = isClipMode ? rawHl : Math.max(0, Number(sc.elapsed_s || 0) - 4);
+      const hlLabel = isClipMode ? (sc.video_highlight_label || sc.video_time_label || '00:00') : fmtTime(effHlAbs);
+      vidHlBtn.textContent = `⚡ 直跳高光瞬间 (${hlLabel})`;
       vidHlBtn.onclick = () => {
-        if (window.seekVideoToScene) window.seekVideoToScene(hlSec, sc.title + ' [高光时刻]');
+        if (hasVideo) {
+          seekQiVideo(effHlAbs, true);
+        } else if (window.seekVideoToScene) {
+          window.seekVideoToScene(rawHl, sc.title + ' [高光时刻]');
+        }
       };
     }
     if (restoreBtn) {
@@ -771,14 +966,66 @@
       };
     }
 
+    // Sync URL #scene=<scene_id> deep-link & share button + keep bottom restore selector aligned
+    if (sc.scene_id && history.replaceState) {
+      try {
+        history.replaceState(null, '', '#scene=' + encodeURIComponent(sc.scene_id));
+      } catch (_) {}
+    }
+    const restoreSel = document.getElementById('scene-id-select');
+    if (restoreSel && sc.scene_id && restoreSel.value !== sc.scene_id) {
+      const hasOpt = Array.from(restoreSel.options).some(o => o.value === sc.scene_id);
+      if (hasOpt) {
+        restoreSel.value = sc.scene_id;
+        restoreSel.dispatchEvent(new Event('change'));
+      }
+    }
+    const shareLinkBtn = document.getElementById('qi-share-link-btn');
+    if (shareLinkBtn) {
+      shareLinkBtn.onclick = () => {
+        const deepUrl = location.href.split('#')[0] + '#scene=' + encodeURIComponent(sc.scene_id || '');
+        if (window.copyToClipboard) {
+          window.copyToClipboard(deepUrl);
+        } else if (navigator.clipboard) {
+          navigator.clipboard.writeText(deepUrl).catch(() => {});
+        }
+        const prevTxt = shareLinkBtn.textContent;
+        shareLinkBtn.textContent = '✅ 已复制直达链接';
+        setTimeout(() => { shareLinkBtn.textContent = prevTxt; }, 1800);
+      };
+    }
+
     inspector.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
+
+  function applySceneHashRoute() {
+    const rawHash = (window.location.hash || '').replace(/^#/, '');
+    if (!rawHash.startsWith('scene=')) return;
+    const targetVal = decodeURIComponent(rawHash.slice('scene='.length)).trim();
+    if (!targetVal) return;
+    const list = getScenesList();
+    if (!list.length) return;
+    let foundIdx = list.findIndex(item => item && String(item.scene_id) === targetVal);
+    if (foundIdx < 0 && /^\d+$/.test(targetVal)) {
+      const oneBased = Number(targetVal) - 1;
+      if (oneBased >= 0 && oneBased < list.length) foundIdx = oneBased;
+    }
+    if (foundIdx >= 0) {
+      window.openQuickInspector(foundIdx, false);
+    }
+  }
+  window.addEventListener('hashchange', applySceneHashRoute);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applySceneHashRoute, { once: true });
+  } else {
+    setTimeout(applySceneHashRoute, 0);
+  }
 
   const prevBtn = document.getElementById('qi-prev-btn');
   const nextBtn = document.getElementById('qi-next-btn');
   const closeBtn = document.getElementById('qi-close-btn');
-  if (prevBtn) prevBtn.addEventListener('click', () => window.openQuickInspector(currentIdx - 1));
-  if (nextBtn) nextBtn.addEventListener('click', () => window.openQuickInspector(currentIdx + 1));
+  if (prevBtn) prevBtn.addEventListener('click', () => stepQuickInspector(-1));
+  if (nextBtn) nextBtn.addEventListener('click', () => stepQuickInspector(1));
   if (closeBtn) closeBtn.addEventListener('click', window.closeQuickInspector);
 
   // Keyboard shortcuts: ← / → / J / K / R / Esc when inspector is open (and lightbox is not active)
@@ -791,10 +1038,10 @@
 
     if (e.key === 'ArrowRight' || e.key === 'j' || e.key === 'J') {
       e.preventDefault();
-      window.openQuickInspector(currentIdx + 1);
+      stepQuickInspector(1);
     } else if (e.key === 'ArrowLeft' || e.key === 'k' || e.key === 'K') {
       e.preventDefault();
-      window.openQuickInspector(currentIdx - 1);
+      stepQuickInspector(-1);
     } else if (e.key === 'r' || e.key === 'R') {
       e.preventDefault();
       const sc = getScenesList()[currentIdx];
@@ -805,6 +1052,13 @@
   });
 })();
 </script>
+
+{% if business_error %}
+<section class="section" id="business-error" style="border-left:4px solid var(--red);padding:14px 18px;margin-bottom:16px;">
+  <strong style="color:var(--red);">⚠️ 业务报告数据包校验失败：</strong>
+  <span class="missing">{{ business_error }}</span>
+</section>
+{% endif %}
 
 {% if business and not (scene and scene.is_multi_suite and scene.scenes) %}
 <!-- 第一层：业务验收结论看板 (Business Verdict Hero) -->

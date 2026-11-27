@@ -143,7 +143,7 @@ def logcat_mark(ctx: ScriptContext, *, tag: Optional[str] = None) -> Optional[st
 
         mark = logcat_mark(ctx)     # 操作前打标 / mark before action
         tap_play_button()
-        logcat_since(ctx, mark, pattern="onAdImpression")
+        logcat_since(ctx, mark, pattern="event=READY")
 
     Parameters / 参数:
         tag: 可选 tag 过滤，获取该 tag 最近日志的时间戳 / Optional tag for precise mark

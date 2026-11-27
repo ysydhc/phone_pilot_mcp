@@ -1428,8 +1428,8 @@ class TestEvolutionTools:
         """不同目录下存在同名辅助模块（如 atomic_ops.py）时，连续调用 phone_run_script 互不污染 sys.modules。"""
         from phone_pilot.mcp.server import phone_run_script
 
-        ios_dir = tmp_path / "adx-sdk-ios" / "tests" / "e2e"
-        android_dir = tmp_path / "adx-sdk-android" / "tests" / "e2e"
+        ios_dir = tmp_path / "project-ios" / "tests" / "e2e"
+        android_dir = tmp_path / "project-android" / "tests" / "e2e"
         ios_dir.mkdir(parents=True)
         android_dir.mkdir(parents=True)
 

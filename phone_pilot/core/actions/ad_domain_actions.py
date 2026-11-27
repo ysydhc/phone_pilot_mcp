@@ -58,28 +58,28 @@ _STAGE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "LOAD",
         re.compile(
-            r"(?:\b(?:AD_LOAD|LOAD_START|LOAD_AD|REQUEST_START|loadAd)\b|(?:event|stage)\s*[=:]\s*[\"']?LOAD\b)",
+            r"(?:\b(?:AD_LOAD|LOAD_START|LOAD_AD|REQUEST_START)\b|(?:event|stage)\s*[=:]\s*[\"']?LOAD\b)",
             re.IGNORECASE,
         ),
     ),
     (
         "READY",
         re.compile(
-            r"(?:\b(?:AD_READY|LOAD_SUCCESS|ON_AD_LOADED|onAdLoaded|lifecycle_stage\s+READY)\b|(?:event|stage)\s*[=:]\s*[\"']?READY\b)",
+            r"(?:\b(?:AD_READY|LOAD_SUCCESS|ON_AD_LOADED|ON_ITEM_LOADED|lifecycle_stage\s+READY)\b|(?:event|stage)\s*[=:]\s*[\"']?READY\b)",
             re.IGNORECASE,
         ),
     ),
     (
         "RENDER",
         re.compile(
-            r"(?:\b(?:AD_RENDER|RENDER_SUCCESS|ON_RENDER|SHOW_OK|onAdRenderSuccess|lifecycle_stage\s+SHOW_ATTEMPT|lifecycle_stage\s+RENDER)\b|(?:event|stage)\s*[=:]\s*[\"']?RENDER\b)",
+            r"(?:\b(?:AD_RENDER|RENDER_SUCCESS|ON_RENDER|SHOW_OK|ON_RENDER_SUCCESS|lifecycle_stage\s+SHOW_ATTEMPT|lifecycle_stage\s+RENDER)\b|(?:event|stage)\s*[=:]\s*[\"']?RENDER\b)",
             re.IGNORECASE,
         ),
     ),
     (
         "IMPRESSION",
         re.compile(
-            r"(?:\b(?:AD_IMPRESSION|trackImpression|onAdImpression|AD_SHOW|ON_AD_SHOW|onAdShow|lifecycle_stage\s+IMPRESSION)\b|(?:event|stage)\s*[=:]\s*[\"']?IMPRESSION\b)",
+            r"(?:\b(?:AD_IMPRESSION|trackImpression|ON_IMPRESSION|AD_SHOW|ON_AD_SHOW|ON_SHOW|lifecycle_stage\s+IMPRESSION)\b|(?:event|stage)\s*[=:]\s*[\"']?IMPRESSION\b)",
             re.IGNORECASE,
         ),
     ),
@@ -93,14 +93,14 @@ _STAGE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "CLICK",
         re.compile(
-            r"(?:\b(?:AD_CLICK|ON_AD_CLICK|CLICK_OK|trackClick|onAdClick|lifecycle_stage\s+CLICK)\b|(?:event|stage)\s*[=:]\s*[\"']?CLICK\b)",
+            r"(?:\b(?:AD_CLICK|ON_AD_CLICK|CLICK_OK|trackClick|ON_CLICK|lifecycle_stage\s+CLICK)\b|(?:event|stage)\s*[=:]\s*[\"']?CLICK\b)",
             re.IGNORECASE,
         ),
     ),
     (
         "CLOSE",
         re.compile(
-            r"(?:\b(?:AD_CLOSE|AD_DISMISS|ON_AD_CLOSE|onAdClose|onAdDismiss|lifecycle_stage\s+CLOSE)\b|(?:event|stage)\s*[=:]\s*[\"']?CLOSE\b)",
+            r"(?:\b(?:AD_CLOSE|AD_DISMISS|ON_AD_CLOSE|ON_DISMISS|lifecycle_stage\s+CLOSE)\b|(?:event|stage)\s*[=:]\s*[\"']?CLOSE\b)",
             re.IGNORECASE,
         ),
     ),
@@ -894,7 +894,7 @@ def _extract_close_nodes_from_dumpsys(drv: Any) -> list[dict[str, Any]]:
         indent = len(m.group(1))
         cls = m.group(2)
         vis = m.group(3)
-        l, t, r_x, b = int(m.group(4)), int(m.group(5)), int(m.group(6)), int(m.group(7))
+        l_x, t, r_x, b = int(m.group(4)), int(m.group(5)), int(m.group(6)), int(m.group(7))
         res_id = m.group(8) or ""
 
         while stack and stack[-1][0] >= indent:
@@ -902,9 +902,9 @@ def _extract_close_nodes_from_dumpsys(drv: Any) -> list[dict[str, Any]]:
         parent_vis = stack[-1][1] if stack else True
         parent_l = stack[-1][2] if stack else 0
         parent_t = stack[-1][3] if stack else 0
-        has_area = (r_x > l) and (b > t)
+        has_area = (r_x > l_x) and (b > t)
         eff_vis = parent_vis and vis.startswith("V") and has_area
-        abs_l = parent_l + l
+        abs_l = parent_l + l_x
         abs_t = parent_t + t
         abs_r = parent_l + r_x
         abs_b = parent_t + b
@@ -1148,7 +1148,7 @@ def inspect_ad_close_and_countdown(
                     }
                 )
             else:
-                # Left-side AdCloseButtonView in AdMaster is typically the mute toggle;
+                # Left-side close-styled widget in top bar is typically the mute toggle;
                 # keep as low-priority fallback only if no right-side close widget exists,
                 # and record in mute_candidates when a right-side candidate is present.
                 close_candidates.append(

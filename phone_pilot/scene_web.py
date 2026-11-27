@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 import secrets
 import time
@@ -25,15 +26,30 @@ class SceneWebController:
 
     def list_devices(
         self,
-        target_package: str = "cc.admaster.android.demo",
+        target_package: str = "",
         platform: str | None = None,
     ) -> dict:
         from phone_pilot.core.manifest_generator import get_online_devices_detailed
 
-        devices = get_online_devices_detailed(
+        all_devices = get_online_devices_detailed(
             target_package=target_package,
-            platform_filter=platform,
+            platform_filter=None,
         )
+        pref = (platform or "").strip().lower()
+        if pref in ("android", "ios"):
+            same = []
+            cross = []
+            for d in all_devices:
+                item = dict(d)
+                if str(item.get("platform", "")).lower() == pref:
+                    item["cross_platform"] = False
+                    same.append(item)
+                else:
+                    item["cross_platform"] = True
+                    cross.append(item)
+            devices = same + cross
+        else:
+            devices = all_devices
         return {
             "ok": True,
             "count": len(devices),
@@ -46,9 +62,10 @@ class SceneWebController:
 
         result = inspect_scene(run_dir)
         digest = result.get("manifest_sha256")
-        if self.auto_approve and digest and result.get("status") in ("READY", "SUCCESS"):
-            self.approved_hashes.add(digest)
-        result["enabled"] = digest in self.approved_hashes
+        with self._lock:
+            if self.auto_approve and digest and result.get("status") in ("READY", "SUCCESS"):
+                self.approved_hashes.add(digest)
+            result["enabled"] = digest in self.approved_hashes
         result["token"] = self.token if result["enabled"] else None
 
         platform = str(
@@ -69,10 +86,14 @@ class SceneWebController:
                     pass
         if platform not in ("android", "ios"):
             platform = "android"
-        default_pkg = "com.baidujp.gbusdkdemo" if platform == "ios" else "cc.admaster.android.demo"
-        pkg_name = (result.get("package") or {}).get("name") or default_pkg
-        if platform == "ios" and pkg_name == "cc.admaster.android.demo":
-            pkg_name = "com.baidujp.gbusdkdemo"
+        from phone_pilot.core.pp_profile import load_pp_profile, resolve_platform_package
+
+        pp_prof = load_pp_profile(Path(run_dir))
+        pkg_name = resolve_platform_package(
+            pp_prof,
+            platform=platform,
+            explicit_package=str((result.get("package") or {}).get("name") or ""),
+        )
         online_devices = get_online_devices_detailed(
             target_package=pkg_name,
             platform_filter=platform,
@@ -81,16 +102,17 @@ class SceneWebController:
 
         # Build human-friendly planned steps for immediate UI stepper preview
         raw_actions = result.get("actions", [])
+        route_labels = pp_prof.get("route_labels") if isinstance(pp_prof.get("route_labels"), dict) else None
         planned_steps = [
             {
                 "index": 1,
                 "title": "启动 Mock 服务与设备预检",
-                "detail": "锁定目标真机并加载本地 Mock 规则 (:8090)",
+                "detail": "锁定目标真机并加载本地 Mock 规则",
                 "status": "PENDING",
             }
         ]
         for idx, act in enumerate(raw_actions, start=2):
-            t, d = _action_label(act)
+            t, d = _action_label(act, route_labels=route_labels)
             planned_steps.append(
                 {"index": idx, "title": t, "detail": d, "status": "PENDING"}
             )
@@ -132,11 +154,15 @@ class SceneWebController:
             }
         if self.auto_approve:
             if manifest_hash:
-                self.approved_hashes.add(manifest_hash)
+                with self._lock:
+                    self.approved_hashes.add(manifest_hash)
             os.environ["PHONE_PILOT_SCENE_ALLOW_ONLINE"] = "1"
             os.environ["PHONE_PILOT_SCENE_ALLOW_PERMISSIONS"] = "1"
-        elif manifest_hash not in self.approved_hashes:
-            return {"ok": False, "status": "BLOCKED", "error": "manifest_not_approved"}
+        else:
+            with self._lock:
+                approved_now = manifest_hash in self.approved_hashes
+            if not approved_now:
+                return {"ok": False, "status": "BLOCKED", "error": "manifest_not_approved"}
 
         from phone_pilot.core.scene_restore import restore_scene
 
@@ -167,39 +193,40 @@ class SceneWebController:
             self._job_states[job_id] = state
 
             def on_progress(evt: dict):
-                etype = evt.get("event")
-                if etype == "plan_initialized":
-                    state["device_serial"] = evt.get("device_serial", serial)
-                    state["steps"] = evt.get("steps", [])
-                elif etype == "step_start":
-                    idx = evt.get("step_index", 0)
-                    state["current_step"] = idx
-                    for s in state["steps"]:
-                        if s.get("index") == idx:
-                            s["status"] = "RUNNING"
-                            if evt.get("detail"):
-                                s["detail"] = evt["detail"]
-                    state["logs"].append(
-                        f"▶ [步骤 {idx}] 正在执行：{evt.get('title', '')} — {evt.get('detail', '')}"
-                    )
-                elif etype == "step_done":
-                    idx = evt.get("step_index", 0)
-                    for s in state["steps"]:
-                        if s.get("index") == idx:
-                            s["status"] = evt.get("status", "SUCCESS")
-                            s["elapsed_ms"] = evt.get("elapsed_ms", 0)
-                            if evt.get("detail"):
-                                s["detail"] = evt["detail"]
-                    state["logs"].append(
-                        f"✔ [步骤 {idx}] 完成 ({evt.get('elapsed_ms', 0)}ms)：{evt.get('detail', '')}"
-                    )
-                elif etype == "log":
-                    state["logs"].append(f"  {evt.get('message', '')}")
-                elif etype == "scene_failed":
-                    for s in state["steps"]:
-                        if s.get("status") == "RUNNING":
-                            s["status"] = "FAILED"
-                    state["logs"].append(f"✖ 异常中断：{evt.get('error', '')}")
+                with self._lock:
+                    etype = evt.get("event")
+                    if etype == "plan_initialized":
+                        state["device_serial"] = evt.get("device_serial", serial)
+                        state["steps"] = copy.deepcopy(evt.get("steps", []))
+                    elif etype == "step_start":
+                        idx = evt.get("step_index", 0)
+                        state["current_step"] = idx
+                        for s in state["steps"]:
+                            if s.get("index") == idx:
+                                s["status"] = "RUNNING"
+                                if evt.get("detail"):
+                                    s["detail"] = evt["detail"]
+                        state["logs"].append(
+                            f"▶ [步骤 {idx}] 正在执行：{evt.get('title', '')} — {evt.get('detail', '')}"
+                        )
+                    elif etype == "step_done":
+                        idx = evt.get("step_index", 0)
+                        for s in state["steps"]:
+                            if s.get("index") == idx:
+                                s["status"] = evt.get("status", "SUCCESS")
+                                s["elapsed_ms"] = evt.get("elapsed_ms", 0)
+                                if evt.get("detail"):
+                                    s["detail"] = evt["detail"]
+                        state["logs"].append(
+                            f"✔ [步骤 {idx}] 完成 ({evt.get('elapsed_ms', 0)}ms)：{evt.get('detail', '')}"
+                        )
+                    elif etype == "log":
+                        state["logs"].append(f"  {evt.get('message', '')}")
+                    elif etype == "scene_failed":
+                        for s in state["steps"]:
+                            if s.get("status") == "RUNNING":
+                                s["status"] = "FAILED"
+                        state["logs"].append(f"✖ 异常中断：{evt.get('error', '')}")
 
             self._jobs[job_id] = self._pool.submit(
                 restore_scene,
@@ -210,12 +237,13 @@ class SceneWebController:
                 mode=mode,
                 progress_callback=on_progress,
             )
-        return {"ok": True, "status": "QUEUED", "job_id": job_id, "progress": state}
+            state_init = copy.deepcopy(state)
+        return {"ok": True, "status": "QUEUED", "job_id": job_id, "progress": state_init}
 
     def result(self, job_id):
         with self._lock:
             job = self._jobs.get(job_id)
-            state = self._job_states.get(job_id, {})
+            state = copy.deepcopy(self._job_states.get(job_id, {}))
         if job is None:
             return {"ok": False, "error": "job_not_found"}
         if not job.done():

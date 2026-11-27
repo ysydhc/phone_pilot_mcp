@@ -1,5 +1,7 @@
-<!-- 底部可折叠抽屉：真机现场一键复原控制台 (默认收起隐藏，按需唤醒) -->
-<section id="scene-restore" class="restore-section-anchor" data-run-name="{{ run_name }}" data-manifest-sha="{{ scene.manifest_sha256 or '' }}" data-default-serial="{{ scene.device_serial or meta.device.serial or '' }}" data-default-scene="{{ scene.default_scene_id or 'default' }}">
+<!-- 底部可折叠抽屉：真机/模拟器现场一键复原控制台 (默认收起隐藏，按需唤醒) -->
+{% set report_plat = (meta.device.platform or 'android')|lower %}
+{% set report_pkg = (scene.package.name if scene and scene.package and scene.package.name else '') %}
+<section id="scene-restore" class="restore-section-anchor" data-run-name="{{ run_name }}" data-platform="{{ report_plat }}" data-package="{{ report_pkg }}" data-manifest-sha="{{ scene.manifest_sha256 or '' }}" data-default-serial="{{ scene.device_serial or meta.device.serial or '' }}" data-default-scene="{{ scene.default_scene_id or 'default' }}">
   <details class="restore-drawer" id="scene-restore-drawer">
     <summary class="restore-drawer-summary">
       <div class="drawer-summary-left">
@@ -19,10 +21,10 @@
     <div class="restore-console">
       <div class="restore-header">
         <div class="restore-title-group">
-          <h2>📱 真机现场一键复原控制台 <span id="current-scene-pill" style="font-size:.78rem;font-weight:600;color:var(--blue);background:rgba(59,130,246,.12);padding:3px 10px;border-radius:6px;">当前选中场景</span></h2>
+          <h2>📱 现场一键复原控制台 <span id="current-scene-pill" style="font-size:.78rem;font-weight:600;color:var(--blue);background:rgba(59,130,246,.12);padding:3px 10px;border-radius:6px;">当前选中场景</span></h2>
           <p>
-            自动在您当前连接的 Android 手机上重启被测应用、启动本地 Mock 广告服务 (:8090)，并按所选场景配方真实执行<strong>「进入目标广告页 &rarr; 触发 Load 加载 &rarr; 触发 Show 展现」</strong>。
-            <span style="opacity:.75;">（注：重建受限 Android 离线 Demo 的语义目标状态；不是打开历史截图、播放录像，也不恢复内存或远端历史。）</span>
+            自动在当前连接的 {{ 'iOS 模拟器/真机' if report_plat == 'ios' else 'Android 真机' }}（亦支持跨端切换）上重启被测应用、挂载本场景专属本地 Mock 打桩，并真实执行<strong>「DeepLink 路由目标广告页 &rarr; 触发 Load &amp; Show &rarr; 终态留证」</strong>。
+            <span style="opacity:.75;">（注：重建离线 Demo 的语义目标状态；不是打开历史截图、播放录像，也不恢复内存或远端历史。）</span>
           </p>
         </div>
       </div>
@@ -50,8 +52,9 @@
           <select id="scene-id-select" class="device-select">
             {% if scene.scenes %}
               {% for sc in scene.scenes %}
+              {% set show_grp_tag = sc.group_label and (sc.group_label[:2] not in sc.title) %}
               <option value="{{ sc.scene_id }}" {% if sc.scene_id == scene.default_scene_id %}selected{% endif %}>
-                {{ '❌ [待排查] ' if sc.status != 'PASS' else '✔ ' }}#{{ sc.index }} {{ sc.title }} ({{ sc.group_label }})
+                {{ '❌ [待排查] ' if sc.status != 'PASS' else '✔ ' }}#{{ sc.index }} {{ sc.title }}{{ (' [' ~ sc.group_label ~ ']') if show_grp_tag else '' }}
               </option>
               {% endfor %}
             {% else %}
@@ -75,7 +78,7 @@
                 <option value="{{ scene.device_serial or meta.device.serial or '' }}">📱 {{ scene.device_serial or meta.device.serial or '自动识别当前连接手机' }}</option>
               {% endif %}
             </select>
-            <button type="button" id="refresh-devices-btn" class="btn-refresh" title="重新扫描当前 USB 连接的 Android 手机">🔄 刷新设备</button>
+            <button type="button" id="refresh-devices-btn" class="btn-refresh" title="重新扫描当前连接的 Android 真机与 iOS 模拟器">🔄 刷新设备</button>
           </div>
         </div>
 
@@ -92,8 +95,8 @@
         </div>
       </div>
 
-      <!-- 可视化步骤步进器 (Stepper，默认折叠减少干扰) -->
-      <details style="margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--surface);">
+      <!-- 可视化步骤步进器 (Stepper，默认展开以便切换场景时直观确认配方差异) -->
+      <details open style="margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--surface);">
         <summary class="stepper-title" style="cursor:pointer;list-style:none;margin:0;">
           <span>🛠️ 查看真机复原动作序列</span>
           <span id="stepper-progress-text" style="color:var(--blue);font-weight:700;">待启动</span>
@@ -115,20 +118,36 @@
       <!-- 实时复原执行控制台流水 (执行期间实时滚动显示，支持换行) -->
       <div id="restore-live-console" style="display:none;background:#0f172a;color:#e2e8f0;font-family:var(--mono);font-size:.76rem;line-height:1.6;padding:12px 16px;border-radius:10px;max-height:180px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border:1px solid #334155;margin-top:6px;"></div>
 
-      <!-- 复原终态结果卡片 (执行完成后展示真机实拍截图、结论与关键业务判定日志) -->
+      <!-- 复原终态结果卡片 (执行完成后展示真机实拍截图、原场景帧同屏对比、结论与关键业务判定日志) -->
       <div id="scene-outcome-card" class="restore-outcome-card">
-        <div class="outcome-layout">
+        <div class="outcome-layout" id="outcome-layout-grid">
           <div>
+            <div id="outcome-compare-bar" style="display:none;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px;">
+              <span style="font-size:.73rem;font-weight:700;color:var(--text2);">🖼️ 视觉比对视图</span>
+              <button type="button" id="outcome-compare-toggle" class="btn-sm" style="font-size:.72rem;padding:2px 8px;border-color:var(--blue);color:var(--blue);">🆚 同屏对比原场景帧</button>
+            </div>
             <video id="restore-outcome-video" controls playsinline preload="metadata" style="width:100%;max-height:360px;border-radius:8px;background:#000;display:none;margin-bottom:8px;border:1px solid var(--border);"></video>
-            <div class="shot-annot-wrap">
-              <img id="outcome-screenshot" class="outcome-shot" style="border:none;" src="" alt="真机复原终态实拍图" onclick="if(window.openLightbox)openLightbox(this.src)">
-              <div id="outcome-tap-bullseye" class="tap-bullseye" style="display:none;"></div>
-              <div id="outcome-tap-tag" class="tap-bullseye-tag" style="display:none;"></div>
+            <div id="outcome-stage-strip" style="display:none;margin-bottom:8px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+              <div style="font-size:.72rem;font-weight:700;color:var(--blue);margin-bottom:6px;">🎞️ 多阶段实拍双态留证（点击图片可放大检视）</div>
+              <div id="outcome-stage-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;"></div>
+            </div>
+            <div id="outcome-compare-grid" style="display:grid;grid-template-columns:1fr;gap:8px;">
+              <div id="outcome-ref-wrap" class="shot-annot-wrap" style="display:none;">
+                <div style="background:#1e293b;color:#93c5fd;font-size:.68rem;font-weight:700;padding:3px 8px;text-align:center;">基准：原报告终态关键帧</div>
+                <img id="outcome-ref-screenshot" class="outcome-shot" style="border:none;" alt="原报告基准关键帧" onclick="if(this.getAttribute('src') && window.openLightbox)openLightbox(this.getAttribute('src'))">
+              </div>
+              <div class="shot-annot-wrap">
+                <div id="outcome-live-cap" style="display:none;background:#064e3b;color:#6ee7b7;font-size:.68rem;font-weight:700;padding:3px 8px;text-align:center;">实拍：本次现场复原终态</div>
+                <img id="outcome-screenshot" class="outcome-shot" style="border:none;" alt="真机复原终态实拍图" onclick="if(this.getAttribute('src') && window.openLightbox)openLightbox(this.getAttribute('src'))">
+                <div id="outcome-tap-bullseye" class="tap-bullseye" style="display:none;"></div>
+                <div id="outcome-tap-tag" class="tap-bullseye-tag" style="display:none;"></div>
+              </div>
             </div>
           </div>
           <div style="min-width:0;">
             <div id="outcome-badge" style="font-size:1.05rem;font-weight:700;color:var(--green);margin-bottom:8px;">✅ 真机现场复原成功！</div>
             <p id="outcome-summary" style="font-size:.88rem;color:var(--text);margin-bottom:8px;line-height:1.5;"></p>
+            <div id="outcome-verify-pills" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
             <div id="outcome-meta" style="font-size:.78rem;color:var(--text2);line-height:1.6;background:var(--bg);padding:8px 12px;border-radius:8px;border:1px solid var(--border);margin-bottom:10px;"></div>
 
             <!-- 关键业务判定日志面板（支持与复原录屏时间双向联动） -->
@@ -184,8 +203,8 @@
 
   if (!restorePanel) return;
   const runName = restorePanel.dataset.runName;
-  const dashboardUrl = 'http://127.0.0.1:8686/run/' + encodeURIComponent(runName) + '/report.html';
-  const autoApproveCmd = 'python3 -m phone_pilot.web --auto-approve';
+  const launcherCmd = 'bash ' + JSON.stringify({{ ((meta.run_dir ~ '/open_pp_server.command') if meta.run_dir else 'open_pp_server.command')|tojson }});
+  const autoApproveCmd = {{ (('bash "' ~ meta.run_dir ~ '/open_pp_server.command"') if meta.run_dir else 'python3 -m phone_pilot.web --auto-approve')|tojson }};
 
   let catalogScenes = [];
   try {
@@ -195,22 +214,32 @@
     }
   } catch (e) {}
 
+  function esc(str) {
+    if (window.escapeHtml) return window.escapeHtml(str);
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function renderStepper(steps) {
     if (!steps || !steps.length || !stepperGrid) return;
     stepperGrid.innerHTML = steps.map(s => {
       const st = (s.status || 'PENDING').toUpperCase();
       let cls = '';
-      let icon = s.index;
+      let icon = esc(s.index);
       if (st === 'RUNNING') { cls = 'running'; icon = '⏳'; }
       else if (st === 'SUCCESS') { cls = 'done'; icon = '✔'; }
       else if (st === 'FAILED') { cls = 'failed'; icon = '✖'; }
-      const timeHtml = s.elapsed_ms ? `<div class="step-card-time">耗时 ${s.elapsed_ms} ms</div>` : '';
+      const timeHtml = s.elapsed_ms ? `<div class="step-card-time">耗时 ${esc(s.elapsed_ms)} ms</div>` : '';
       return `
-        <div class="step-card-item ${cls}" data-step-idx="${s.index}">
+        <div class="step-card-item ${cls}" data-step-idx="${esc(s.index)}">
           <div class="step-idx-dot">${icon}</div>
           <div class="step-card-body">
-            <div class="step-card-title">${s.index}. ${s.title || ''}</div>
-            <div class="step-card-desc">${s.detail || ''}</div>
+            <div class="step-card-title">${esc(s.index)}. ${esc(s.title || '')}</div>
+            <div class="step-card-desc">${esc(s.detail || '')}</div>
             ${timeHtml}
           </div>
         </div>
@@ -235,9 +264,17 @@
     }
   }
 
+  let activeRestoreSeq = 0;
+
   if (sceneSelect) {
     sceneSelect.addEventListener('change', () => {
+      activeRestoreSeq += 1;
       if (outcomeCard) outcomeCard.style.display = 'none';
+      if (liveConsole) liveConsole.style.display = 'none';
+      if (button) {
+        button.disabled = false;
+        button.textContent = '🚀 立即在手机上复原现场';
+      }
       syncSelectedScenePreview();
     });
     syncSelectedScenePreview();
@@ -256,7 +293,9 @@
       }
     }
     if (restorePanel) {
-      restorePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      requestAnimationFrame(() => {
+        restorePanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     }
   };
 
@@ -319,20 +358,32 @@
       refreshBtn.textContent = '扫描中...';
     }
     try {
-      const res = await (await fetch('/api/devices')).json();
+      const repPlat = restorePanel.dataset.platform || '';
+      const repPkg = restorePanel.dataset.package || '';
+      const defSerial = restorePanel.dataset.defaultSerial || '';
+      const qs = new URLSearchParams();
+      if (repPlat) qs.set('platform', repPlat);
+      if (repPkg) qs.set('package', repPkg);
+      const res = await (await fetch('/api/devices?' + qs.toString())).json();
       const devs = res.devices || [];
       if (deviceCountHint) {
-        deviceCountHint.textContent = devs.length ? `已连接 ${devs.length} 台在线手机` : '未检测到 USB 设备';
+        deviceCountHint.textContent = devs.length ? `已连接 ${devs.length} 台设备` : '未检测到在线设备';
         deviceCountHint.style.color = devs.length ? 'var(--green)' : 'var(--red)';
       }
       if (devs.length && serialSelect) {
         const prev = serialSelect.value;
         serialSelect.innerHTML = devs.map(d => {
           const appTag = d.app_installed ? ' · 已装Demo' : ' · 未装Demo';
-          return `<option value="${d.serial}">${d.display_name}${appTag}</option>`;
+          const crossTag = d.cross_platform ? ' [跨端复原]' : '';
+          return `<option value="${esc(d.serial)}">${esc(d.display_name)}${appTag}${crossTag}</option>`;
         }).join('');
-        if (devs.some(d => d.serial === prev)) {
+        const samePlat = devs.filter(d => !d.cross_platform);
+        if (defSerial && devs.some(d => d.serial === defSerial)) {
+          serialSelect.value = defSerial;
+        } else if (prev && samePlat.some(d => d.serial === prev)) {
           serialSelect.value = prev;
+        } else if (samePlat.length) {
+          serialSelect.value = samePlat[0].serial;
         } else {
           serialSelect.value = devs[0].serial;
         }
@@ -372,18 +423,34 @@
     switchBtn.addEventListener('click', async () => {
       switchBtn.disabled = true;
       const oldText = switchBtn.textContent;
-      switchBtn.textContent = '正在连接 127.0.0.1:8686...';
+      switchBtn.textContent = '正在扫描本机报告服务 (8686..8701)...';
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 1500);
-        await fetch('http://127.0.0.1:8686/api/scene-plan?name=' + encodeURIComponent(runName), { signal: controller.signal, mode: 'cors' });
-        clearTimeout(timeoutId);
-        window.location.href = dashboardUrl;
+        let matchedPort = null;
+        for (let p = 8686; p <= 8701; p++) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 600);
+            const resp = await fetch(`http://127.0.0.1:${p}/api/resolve-run?name=` + encodeURIComponent(runName), { signal: controller.signal, mode: 'cors' });
+            clearTimeout(timeoutId);
+            if (resp.ok) {
+              const info = await resp.json();
+              if (info && info.found) {
+                matchedPort = p;
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+        if (matchedPort) {
+          window.location.href = `http://127.0.0.1:${matchedPort}/run/` + encodeURIComponent(runName) + '/report.html';
+          return;
+        }
+        throw new Error('no_matching_server');
       } catch (e) {
         switchBtn.textContent = oldText;
         switchBtn.disabled = false;
         if (navigator.clipboard) navigator.clipboard.writeText(autoApproveCmd);
-        alert('本机服务 (127.0.0.1:8686) 尚未启动。\n已自动复制启动命令：\n' + autoApproveCmd + '\n\n请在终端运行后重试！');
+        alert('当前报告专属的本机 Web 服务尚未启动。\n已自动复制一键启动命令：\n' + autoApproveCmd + '\n\n请在终端粘贴运行（或双击报告目录下的 open_pp_server.command）！');
       }
     });
   }
@@ -406,8 +473,9 @@
         if (switchBtn) switchBtn.click();
         return;
       }
+      const mySeq = ++activeRestoreSeq;
       button.disabled = true;
-      const oldBtnText = button.textContent;
+      const oldBtnText = '🚀 立即在手机上复原现场';
       button.textContent = '⏳ 正在真机上执行复原...';
       if (outcomeCard) outcomeCard.style.display = 'none';
       if (outcomeKeyLogsBox) outcomeKeyLogsBox.style.display = 'none';
@@ -419,6 +487,7 @@
 
       try {
         const plan = await (await fetch('/api/scene-plan?name=' + encodeURIComponent(runName))).json();
+        if (mySeq !== activeRestoreSeq) return;
         if (!plan.enabled || plan.status !== 'READY') {
           throw new Error('复原计划未就绪：' + JSON.stringify(plan.blockers || plan));
         }
@@ -435,6 +504,7 @@
           scene_id: sceneId
         });
         const job = await (await fetch('/api/restore-scene', { method: 'POST', body })).json();
+        if (mySeq !== activeRestoreSeq) return;
         if (!job.job_id) {
           throw new Error('任务提交失败：' + (job.error || JSON.stringify(job)));
         }
@@ -442,7 +512,9 @@
         let result;
         do {
           await new Promise(resolve => setTimeout(resolve, 450));
+          if (mySeq !== activeRestoreSeq) return;
           result = await (await fetch('/api/scene-result?job_id=' + encodeURIComponent(job.job_id))).json();
+          if (mySeq !== activeRestoreSeq) return;
           if (result.progress) {
             if (result.progress.steps && result.progress.steps.length) {
               renderStepper(result.progress.steps);
@@ -455,6 +527,8 @@
             }
           }
         } while (result.status === 'RUNNING' || result.status === 'QUEUED');
+
+        if (mySeq !== activeRestoreSeq) return;
 
         if (result.status === 'SUCCESS') {
           if (progressText) progressText.textContent = '✅ 复原完成';
@@ -485,15 +559,82 @@
           if (shotPath && outcomeShot) {
             outcomeShot.src = '/run/' + encodeURIComponent(runName) + '/' + shotPath + '?t=' + Date.now();
           }
-          // Render tap bullseye on restored screenshot from receipt.actions
+          // Render multi-stage captured screenshots (e.g. Stage 1 Image + Stage 2 Video)
+          const stageStrip = document.getElementById('outcome-stage-strip');
+          const stageGrid = document.getElementById('outcome-stage-grid');
+          const stageShots = (result.receipt && result.receipt.stage_screenshots) || [];
+          if (stageStrip && stageGrid) {
+            if (Array.isArray(stageShots) && stageShots.length >= 2) {
+              stageStrip.style.display = 'block';
+              const bust = Date.now();
+              stageGrid.innerHTML = stageShots.map((st, idx) => {
+                const stRel = st && st.path ? st.path : '';
+                const stUrl = stRel ? ('/run/' + encodeURIComponent(runName) + '/' + stRel + '?t=' + bust) : '';
+                const stLbl = (st && st.label) ? st.label : ('阶段 ' + (idx + 1));
+                return `
+                  <div class="shot-annot-wrap" style="border:1px solid var(--border);border-radius:6px;overflow:hidden;background:#0f172a;">
+                    <div style="background:#1e293b;color:#bfdbfe;font-size:.66rem;font-weight:700;padding:3px 6px;text-align:center;">${esc(stLbl)}</div>
+                    <img src="${esc(stUrl)}" class="outcome-shot stage-outcome-shot" style="border:none;width:100%;display:block;cursor:zoom-in;" alt="${esc(stLbl)}" onclick="if(this.getAttribute('src') && window.openLightbox)openLightbox(this.getAttribute('src'))">
+                  </div>
+                `;
+              }).join('');
+            } else {
+              stageGrid.innerHTML = '';
+              stageStrip.style.display = 'none';
+            }
+          }
+          // Setup Side-by-Side Original Frame vs Live Restored Screenshot Comparison
+          const cmpBar = document.getElementById('outcome-compare-bar');
+          const cmpBtn = document.getElementById('outcome-compare-toggle');
+          const cmpGrid = document.getElementById('outcome-compare-grid');
+          const refWrap = document.getElementById('outcome-ref-wrap');
+          const refImg = document.getElementById('outcome-ref-screenshot');
+          const liveCap = document.getElementById('outcome-live-cap');
+          const layoutGrid = document.getElementById('outcome-layout-grid');
+          const origRel = selectedObj
+            ? ((selectedObj.screenshots && selectedObj.screenshots.length) ? selectedObj.screenshots[selectedObj.screenshots.length - 1] : (selectedObj.screenshot || ''))
+            : '';
+          if (cmpBar && cmpBtn && cmpGrid && refWrap && refImg && origRel && shotPath) {
+            const normOrig = (origRel.startsWith('screenshots/') || origRel.startsWith('scenes/') || origRel.startsWith('evidence/'))
+              ? origRel
+              : ('screenshots/' + origRel);
+            refImg.src = '/run/' + encodeURIComponent(runName) + '/' + normOrig;
+            cmpBar.style.display = 'flex';
+            let cmpActive = true;
+            const syncCompareMode = () => {
+              refWrap.style.display = cmpActive ? 'block' : 'none';
+              if (liveCap) liveCap.style.display = cmpActive ? 'block' : 'none';
+              cmpGrid.style.gridTemplateColumns = cmpActive ? '1fr 1fr' : '1fr';
+              if (layoutGrid) layoutGrid.style.gridTemplateColumns = cmpActive ? 'minmax(320px, 430px) 1fr' : '220px 1fr';
+              cmpBtn.textContent = cmpActive ? '🖼️ 切回单图视图' : '🆚 同屏对比原场景帧';
+            };
+            cmpBtn.onclick = () => { cmpActive = !cmpActive; syncCompareMode(); };
+            syncCompareMode();
+          } else if (cmpBar) {
+            cmpBar.style.display = 'none';
+          }
+          // Render tap bullseye on restored screenshot from receipt.actions using true natural dimensions
           const outBullseye = document.getElementById('outcome-tap-bullseye');
           const outTapTag = document.getElementById('outcome-tap-tag');
           const recActions = (result.receipt && result.receipt.actions) || [];
           const tappedActs = recActions.filter(a => a && a.coords && typeof a.coords.x === 'number');
-          if (outBullseye && outTapTag && tappedActs.length) {
+          const applyOutcomeBullseye = () => {
+            if (!(outBullseye && outTapTag && tappedActs.length)) {
+              if (outBullseye) outBullseye.style.display = 'none';
+              if (outTapTag) outTapTag.style.display = 'none';
+              return;
+            }
             const lastTap = tappedActs[tappedActs.length - 1];
-            const txPct = Math.min(96, Math.max(4, Math.round((lastTap.coords.x / 1080) * 1000) / 10));
-            const tyPct = Math.min(96, Math.max(4, Math.round((lastTap.coords.y / 2400) * 1000) / 10));
+            let refW = (outcomeShot && outcomeShot.naturalWidth) || 1080;
+            let refH = (outcomeShot && outcomeShot.naturalHeight) || 2400;
+            // Handle iOS logical points (e.g. 390x844) vs 3x Retina PNG (1170x2532)
+            if (lastTap.coords.x <= 500 && lastTap.coords.y <= 1000 && refW > 750 && refH > 1500) {
+              const scaleGuess = Math.max(1, Math.round(refW / 393));
+              refW = Math.round(refW / scaleGuess);
+              refH = Math.round(refH / scaleGuess);
+            }
+            const txPct = Math.min(96, Math.max(4, Math.round((lastTap.coords.x / Math.max(1, refW)) * 1000) / 10));
+            const tyPct = Math.min(96, Math.max(4, Math.round((lastTap.coords.y / Math.max(1, refH)) * 1000) / 10));
             const selTxt = (lastTap.selector && (lastTap.selector.text || lastTap.selector.resource_id)) || '目标控件';
             outBullseye.style.display = 'flex';
             outBullseye.style.left = txPct + '%';
@@ -502,10 +643,11 @@
             outTapTag.style.left = txPct + '%';
             outTapTag.style.top = tyPct + '%';
             outTapTag.textContent = `🎯 终步点击「${selTxt}」(${lastTap.coords.x}, ${lastTap.coords.y})`;
-          } else {
-            if (outBullseye) outBullseye.style.display = 'none';
-            if (outTapTag) outTapTag.style.display = 'none';
+          };
+          if (outcomeShot) {
+            outcomeShot.onload = applyOutcomeBullseye;
           }
+          applyOutcomeBullseye();
           const bVerdict = (result.receipt && result.receipt.business_verdict) || {};
           const sceneLabel = selectedObj ? selectedObj.title : '目标场景';
           if (outcomeBadge) {
@@ -515,11 +657,29 @@
           if (outcomeSummary) {
             outcomeSummary.textContent = bVerdict.summary || '已完成冷启动、Mock 规则注入与展示全链路。';
           }
+          const verifyPillsEl = document.getElementById('outcome-verify-pills');
+          if (verifyPillsEl) {
+            const vChecks = bVerdict.verification_checks || [];
+            if (vChecks.length) {
+              verifyPillsEl.style.display = 'flex';
+              verifyPillsEl.innerHTML = vChecks.map(chk => {
+                const st = String(chk.status || 'PASS').toUpperCase();
+                const icon = st === 'PASS' ? '🟢' : (st === 'WARN' ? '🟡' : '🔴');
+                const borderCol = st === 'PASS' ? 'rgba(34,197,94,.4)' : (st === 'WARN' ? 'rgba(245,158,11,.45)' : 'rgba(239,68,68,.5)');
+                const bgCol = st === 'PASS' ? 'rgba(34,197,94,.1)' : (st === 'WARN' ? 'rgba(245,158,11,.12)' : 'rgba(239,68,68,.14)');
+                const txtCol = st === 'PASS' ? 'var(--green)' : (st === 'WARN' ? 'var(--amber)' : 'var(--red)');
+                return `<span class="restore-verify-pill" data-check-id="${esc(chk.id || '')}" data-status="${esc(st)}" style="font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid ${borderCol};background:${bgCol};color:${txtCol};" title="${esc(chk.detail || '')}">${icon} ${esc(chk.label || chk.id)}</span>`;
+              }).join('');
+            } else {
+              verifyPillsEl.innerHTML = '';
+              verifyPillsEl.style.display = 'none';
+            }
+          }
           const freshPid = result.receipt && result.receipt.fresh_process ? result.receipt.fresh_process.pid : '-';
           const usedSerial = result.device_serial || serial;
           const pkgName = (result.receipt && result.receipt.package && result.receipt.package.name) || '';
           if (outcomeMeta) {
-            outcomeMeta.innerHTML = `<span><strong>真机：</strong>${usedSerial}</span> · <span><strong>应用：</strong>${pkgName} (PID: ${freshPid})</span>`;
+            outcomeMeta.innerHTML = `<span><strong>真机：</strong>${esc(usedSerial)}</span> · <span><strong>应用：</strong>${esc(pkgName)} (PID: ${esc(freshPid)})</span>`;
           }
 
           // Render Key Acceptance Logs with Video <-> Log Time Sync
@@ -543,7 +703,7 @@
             let outSync = hasOutVideo;
             const renderOutLogs = (curT) => {
               if (!tlOutLogs.length) {
-                outcomeKeyLogs.innerHTML = window.highlightLogHtml ? window.highlightLogHtml(logText) : logText;
+                outcomeKeyLogs.innerHTML = window.highlightLogHtml ? window.highlightLogHtml(logText) : esc(logText);
                 return;
               }
               let activeIdx = -1;
@@ -559,7 +719,7 @@
                 const cls = ['qi-log-line'];
                 if (i === activeIdx) cls.push('active-time');
                 else if (!outSync && isFuture) cls.push('future-time');
-                const hl = window.highlightLogHtml ? window.highlightLogHtml(item.line) : item.line;
+                const hl = window.highlightLogHtml ? window.highlightLogHtml(item.line) : esc(item.line);
                 return `<div class="${cls.join(' ')}" data-t="${t}" title="点击跳转视频 ${fmtOutT(t)}"><span class="qi-log-ts">[${fmtOutT(t)}]</span>${hl}</div>`;
               }).filter(Boolean);
               outcomeKeyLogs.innerHTML = rows.join('');
@@ -630,6 +790,7 @@
           if (outcomeMeta) outcomeMeta.innerHTML = '请检查手机屏幕是否处于解锁亮屏状态，且已安装被测应用。';
         }
       } catch (error) {
+        if (mySeq !== activeRestoreSeq) return;
         if (progressText) progressText.textContent = '✖ 执行出错';
         if (outcomeCard) {
           outcomeCard.className = 'restore-outcome-card failed';
@@ -642,8 +803,10 @@
         if (outcomeSummary) outcomeSummary.textContent = error.message;
         if (outcomeMeta) outcomeMeta.innerHTML = '请确认本机后台服务 (127.0.0.1:8686) 已启动且手机连接正常。';
       } finally {
-        button.disabled = false;
-        button.textContent = oldBtnText;
+        if (mySeq === activeRestoreSeq) {
+          button.disabled = false;
+          button.textContent = oldBtnText;
+        }
       }
     });
   }

@@ -146,8 +146,8 @@ a:hover { text-decoration: underline; }
 
 <!-- Tabs -->
 <div class="tabs">
-  <button class="tab-btn active" onclick="switchTab('runs')">运行记录 ({{ runs|length }})</button>
-  <button class="tab-btn" onclick="switchTab('resources')">图片资源 ({{ resources|length }})</button>
+  <button class="tab-btn active" onclick="switchTab('runs', this)">运行记录 ({{ runs|length }})</button>
+  <button class="tab-btn" onclick="switchTab('resources', this)">图片资源 ({{ resources|length }})</button>
 </div>
 
 <!-- Batch action bar (shown when runs tab is active) -->
@@ -156,7 +156,12 @@ a:hover { text-decoration: underline; }
 <div class="tab-panel active" id="tab-runs">
   {% if runs %}
   <div class="filter-bar">
-    <input type="text" id="runs-filter-name" placeholder="搜索脚本名称..." oninput="filterRuns()">
+    <input type="text" id="runs-filter-name" placeholder="搜索脚本 / 工程 / 设备..." oninput="filterRuns()">
+    <select id="runs-filter-platform" onchange="filterRuns()">
+      <option value="">全部平台</option>
+      <option value="android">📱 Android</option>
+      <option value="ios">🍎 iOS</option>
+    </select>
     <select id="runs-filter-status" onchange="filterRuns()">
       <option value="">全部状态</option>
       <option value="passed">通过 (PASSED)</option>
@@ -169,7 +174,7 @@ a:hover { text-decoration: underline; }
   <table class="runs-table">
     <thead>
       <tr>
-        <th>脚本</th>
+        <th>脚本 / 工程</th>
         <th>状态</th>
         <th>通过率</th>
         <th>耗时</th>
@@ -181,21 +186,24 @@ a:hover { text-decoration: underline; }
     </thead>
     <tbody>
       {% for r in runs %}
-      <tr data-name="{{ r.script_name|lower }}" data-status="{{ r.status }}">
-        <td class="name-cell" title="{{ r.run_dir }}">{{ r.script_name }}</td>
+      <tr data-name="{{ (r.script_name ~ ' ' ~ (r.source_project or '') ~ ' ' ~ (r.device_serial or ''))|lower }}" data-status="{{ r.status }}" data-platform="{{ r.platform or '' }}">
+        <td class="name-cell" title="{{ r.run_dir }}">
+          <div>{{ r.script_name }}</div>
+          {% if r.source_project %}<div style="font-size:.72rem;font-weight:500;color:var(--text2);">{{ r.source_project }}</div>{% endif %}
+        </td>
         <td><span class="status-badge {{ r.status }}">{{ r.status|upper }}</span></td>
         <td>
-          <span class="pass-rate {{ 'green' if r.pass_rate == 100 else ('red' if r.pass_rate < 50 else 'amber') }}">{{ r.pass_rate }}%</span>
+          <span class="pass-rate {{ 'green' if r.pass_rate == 100 else ('red' if r.pass_rate < 50 else 'amber') }}">{{ r.pass_summary or (r.pass_rate ~ '%') }}</span>
         </td>
         <td>{{ r.duration_display }}</td>
-        <td style="font-size:.8rem;color:var(--text2)">{{ r.device_serial or "-" }}</td>
+        <td style="font-size:.8rem;color:var(--text2)">{% if r.platform == 'ios' %}🍎 {% elif r.platform == 'android' %}📱 {% endif %}{{ r.device_serial or "-" }}</td>
         <td style="font-size:.8rem;white-space:nowrap">{{ r.started_at[5:16] if r.started_at else "-" }}</td>
         <td>
           {% if r.view_available %}
           <a href="/run/{{ r.run_dir }}/report.html" target="_blank">查看</a>
           {% endif %}
           {% if not r.has_report_file and r.can_generate_report %}
-          <button class="btn-gen" data-run="{{ r.run_dir }}" onclick="generateReport(this.dataset.run)">生成</button>
+          <button class="btn-gen" data-run="{{ r.run_dir }}" onclick="generateReport(this.dataset.run, this)">生成</button>
           {% endif %}
         </td>
         <td><button class="btn-del" data-run="{{ r.run_dir }}" onclick="deleteRun(this.dataset.run)">删除</button></td>
@@ -254,10 +262,10 @@ a:hover { text-decoration: underline; }
 
 <script>
 /* Tab switching */
-function switchTab(name) {
+function switchTab(name, btnEl) {
   document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.classList.remove('active'); });
   document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
-  event.target.classList.add('active');
+  if (btnEl) btnEl.classList.add('active');
   document.getElementById('tab-' + name).classList.add('active');
 }
 
@@ -325,15 +333,19 @@ function fallbackCopy(text) {
 /* Filter runs table */
 function filterRuns() {
   var nameQ = document.getElementById('runs-filter-name').value.toLowerCase();
+  var platEl = document.getElementById('runs-filter-platform');
+  var platQ = platEl ? platEl.value : '';
   var statusQ = document.getElementById('runs-filter-status').value;
   var rows = document.querySelectorAll('.runs-table tbody tr');
   var shown = 0;
   rows.forEach(function(row) {
     var name = row.getAttribute('data-name') || '';
     var status = row.getAttribute('data-status') || '';
+    var plat = row.getAttribute('data-platform') || '';
     var nameMatch = !nameQ || name.indexOf(nameQ) !== -1;
+    var platMatch = !platQ || plat === platQ;
     var statusMatch = !statusQ || status === statusQ;
-    if (nameMatch && statusMatch) { row.style.display = ''; shown++; }
+    if (nameMatch && platMatch && statusMatch) { row.style.display = ''; shown++; }
     else { row.style.display = 'none'; }
   });
   document.getElementById('runs-count').textContent = '显示 ' + shown + '/' + rows.length + ' 条';
@@ -353,10 +365,12 @@ function filterResources() {
 }
 
 /* Generate report */
-function generateReport(name) {
-  var btn = event.target;
-  btn.disabled = true;
-  btn.textContent = '生成中...';
+function generateReport(name, btnEl) {
+  var btn = btnEl || document.querySelector('.btn-gen[data-run="' + name + '"]');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '生成中...';
+  }
   return fetch('/api/generate-report', {
     method: 'POST',
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},

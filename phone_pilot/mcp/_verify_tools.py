@@ -41,8 +41,8 @@ def _isolate_script_modules(script_path: pathlib.Path, repo_path: str = "") -> N
     """Ensure local helper modules in ``script_path.parent`` are isolated across runs.
 
     When ``phone_run_script`` runs scripts across different repositories in the
-    same long-lived MCP server process (for example ``adx-sdk-ios/tests/e2e``
-    followed by ``adx-sdk-android/tests/e2e``), both directories may contain
+    same long-lived MCP server process (for example ``project-ios/tests/e2e``
+    followed by ``project-android/tests/e2e``), both directories may contain
     same-named helper modules such as ``atomic_ops.py`` with different exports.
     This helper:
     1. Discovers local ``.py`` modules and packages in ``script_dir``.

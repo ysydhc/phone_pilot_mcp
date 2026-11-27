@@ -44,8 +44,45 @@ def _recordings_root() -> pathlib.Path:
     return run_recordings_root()
 
 
+def _extra_recordings_roots() -> list[pathlib.Path]:
+    """Return extra .recordings roots from PHONE_PILOT_EXTRA_RECORDINGS_DIRS."""
+    roots: list[pathlib.Path] = []
+    extra_raw = (os.environ.get("PHONE_PILOT_EXTRA_RECORDINGS_DIRS") or "").strip()
+    if extra_raw:
+        for item in extra_raw.split(os.pathsep):
+            item = item.strip()
+            if not item:
+                continue
+            p = pathlib.Path(item).expanduser().resolve()
+            if p.is_dir() and p not in roots:
+                roots.append(p)
+    return roots
+
+
+def _all_recordings_roots() -> list[pathlib.Path]:
+    """Return primary .recordings root plus any extra roots."""
+    primary = _runs_dir().parent
+    roots: list[pathlib.Path] = [primary]
+    for p in _extra_recordings_roots():
+        if p not in roots:
+            roots.append(p)
+    return roots
+
+
 def _runs_dir() -> pathlib.Path:
     return _recordings_root() / "runs"
+
+
+def _all_runs_dirs() -> list[pathlib.Path]:
+    dirs: list[pathlib.Path] = []
+    primary_runs = _runs_dir()
+    if primary_runs.is_dir():
+        dirs.append(primary_runs)
+    for r in _extra_recordings_roots():
+        cand = r / "runs"
+        if cand.is_dir() and cand not in dirs:
+            dirs.append(cand)
+    return dirs
 
 
 def _res_cache_dir() -> pathlib.Path:
@@ -70,22 +107,29 @@ def _read_json(path: pathlib.Path) -> Optional[dict]:
 
 
 def _load_runs() -> list[dict]:
-    """Load all run metadata, sorted by time descending."""
-    runs_root = _runs_dir()
-    if not runs_root.is_dir():
+    """Load all run metadata across primary and extra recordings roots, sorted by time descending."""
+    runs_dirs = _all_runs_dirs()
+    if not runs_dirs:
         return []
+    seen_names: set[str] = set()
+    run_paths: list[pathlib.Path] = []
+    for r_dir in runs_dirs:
+        for d in sorted(r_dir.iterdir(), reverse=True):
+            if d.is_dir() and d.name not in seen_names:
+                seen_names.add(d.name)
+                run_paths.append(d)
     runs: list[dict] = []
-    for d in sorted(runs_root.iterdir(), reverse=True):
-        if not d.is_dir():
-            continue
+    for d in run_paths:
         meta = _read_json(d / "run_meta.json")
         if meta is None:
             # Minimal entry for dirs without meta
             meta = {"script_name": d.name, "status": "unknown", "run_dir": d.name}
         else:
             meta["run_dir"] = d.name
+        if meta.get("script_name") == "-c":
+            meta["script_name"] = "adhoc_cli (-c)"
         # Duration display
-        dur = meta.get("duration_s", 0)
+        dur = float(meta.get("duration_s") or 0.0)
         mins = int(dur) // 60
         secs = int(dur) % 60
         meta["duration_display"] = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
@@ -106,12 +150,67 @@ def _load_runs() -> list[dict]:
                 meta["can_generate_report"] = bool(os.fstat(folder.fd).st_mode & 0o200)
         except (ValueError, OSError):
             pass
-        # Steps pass rate (quick calculation from steps meta)
-        steps_info = meta.get("steps", {})
-        total = steps_info.get("total", 0)
-        passed = steps_info.get("passed", 0)
-        meta["pass_rate"] = round(passed / total * 100) if total > 0 else 100
+        # Device serial & platform normalization (run_meta stores nested device.serial)
+        dev_obj = meta.get("device") if isinstance(meta.get("device"), dict) else {}
+        serial_str = str(meta.get("device_serial") or dev_obj.get("serial") or "").strip()
+        meta["device_serial"] = serial_str
+        plat_str = str(dev_obj.get("platform") or meta.get("platform") or "").lower()
+        if plat_str == "ios" and serial_str and "-" not in serial_str and len(serial_str) < 24:
+            plat_str = "android"
+        meta["platform"] = plat_str
+        # Derive source project name generically from `<project>/.recordings/runs/<run_name>`
+        try:
+            proj_dir = d.parent.parent.parent if d.parent.name == "runs" else d.parent.parent
+            meta["source_project"] = proj_dir.name if proj_dir.name not in ("", "/", ".recordings") else ""
+        except Exception:
+            meta["source_project"] = ""
+
+        # Pass rate & business gate verdict: prefer suite/business verdict over raw tool step rate
+        cat_meta = _read_json(d / "scene_catalog.json")
+        gate_meta = _read_json(d / "release_gate_summary.json")
+        biz_meta = _read_json(d / "business_report.json")
+        if isinstance(cat_meta, dict) and int(cat_meta.get("total_scenes") or 0) > 0:
+            b_tot = int(cat_meta["total_scenes"])
+            b_pass = int(cat_meta.get("passed_scenes") or 0)
+            meta["pass_rate"] = round(b_pass / b_tot * 100)
+            meta["pass_summary"] = f"{b_pass}/{b_tot} ({meta['pass_rate']}%)"
+            if b_pass < b_tot or cat_meta.get("gate_pass") is False:
+                meta["status"] = "failed"
+        elif isinstance(gate_meta, dict) and isinstance(gate_meta.get("summary"), list) and gate_meta["summary"]:
+            g_items = [x for x in gate_meta["summary"] if isinstance(x, dict)]
+            b_tot = len(g_items)
+            b_pass = sum(1 for x in g_items if x.get("ok"))
+            meta["pass_rate"] = round(b_pass / b_tot * 100) if b_tot else 0
+            meta["pass_summary"] = f"{b_pass}/{b_tot} ({meta['pass_rate']}%)"
+            if b_pass < b_tot or gate_meta.get("release_pass") is False or gate_meta.get("ok") is False:
+                meta["status"] = "failed"
+        elif isinstance(biz_meta, dict) and isinstance(biz_meta.get("cases"), list) and biz_meta["cases"]:
+            b_cases = [x for x in biz_meta["cases"] if isinstance(x, dict)]
+            b_steps = [x for x in (biz_meta.get("business_steps") or []) if isinstance(x, dict)]
+            b_tot = len(b_cases)
+            b_pass = sum(
+                1
+                for c in b_cases
+                if any(s.get("case_id") == c.get("case_id") for s in b_steps)
+                and all(s.get("status") == "PASS" for s in b_steps if s.get("case_id") == c.get("case_id"))
+            )
+            meta["pass_rate"] = round(b_pass / b_tot * 100) if b_tot else 0
+            meta["pass_summary"] = f"{b_pass}/{b_tot} ({meta['pass_rate']}%)"
+            if b_tot > 0 and b_pass < b_tot:
+                meta["status"] = "failed"
+        else:
+            steps_info = meta.get("steps", {})
+            total = steps_info.get("total", 0)
+            passed = steps_info.get("passed", 0)
+            if total > 0:
+                meta["pass_rate"] = round(passed / total * 100)
+                if meta.get("status") == "failed" and meta["pass_rate"] == 100:
+                    meta["pass_rate"] = 0
+            else:
+                meta["pass_rate"] = 0 if meta.get("status") == "failed" else 100
+            meta["pass_summary"] = f"{meta['pass_rate']}%"
         runs.append(meta)
+    runs.sort(key=lambda r: str(r.get("started_at") or r.get("run_dir") or ""), reverse=True)
     return runs
 
 
@@ -203,12 +302,40 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = unquote(self.path).split("?")[0]
+        raw_host = (self.headers.get("Host") or "").strip()
+        if raw_host and urlsplit("http://" + raw_host).hostname not in ("127.0.0.1", "localhost"):
+            return self._send_json({"ok": False, "error": "host_rejected"}, 403)
+
+        if path in ("/api/devices", "/api/scene-plan", "/api/scene-result"):
+            sec_site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+            origin = (self.headers.get("Origin") or "").strip()
+            if sec_site == "cross-site" or (
+                origin and urlsplit(origin).hostname not in ("127.0.0.1", "localhost")
+            ):
+                return self._send_json({"ok": False, "error": "cross_origin_rejected"}, 403)
 
         if path == "/" or path == "":
             return self._serve_dashboard()
 
         if path == "/api/devices":
-            return self._send_json(self.server.scene_controller.list_devices())
+            params = parse_qs(urlsplit(self.path).query)
+            plat = (params.get("platform", [""])[0] or "").strip().lower() or None
+            pkg = (params.get("package", [""])[0] or "").strip()
+            return self._send_json(
+                self.server.scene_controller.list_devices(
+                    target_package=pkg,
+                    platform=plat,
+                )
+            )
+
+        if path == "/api/resolve-run":
+            params = parse_qs(urlsplit(self.path).query)
+            run_dir = self._scene_run_dir(params.get("name", [""])[0])
+            return self._send_json(
+                {"ok": run_dir is not None, "found": run_dir is not None},
+                200 if run_dir is not None else 404,
+                allow_cors=True,
+            )
 
         if path == "/api/scene-plan":
             params = parse_qs(urlsplit(self.path).query)
@@ -279,12 +406,14 @@ class _Handler(BaseHTTPRequestHandler):
     def _scene_run_dir(self, name):
         if not name or name in (".", "..") or "/" in name or "\\" in name:
             return None
-        candidate = _runs_dir().absolute() / name
-        try:
-            with safe_directory(candidate):
-                return candidate
-        except (ValueError, OSError):
-            return None
+        for r_dir in [_runs_dir().absolute(), *[p.absolute() for p in _all_runs_dirs()]]:
+            candidate = r_dir / name
+            try:
+                with safe_directory(candidate):
+                    return candidate
+            except (ValueError, OSError):
+                continue
+        return None
 
     def _serve_dashboard(self):
         try:
@@ -301,7 +430,8 @@ class _Handler(BaseHTTPRequestHandler):
         status_code = 200
 
         if range_header and range_header.startswith("bytes=") and total_size > 0:
-            m_range = re.match(r"^bytes=(\d*)-(\d*)$", range_header.strip())
+            first_range = range_header[6:].split(",", 1)[0].strip()
+            m_range = re.match(r"^(\d*)-(\d*)$", first_range)
             if m_range:
                 s_str, e_str = m_range.group(1), m_range.group(2)
                 if s_str and e_str:
@@ -367,6 +497,18 @@ class _Handler(BaseHTTPRequestHandler):
     def _serve_run_file(self, run_name: str, sub_path: str):
         root = self._scene_run_dir(run_name)
         if root is None:
+            if (
+                run_name
+                and run_name not in (".", "..")
+                and "/" not in run_name
+                and "\\" not in run_name
+            ):
+                candidate = _runs_dir().absolute() / run_name
+                if not candidate.exists() and not candidate.is_symlink():
+                    return self._send_error(
+                        404,
+                        f"Run '{run_name}' not found under {_runs_dir().absolute()}",
+                    )
             return self._send_error(403, "Forbidden")
         relative = pathlib.Path(sub_path)
         if relative.is_absolute() or ".." in relative.parts or "\\" in sub_path:
@@ -409,8 +551,8 @@ class _Handler(BaseHTTPRequestHandler):
         name = body.get("name", [""])[0]
         if not name or ".." in name:
             return self._send_json({"ok": False, "error": "invalid name"})
-        run_dir = _runs_dir() / name
-        if not run_dir.is_dir():
+        run_dir = self._scene_run_dir(name)
+        if run_dir is None or not run_dir.is_dir():
             return self._send_json({"ok": False, "error": "run not found"})
         try:
             shutil.rmtree(run_dir)
@@ -436,8 +578,8 @@ class _Handler(BaseHTTPRequestHandler):
         name = body.get("name", [""])[0]
         if not name or ".." in name:
             return self._send_json({"ok": False, "error": "invalid name"})
-        run_dir = _runs_dir() / name
-        if not run_dir.is_dir():
+        run_dir = self._scene_run_dir(name)
+        if run_dir is None or not run_dir.is_dir():
             return self._send_json({"ok": False, "error": "run not found"})
         try:
             from phone_pilot.core.html_report import generate_html_report
@@ -455,8 +597,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": False, "error": "empty_path"}, 400)
         try:
             target = pathlib.Path(raw_path).expanduser().resolve()
-            rec_root = _recordings_root().resolve()
-            if target != rec_root and rec_root not in target.parents:
+            allowed_roots = [r.resolve() for r in _all_recordings_roots()]
+            if not any(target == r or r in target.parents for r in allowed_roots):
                 return self._send_json({"ok": False, "error": "outside_recordings_root"}, 403)
             if not target.exists():
                 return self._send_json({"ok": False, "error": "path_not_found"}, 404)
@@ -505,10 +647,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _send_json(self, obj: Any, code: int = 200):
+    def _send_json(self, obj: Any, code: int = 200, *, allow_cors: bool = False):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if allow_cors:
+            self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -593,6 +737,12 @@ def _cli():
         help="Path to .recordings directory (default: <cwd>/.recordings)",
     )
     parser.add_argument(
+        "--extra-recordings-dir",
+        action="append",
+        default=[],
+        help="Additional .recordings directories to serve alongside primary root (repeatable)",
+    )
+    parser.add_argument(
         "--no-browser", action="store_true", help="Don't auto-open browser"
     )
     parser.add_argument(
@@ -613,6 +763,14 @@ def _cli():
         os.environ["PHONE_PILOT_RECORDINGS_DIR"] = str(
             pathlib.Path(args.recordings_dir).expanduser().resolve()
         )
+    if args.extra_recordings_dir:
+        resolved_extras = [
+            str(pathlib.Path(p).expanduser().resolve())
+            for p in args.extra_recordings_dir
+            if p and str(p).strip()
+        ]
+        if resolved_extras:
+            os.environ["PHONE_PILOT_EXTRA_RECORDINGS_DIRS"] = os.pathsep.join(resolved_extras)
     if any(
         not re.fullmatch(r"[0-9a-f]{64}", value) for value in args.approve_scene_sha256
     ):
@@ -622,8 +780,7 @@ def _cli():
         import hashlib
         os.environ["PHONE_PILOT_SCENE_ALLOW_ONLINE"] = "1"
         os.environ["PHONE_PILOT_SCENE_ALLOW_PERMISSIONS"] = "1"
-        runs_root = _runs_dir()
-        if runs_root.is_dir():
+        for runs_root in _all_runs_dirs():
             for d in runs_root.iterdir():
                 manifest_file = d / "scene_manifest.json"
                 if manifest_file.is_file():

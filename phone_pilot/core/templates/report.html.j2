@@ -3,19 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+{% if scene and scene.is_multi_suite and scene.scenes %}
+<title>{{ meta.script_name }} — 验收 {{ ('PASS (' ~ scene.catalog.passed_scenes ~ '/' ~ scene.catalog.total_scenes ~ ')') if scene.catalog.gate_pass else ('FAIL (' ~ scene.catalog.passed_scenes ~ '/' ~ scene.catalog.total_scenes ~ ')') }}</title>
+{% else %}
 <title>{{ meta.script_name }} — 执行 {{ "EXIT 0" if meta.exit_code == 0 else "FAILED" }} · 业务 {{ business.summary.status if business else 'UNKNOWN' }}</title>
+{% endif %}
 <style>
 /* ---- Reset & Base ---- */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg: #f5f6f8; --surface: #ffffff; --text: #1a1a2e; --text2: #555;
-  --border: #e0e0e0; --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
-  --blue: #3b82f6; --purple: #8b5cf6;
+  --bg: #f5f6f8; --bg2: #eef2f6; --surface: #ffffff; --surface2: #f1f5f9;
+  --text: #1a1a2e; --text2: #555;
+  --border: #e0e0e0; --green: #22c55e; --green-bg: rgba(34,197,94,.14);
+  --red: #ef4444; --amber: #f59e0b; --blue: #3b82f6; --accent: #3b82f6; --purple: #8b5cf6;
+  --mono: "SF Mono", "Fira Code", Menlo, Consolas, monospace;
   --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,.08);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f172a; --surface: #1e293b; --text: #e2e8f0; --text2: #94a3b8;
+    --bg: #0f172a; --bg2: #162033; --surface: #1e293b; --surface2: #243247;
+    --text: #e2e8f0; --text2: #94a3b8;
     --border: #334155; --shadow: 0 1px 3px rgba(0,0,0,.3);
   }
 }
@@ -171,13 +178,24 @@ a { color: var(--blue); text-decoration: none; }
 <nav class="nav">
   <a href="/" style="font-weight:700;color:var(--blue)" title="返回 Dashboard">&larr; Dashboard</a>
   <span style="color:var(--border)">|</span>
+  {% if scene and scene.is_multi_suite and scene.scenes %}
+  <a href="#suite-matrix">门禁矩阵 ({{ scene.scenes|length }})</a>
+  {% if recordings %}<a href="#recordings">全程录屏</a>{% endif %}
+  {% if logcat_files or key_acceptance_logs or console_tail %}<a href="#logs">全局日志</a>{% endif %}
+  {% if steps %}<a href="#steps">底层流水</a>{% endif %}
+  <a href="#scene-restore">现场复原</a>
+  {% else %}
   <a href="#overview">概览</a>
+  {% if recordings %}<a href="#recordings">录屏</a>{% endif %}
   <a href="#steps">工具流水</a>
+  {% if business %}
   <a href="#business-overview">功能全景</a>
   <a href="#business-steps">业务步骤</a>
+  {% endif %}
   <a href="#scene-restore">现场复原</a>
   {% if gallery_items %}<a href="#gallery">截图</a>{% endif %}
   {% if logcat_files or key_acceptance_logs or console_tail %}<a href="#logs">日志</a>{% endif %}
+  {% endif %}
   {% if meminfo_files %}<a href="#memory">内存</a>{% endif %}
   {% if healing_events %}<a href="#healing">自愈</a>{% endif %}
 </nav>
@@ -185,27 +203,28 @@ a { color: var(--blue); text-decoration: none; }
 <div class="container">
 
 <!-- Banner -->
-<div class="banner {{ 'passed' if business and business.summary.status == 'PASS' and meta.exit_code == 0 else 'failed' }}">
+{% set banner_ok = (not business_error) and ((business and business.summary.status == 'PASS' and meta.exit_code == 0) or (not business and ((scene.catalog.gate_pass and meta.exit_code == 0) if (scene and scene.is_multi_suite and scene.catalog and scene.catalog.total_scenes) else (meta.exit_code == 0)))) %}
+<div class="banner {{ 'passed' if banner_ok else 'failed' }}">
   <div>
     <h1>
       {% if task_context and task_context.card_id %}<span class="badge" style="vertical-align:middle;margin-right:8px;background:rgba(255,255,255,.22);">{{ task_context.card_id }}</span>{% endif %}
       {{ (task_context.title if task_context and task_context.title else none) or meta.script_name or "Script" }}
     </h1>
     <div class="meta-row">
-      <span>{{ "✅ 验收通过" if (business and business.summary.status == "PASS" and meta.exit_code == 0) else "❌ 存在失败/阻塞" }}</span>
+      <span>{{ "✅ 验收通过" if banner_ok else "❌ 存在失败/阻塞" }}</span>
       <span>耗时 {{ duration_display }}</span>
       <span>{{ meta.device.serial or "?" }} ({{ meta.device.platform or "?" }})</span>
       {% if freshness_gate %}<span>{{ "🛡️ 最新包体" if freshness_gate.ok else "⚠️ 包体过期" }}</span>{% endif %}
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-    <a href="#scene-restore-anchor" class="badge" style="text-decoration:none;cursor:pointer;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.26);color:#fff;font-weight:700;" onclick="var d=document.getElementById('scene-restore-drawer');if(d)d.open=true;">
+    <a href="#scene-restore" class="badge" style="text-decoration:none;cursor:pointer;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.26);color:#fff;font-weight:700;" onclick="event.preventDefault();if(window.openRestoreForScene){window.openRestoreForScene();}else{var d=document.getElementById('scene-restore-drawer');if(d){d.open=true;d.scrollIntoView({behavior:'smooth'});}}">
       ⚡ 手机现场复现
     </a>
     <button type="button" class="badge" style="cursor:pointer;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.18);color:#fff;font-weight:700;" onclick="if(window.copyMarkdownSummary)window.copyMarkdownSummary()">
       📋 复制结论
     </button>
-    <button type="button" class="badge" style="cursor:pointer;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:.75rem;" onclick="if(window.copyToClipboard)window.copyToClipboard('bash ' + {{ (meta.run_dir ~ '/open_pp_server.command')|tojson }})">
+    <button type="button" class="badge" style="cursor:pointer;border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;font-size:.75rem;" data-cmd="{{ ('bash \"' ~ meta.run_dir ~ '/open_pp_server.command\"') if meta.run_dir else 'bash open_pp_server.command' }}" onclick="if(window.copyToClipboard)window.copyToClipboard(this.dataset.cmd)">
       🚀 启动命令
     </button>
   </div>
@@ -291,6 +310,32 @@ a { color: var(--blue); text-decoration: none; }
 {% endif %}
 
 {% include 'business_report.html.j2' %}
+
+{% if (scene and scene.is_multi_suite and scene.scenes) and recordings %}
+<details class="section" id="recordings" style="margin-bottom:20px;">
+  <summary class="section-header" style="cursor:pointer;list-style:none;">
+    <span>🎬 全流程真机合并录屏与章节总览 ({{ recordings|length }} 个视频 · 点击展开)</span>
+    <span class="chevron">&#9660;</span>
+  </summary>
+  <div class="section-body">
+    <div style="display:flex;flex-wrap:wrap;gap:20px;justify-content:center;padding:8px 0;">
+      {% for rec in recordings %}
+      <div style="flex:1;min-width:280px;max-width:460px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-weight:600;font-size:.86rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ rec.filename }}">{{ rec.filename }}</span>
+          <span style="font-size:.78rem;color:var(--text2);">{{ rec.size_mb }} MB</span>
+        </div>
+        <video {% if loop.first %}id="main-recording-video"{% endif %} controls preload="metadata" style="width:100%;max-height:480px;border-radius:8px;background:#000;object-fit:contain;" src="{{ rec.rel_path }}"></video>
+        <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span id="video-chapter-active" style="display:none;font-size:.76rem;color:var(--blue);font-weight:700;"></span>
+          <a class="btn-sm" href="{{ rec.rel_path }}" download style="text-decoration:none;margin-left:auto;">下载完整视频</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</details>
+{% endif %}
 
 {% if not (scene and scene.is_multi_suite and scene.scenes) %}
 <!-- Overview Cards (only shown for legacy single-script reports) -->
@@ -382,7 +427,7 @@ a { color: var(--blue); text-decoration: none; }
         <div style="font-size:.78rem;color:var(--text2);">当前长视频包含 {{ scene.scenes|length }} 个子场景实录，点击下方任意章节可直接定位进度条：</div>
         <div class="video-chapter-bar" style="margin-top:2px;">
           {% for sc in scene.scenes %}
-          <button type="button" class="video-chapter-pill {{ 'fail' if sc.status != 'PASS' else '' }}" onclick="if(window.seekVideoToScene)window.seekVideoToScene({{ sc.video_offset_s }}, '{{ sc.title|e }}')">
+          <button type="button" class="video-chapter-pill {{ 'fail' if sc.status != 'PASS' else '' }}" data-offset="{{ sc.video_offset_s }}" data-title="{{ sc.title }}" onclick="if(window.seekVideoToScene)window.seekVideoToScene(Number(this.dataset.offset||0), this.dataset.title)">
             <span>{{ '✖' if sc.status != 'PASS' else '▶' }}</span>
             <span style="font-family:monospace;">{{ sc.video_time_label }}</span>
             <span>#{{ sc.index }} {{ sc.title }}</span>
@@ -484,11 +529,11 @@ a { color: var(--blue); text-decoration: none; }
     <div style="margin-top:16px;">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
         <h4 style="margin:0;font-size:.92rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <span>🎯 关键业务判定日志（SDK 生命周期回调 / 曝光计费 / 商业化上报）</span>
-          <span style="font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--green-bg);color:var(--green);">已提纯 {{ key_acceptance_log_count }} 条核心日志 · 自动剔除 ADB 轮询噪音</span>
+          <span>🎯 关键业务判定日志（生命周期回调 / 网络打桩 / 核心断言）</span>
+          <span style="font-size:.75rem;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--green-bg);color:var(--green);">已提纯 {{ key_acceptance_log_count }} 条核心日志 · 自动剔除轮询噪音</span>
         </h4>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <input type="text" id="key-log-filter" placeholder="🔍 过滤关键字 (如 LOAD_SUCCESS / IMPRESSION / s_vld)" oninput="filterKeyAcceptanceLogs(this.value)" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.78rem;width:280px;outline:none;">
+          <input type="text" id="key-log-filter" placeholder="🔍 过滤关键字 (如 PASS / MockServer / ERROR)" oninput="filterKeyAcceptanceLogs(this.value)" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.78rem;width:280px;outline:none;">
           <button class="btn-sm" onclick="copyToClipboard(document.getElementById('key-acceptance-log-preview').textContent)">复制关键日志</button>
           {% if console_log_abs %}
           <button class="btn-sm" data-copy-path="{{ console_log_abs }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
@@ -517,6 +562,72 @@ a { color: var(--blue); text-decoration: none; }
     {% endif %}
   </div>
 </div>
+{% endif %}
+{% endif %}
+
+{% if scene and scene.is_multi_suite and scene.scenes %}
+<!-- Multi-suite collapsed global Logs & Steps sections so top nav #logs / #steps always work -->
+{% if logcat_files or key_acceptance_logs or console_tail %}
+<details class="section" id="logs" style="margin-bottom:18px;">
+  <summary class="section-header" style="cursor:pointer;list-style:none;">
+    <span>📜 全局关键业务日志检索与原始文件 ({% if key_acceptance_log_count %}{{ key_acceptance_log_count }} 条关键日志{% if logcat_files %} · {{ logcat_files|length }} 个文件{% endif %}{% else %}{{ logcat_files|length }} 个日志文件{% endif %} · 点击展开)</span>
+    <span class="chevron">&#9660;</span>
+  </summary>
+  <div class="section-body">
+    {% if logcat_files %}
+    <h4 style="margin-bottom:8px;font-size:.9rem">📄 原始日志文件</h4>
+    {% for lf in logcat_files %}
+    <div class="log-file-item">
+      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono);font-size:.82rem;">{{ lf.name }}</span>
+      <div class="log-actions">
+        <span style="color:var(--text2);font-size:.8rem;white-space:nowrap">{{ lf.lines }} 行 &middot; {{ lf.size_kb }}KB</span>
+        {% if lf.rel_path %}<a class="btn-sm" href="{{ lf.rel_path }}" target="_blank" style="text-decoration:none">在浏览器查看</a>{% endif %}
+        {% if lf.abs_path %}
+        <button class="btn-sm" data-copy-path="{{ lf.abs_path }}" onclick="copyToClipboard(this.dataset.copyPath)">复制路径</button>
+        <button class="btn-sm" data-copy-path="{{ lf.abs_path }}" onclick="openInFinder(this.dataset.copyPath)">在 Finder 中打开</button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% if key_acceptance_logs %}
+    <div style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+        <h4 style="margin:0;font-size:.9rem;">🎯 全局提纯关键日志 ({{ key_acceptance_log_count }} 条)</h4>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <input type="text" id="key-log-filter" placeholder="🔍 过滤关键字 (如 LOAD_SUCCESS / IMPRESSION)" oninput="filterKeyAcceptanceLogs(this.value)" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:.78rem;width:260px;outline:none;">
+          <button class="btn-sm" onclick="copyToClipboard(document.getElementById('key-acceptance-log-preview').textContent)">复制关键日志</button>
+        </div>
+      </div>
+      <div class="log-preview" id="key-acceptance-log-preview" data-raw-logs="{{ key_acceptance_logs|e }}" style="max-height:340px;color:#d1fae5;border:1px solid #1e293b;">{{ key_acceptance_logs }}</div>
+    </div>
+    {% endif %}
+  </div>
+</details>
+{% endif %}
+
+{% if steps %}
+<details class="section" id="steps" style="margin-bottom:18px;">
+  <summary class="section-header" style="cursor:pointer;list-style:none;">
+    <span>🔧 底层工具执行流水 ({{ steps|length }} 步 · 点击展开)</span>
+    <span class="chevron">&#9660;</span>
+  </summary>
+  <div class="section-body">
+    {% for s in steps %}
+    <div class="step-row {{ 'failed' if s.status not in ('ok', 'passed') else '' }}">
+      <div class="step-num {{ 'ok' if s.status in ('ok', 'passed') else 'fail' }}">{{ loop.index }}</div>
+      <div class="step-info">
+        <div class="step-action">{{ s.action }}{% if s.retry_info %} <span style="font-size:.75rem;color:var(--amber);font-weight:400">({{ s.retry_info }})</span>{% endif %}</div>
+        {% if s.detail %}<div class="step-detail">{{ s.detail[:200] }}</div>{% endif %}
+      </div>
+      <div class="step-time">{{ s.timestamp[11:19] if s.timestamp|length > 19 else s.timestamp }}</div>
+      {% if s.screenshot %}
+      <img class="step-thumb" src="screenshots/{{ s.screenshot }}" alt="Step {{ s.step }}" onclick="openLightbox(this.getAttribute('src'))">
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</details>
 {% endif %}
 {% endif %}
 
@@ -812,43 +923,90 @@ a { color: var(--blue); text-decoration: none; }
 
 <!-- Lightbox overlay with navigation -->
 <div class="lightbox" id="lightbox" onclick="closeLightbox(event)">
-  <button class="lb-nav lb-prev" onclick="lbPrev(event)" title="上一张">&#10094;</button>
-  <img id="lightbox-img" src="" alt="Preview">
-  <button class="lb-nav lb-next" onclick="lbNext(event)" title="下一张">&#10095;</button>
+  <button class="lb-nav lb-prev" id="lb-prev-btn" onclick="lbPrev(event)" title="上一张">&#10094;</button>
+  <img id="lightbox-img" alt="Preview">
+  <button class="lb-nav lb-next" id="lb-next-btn" onclick="lbNext(event)" title="下一张">&#10095;</button>
   <div class="lb-counter" id="lb-counter"></div>
 </div>
 
 <script>
-/* Section collapse/expand */
+/* Section collapse/expand & smart nav anchor auto-expand */
 function toggleSection(header) {
   header.classList.toggle('collapsed');
   var body = header.nextElementSibling;
-  body.classList.toggle('hidden');
+  if (body) body.classList.toggle('hidden');
 }
+document.querySelectorAll('.nav a[href^="#"]').forEach(function(link) {
+  link.addEventListener('click', function(e) {
+    var href = link.getAttribute('href');
+    if (!href || href === '#scene-restore') return;
+    var target = document.getElementById(href.slice(1));
+    if (target) {
+      if (target.tagName.toLowerCase() === 'details') target.open = true;
+      var body = target.querySelector('.section-body.hidden');
+      if (body) {
+        body.classList.remove('hidden');
+        var hdr = target.querySelector('.section-header.collapsed');
+        if (hdr) hdr.classList.remove('collapsed');
+      }
+    }
+  });
+});
 
-/* Lightbox with navigation */
+/* Lightbox with scene-aware image list & empty-array protection */
+var _defaultLbImages = [];
 var _lbImages = [];
 var _lbCurrent = 0;
 (function() {
   var imgs = document.querySelectorAll('.gallery img[data-idx]');
-  imgs.forEach(function(img) { _lbImages.push(img.getAttribute('src')); });
-  /* Also collect step thumbnails as fallback */
-  if (_lbImages.length === 0) {
-    document.querySelectorAll('.step-thumb').forEach(function(img) { _lbImages.push(img.getAttribute('src')); });
+  imgs.forEach(function(img) {
+    var s = img.getAttribute('src');
+    if (s) _defaultLbImages.push(s);
+  });
+  if (_defaultLbImages.length === 0) {
+    document.querySelectorAll('.step-thumb, .card-frame img').forEach(function(img) {
+      var s = img.getAttribute('src');
+      if (s && _defaultLbImages.indexOf(s) === -1) _defaultLbImages.push(s);
+    });
   }
+  _lbImages = _defaultLbImages.slice();
 })();
 
-function openLightbox(idx) {
-  if (typeof idx === 'string') {
-    /* Called with src string (from step thumbnail) */
-    var found = _lbImages.indexOf(idx);
-    _lbCurrent = found >= 0 ? found : 0;
-    document.getElementById('lightbox-img').src = idx;
-  } else {
-    _lbCurrent = idx;
-    document.getElementById('lightbox-img').src = _lbImages[idx] || '';
+function _syncLbControls() {
+  var hasMany = _lbImages.length > 1;
+  var prevBtn = document.getElementById('lb-prev-btn');
+  var nextBtn = document.getElementById('lb-next-btn');
+  var counterEl = document.getElementById('lb-counter');
+  if (prevBtn) prevBtn.style.display = hasMany ? '' : 'none';
+  if (nextBtn) nextBtn.style.display = hasMany ? '' : 'none';
+  if (counterEl) counterEl.textContent = _lbImages.length > 0 ? ((_lbCurrent + 1) + ' / ' + _lbImages.length) : '';
+}
+
+function openLightbox(idx, customList) {
+  if (Array.isArray(customList) && customList.length > 0) {
+    _lbImages = customList.filter(Boolean);
+  } else if (_defaultLbImages.length > 0) {
+    _lbImages = _defaultLbImages.slice();
   }
-  _updateLbCounter();
+  var srcToShow = '';
+  if (typeof idx === 'string') {
+    if (!idx) return;
+    var found = _lbImages.indexOf(idx);
+    if (found < 0) {
+      _lbImages = [idx];
+      _lbCurrent = 0;
+    } else {
+      _lbCurrent = found;
+    }
+    srcToShow = idx;
+  } else {
+    if (!_lbImages.length) return;
+    _lbCurrent = Math.max(0, Math.min(_lbImages.length - 1, Number(idx) || 0));
+    srcToShow = _lbImages[_lbCurrent] || '';
+  }
+  if (!srcToShow) return;
+  document.getElementById('lightbox-img').src = srcToShow;
+  _syncLbControls();
   document.getElementById('lightbox').classList.add('active');
 }
 function closeLightbox(e) {
@@ -857,19 +1015,17 @@ function closeLightbox(e) {
 }
 function lbPrev(e) {
   e && e.stopPropagation();
+  if (_lbImages.length <= 1) return;
   _lbCurrent = (_lbCurrent - 1 + _lbImages.length) % _lbImages.length;
   document.getElementById('lightbox-img').src = _lbImages[_lbCurrent];
-  _updateLbCounter();
+  _syncLbControls();
 }
 function lbNext(e) {
   e && e.stopPropagation();
+  if (_lbImages.length <= 1) return;
   _lbCurrent = (_lbCurrent + 1) % _lbImages.length;
   document.getElementById('lightbox-img').src = _lbImages[_lbCurrent];
-  _updateLbCounter();
-}
-function _updateLbCounter() {
-  var el = document.getElementById('lb-counter');
-  if (el && _lbImages.length > 0) el.textContent = (_lbCurrent + 1) + ' / ' + _lbImages.length;
+  _syncLbControls();
 }
 document.addEventListener('keydown', function(e) {
   if (!document.getElementById('lightbox').classList.contains('active')) return;
